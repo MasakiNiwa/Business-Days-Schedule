@@ -98,12 +98,14 @@ export function loadState(store: KeyValueStore): AppState {
   const calendars = readJson<BusinessCalendar[]>(store, KEY_CALENDARS);
   const prefs = readJson<Partial<Preferences>>(store, KEY_PREFS);
 
+  const validCalendars = Array.isArray(calendars)
+    ? calendars.filter((calendar) => !hasError(validateCalendar(calendar)))
+    : [];
+
   return {
     rules: Array.isArray(rules) ? rules.filter((rule) => !hasError(validateRule(rule))) : defaults.rules,
-    calendars:
-      Array.isArray(calendars) && calendars.length > 0
-        ? calendars.filter((calendar) => !hasError(validateCalendar(calendar)))
-        : defaults.calendars,
+    // カレンダーが1件も残らないと営業日を計算できないため、必ず既定値へ戻す。
+    calendars: validCalendars.length > 0 ? validCalendars : defaults.calendars,
     prefs: { ...defaults.prefs, ...(prefs ?? {}) },
   };
 }

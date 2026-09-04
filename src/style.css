@@ -1,20 +1,63 @@
+/* Business Days Schedule — docs/SPEC.md §8 */
+
 :root {
   color-scheme: light dark;
-  --fg: #1a1a1a;
+
+  --fg: #1a1d21;
   --fg-muted: #5b6470;
+  --fg-faint: #98a1ad;
   --bg: #ffffff;
-  --border: #d9dee5;
+  --bg-sunken: #f6f7f9;
+  --bg-closed: #f0f1f4;
+  --border: #dde1e7;
+  --border-strong: #b9c0cb;
   --accent: #2563eb;
+  --red: #c8322b;
+  --blue: #2563eb;
+  --danger-bg: #fdecea;
+  --danger-fg: #a3261e;
+  --notice-bg: #fff8e1;
+  --notice-fg: #7a5c00;
+
+  --color-blue: #2f6fed;
+  --color-green: #1f9254;
+  --color-red: #d13b32;
+  --color-orange: #d97706;
+  --color-purple: #7c3aed;
+  --color-teal: #0d9488;
+  --color-pink: #db2777;
+  --color-gray: #64748b;
+
   font-family: system-ui, -apple-system, 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+  font-size: 15px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --fg: #e8eaed;
-    --fg-muted: #a0a8b4;
-    --bg: #16181c;
-    --border: #333a44;
+    --fg: #e6e9ee;
+    --fg-muted: #a3acba;
+    --fg-faint: #6c7686;
+    --bg: #15181d;
+    --bg-sunken: #1c2027;
+    --bg-closed: #22262e;
+    --border: #2f3540;
+    --border-strong: #454d5a;
     --accent: #6ea8ff;
+    --red: #f2837b;
+    --blue: #7aa7ff;
+    --danger-bg: #3a1f1d;
+    --danger-fg: #f4a8a1;
+    --notice-bg: #33290f;
+    --notice-fg: #e8cf8a;
+
+    --color-blue: #5b8def;
+    --color-green: #3fae74;
+    --color-red: #e4695f;
+    --color-orange: #e0982f;
+    --color-purple: #9c6ef0;
+    --color-teal: #2bb3a3;
+    --color-pink: #e8629f;
+    --color-gray: #8b96a6;
   }
 }
 
@@ -24,73 +67,444 @@
 
 body {
   margin: 0;
-  padding: 2rem 1.25rem;
   color: var(--fg);
   background: var(--bg);
-  line-height: 1.7;
+  line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
 }
 
-main {
-  max-width: 46rem;
+#app {
+  max-width: 78rem;
   margin: 0 auto;
-}
-
-h1 {
-  font-size: 1.5rem;
-  margin: 0 0 0.25rem;
-}
-
-.lede {
-  color: var(--fg-muted);
-  margin: 0 0 2rem;
-}
-
-.card {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1rem 1.25rem;
-  margin-bottom: 1rem;
-}
-
-.card h2 {
-  font-size: 0.95rem;
-  margin: 0 0 0.75rem;
-  color: var(--fg-muted);
-  font-weight: 600;
-}
-
-dl {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 0.35rem 1.25rem;
-  margin: 0;
-}
-
-dt {
-  color: var(--fg-muted);
-  white-space: nowrap;
-}
-
-dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.error {
-  color: #b3261e;
+  padding: 1.25rem 1rem 3rem;
 }
 
 a {
   color: var(--accent);
 }
 
-@media (max-width: 30rem) {
-  dl {
+/* --- ヘッダー ---------------------------------------------------------- */
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1rem;
+}
+
+.month-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.month-label {
+  font-size: 1.35rem;
+  font-weight: 600;
+  margin: 0;
+  min-width: 8.5em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.nav {
+  width: 2.25rem;
+  height: 2.25rem;
+  font-size: 1.25rem;
+  line-height: 1;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.nav:hover,
+.button:hover {
+  background: var(--bg-sunken);
+}
+
+.nav:focus-visible,
+.button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.button {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  padding: 0.4rem 0.9rem;
+}
+
+.button-sm {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.9rem;
+}
+
+/* --- 通知バナー -------------------------------------------------------- */
+
+.banner {
+  margin: 0 0 0.6rem;
+  padding: 0.55rem 0.8rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  background: var(--notice-bg);
+  color: var(--notice-fg);
+}
+
+.banner-error {
+  background: var(--danger-bg);
+  color: var(--danger-fg);
+}
+
+/* --- レイアウト -------------------------------------------------------- */
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 19rem;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+/* --- カレンダー -------------------------------------------------------- */
+
+.calendar {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.calendar th {
+  padding: 0.4rem 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.calendar th.is-red {
+  color: var(--red);
+}
+
+.calendar th.is-blue {
+  color: var(--blue);
+}
+
+.cell {
+  vertical-align: top;
+  height: 6.5rem;
+  padding: 0.3rem 0.35rem;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.cell.is-closed {
+  background: var(--bg-closed);
+}
+
+.cell.is-outside {
+  opacity: 0.45;
+}
+
+.cell.is-today {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.cell-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  margin-bottom: 0.2rem;
+}
+
+.cell-day {
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.cell.is-red .cell-day {
+  color: var(--red);
+}
+
+.cell.is-blue .cell-day {
+  color: var(--blue);
+}
+
+.cell-closed {
+  font-size: 0.7rem;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- 予定チップ -------------------------------------------------------- */
+
+.chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  padding: 1px 4px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: color-mix(in srgb, var(--chip) 16%, transparent);
+  color: color-mix(in srgb, var(--chip) 75%, var(--fg));
+  cursor: default;
+}
+
+.chip.is-notice {
+  background: transparent;
+  border: 1px dashed color-mix(in srgb, var(--chip) 55%, transparent);
+  color: var(--fg-muted);
+}
+
+.chip-mark {
+  flex: none;
+  font-size: 0.7rem;
+}
+
+.chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.color-blue { --chip: var(--color-blue); }
+.color-green { --chip: var(--color-green); }
+.color-red { --chip: var(--color-red); }
+.color-orange { --chip: var(--color-orange); }
+.color-purple { --chip: var(--color-purple); }
+.color-teal { --chip: var(--color-teal); }
+.color-pink { --chip: var(--color-pink); }
+.color-gray { --chip: var(--color-gray); }
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 0.6rem 0 0;
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+}
+
+/* --- ルール一覧 -------------------------------------------------------- */
+
+.panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.9rem 1rem;
+  background: var(--bg-sunken);
+}
+
+.panel-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--fg-muted);
+  margin: 0 0 0.75rem;
+}
+
+.rules {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.rule {
+  display: flex;
+  gap: 0.55rem;
+}
+
+.rule.is-disabled {
+  opacity: 0.55;
+}
+
+.rule-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  margin-top: 0.42rem;
+  border-radius: 50%;
+  background: var(--chip);
+}
+
+.rule-body {
+  min-width: 0;
+}
+
+.rule-body p {
+  margin: 0;
+}
+
+.rule-title {
+  font-weight: 600;
+  font-size: 0.92rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.rule-badge {
+  font-size: 0.7rem;
+  font-weight: 400;
+  padding: 0 0.35rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  color: var(--fg-muted);
+}
+
+.rule-desc {
+  font-size: 0.82rem;
+  color: var(--fg-muted);
+}
+
+.rule-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--fg-faint);
+  margin-top: 0.15rem;
+}
+
+.rule-note {
+  font-size: 0.78rem;
+  color: var(--fg-faint);
+  margin-top: 0.15rem;
+}
+
+.empty {
+  text-align: center;
+  color: var(--fg-muted);
+  font-size: 0.88rem;
+}
+
+.empty p {
+  margin: 0 0 0.4rem;
+}
+
+.empty-hint {
+  font-size: 0.8rem;
+  color: var(--fg-faint);
+  margin-bottom: 0.8rem !important;
+}
+
+/* --- フッター ---------------------------------------------------------- */
+
+.app-footer {
+  margin-top: 2rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.78rem;
+  color: var(--fg-faint);
+}
+
+.app-footer p {
+  margin: 0 0 0.2rem;
+}
+
+/* --- レスポンシブ ------------------------------------------------------ */
+
+@media (max-width: 60rem) {
+  .layout {
     grid-template-columns: 1fr;
-    gap: 0 0;
   }
 
-  dt {
-    margin-top: 0.5rem;
+  .cell {
+    height: 5.5rem;
+  }
+}
+
+@media (max-width: 34rem) {
+  :root {
+    font-size: 14px;
+  }
+
+  #app {
+    padding: 0.75rem 0.5rem 2rem;
+  }
+
+  .month-label {
+    font-size: 1.1rem;
+    min-width: 7em;
+  }
+
+  /* 幅が狭くツールチップも使えないため、省略せず折り返してセルを伸ばす。 */
+  .cell {
+    height: auto;
+    min-height: 4.2rem;
+    padding: 0.2rem;
+  }
+
+  .chip-label {
+    white-space: normal;
+    overflow: visible;
+    word-break: break-word;
+  }
+
+  /* 幅が足りないので祝日名は日付の下へ折り返す（名前自体は残す）。 */
+  .cell-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+  }
+
+  .cell-closed {
+    font-size: 0.62rem;
+    line-height: 1.2;
+    max-width: 100%;
+  }
+
+  .chip {
+    font-size: 0.68rem;
+  }
+}
+
+/* --- 印刷 -------------------------------------------------------------- */
+
+@media print {
+  .app-header button,
+  .panel,
+  .app-footer,
+  .banner {
+    display: none;
+  }
+
+  #app {
+    max-width: none;
+    padding: 0;
+  }
+
+  .cell {
+    height: auto;
+    min-height: 4.5rem;
+  }
+
+  .chip {
+    border: 1px solid var(--chip);
+    background: transparent;
   }
 }
