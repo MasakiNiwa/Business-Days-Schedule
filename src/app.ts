@@ -31,6 +31,8 @@ import { renderDayDetail } from './ui/DayDetail';
 import { renderHelp } from './ui/HelpView';
 import { applyTheme, nextTheme, themeIcon, themeLabel } from './ui/theme';
 import { button } from './ui/controls';
+import { createDialog } from './ui/dialog';
+import type { DialogController } from './ui/dialog';
 import { clear, h } from './ui/dom';
 import { RuleEditor } from './ui/RuleEditor';
 import { renderRuleList } from './ui/RuleList';
@@ -41,16 +43,33 @@ const SAMPLES_URL = `${import.meta.env.BASE_URL}data/samples/business-basics.jso
 
 type Mode =
   | { kind: 'calendar' }
+  | { kind: 'rules' }
   | { kind: 'edit'; rule: Rule; isNew: boolean }
   | { kind: 'settings' }
   | { kind: 'help' }
   | { kind: 'day'; date: DateStr };
+
+/** 開いているダイアログの中身を作り直してよいかの判定に使う。 */
+function dialogKeyOf(mode: Mode): string | null {
+  switch (mode.kind) {
+    case 'calendar':
+      return null;
+    case 'edit':
+      return `edit:${mode.rule.id}`;
+    case 'day':
+      return `day:${mode.date}`;
+    default:
+      return mode.kind;
+  }
+}
 
 export class App {
   private state: AppState;
   private view: { year: number; month: Month };
   private mode: Mode = { kind: 'calendar' };
   private flash: { text: string; tone: 'info' | 'error' } | null = null;
+  private dialog: DialogController | null = null;
+  private dialogKey: string | null = null;
 
   private readonly today: DateStr;
   private readonly store: KeyValueStore;
@@ -251,6 +270,10 @@ export class App {
     themeButton.setAttribute('aria-label', `配色: ${themeLabel(theme)}（クリックで切り替え）`);
     themeButton.setAttribute('title', `配色: ${themeLabel(theme)}`);
 
+    const rulesButton = button('ルール', () => this.openMode('rules'), 'button button-sm');
+    rulesButton.setAttribute('title', 'ルールの一覧・追加');
+    if (this.mode.kind === 'rules') rulesButton.setAttribute('aria-pressed', 'true');
+
     const settingsButton = button('⚙', () => this.openMode('settings'), 'nav');
     settingsButton.setAttribute('aria-label', '設定');
     settingsButton.setAttribute('title', '設定');
@@ -272,13 +295,18 @@ export class App {
         next,
         button('今日', () => this.goToToday(), 'button button-sm'),
       ),
-      h('div', { class: 'header-actions' }, themeButton, settingsButton, helpButton),
+      h('div', { class: 'header-actions' }, rulesButton, themeButton, settingsButton, helpButton),
     );
   }
 
-  /** 設定・ヘルプはトグル動作にする。同じボタンをもう一度押せば閉じる。 */
-  private openMode(kind: 'settings' | 'help'): void {
+  /** ヘッダーのボタンはトグル動作にする。同じボタンをもう一度押せば閉じる。 */
+  private openMode(kind: 'settings' | 'help' | 'rules'): void {
     this.mode = this.mode.kind === kind ? { kind: 'calendar' } : { kind };
+    this.render();
+  }
+
+  private backToCalendar(): void {
+    this.mode = { kind: 'calendar' };
     this.render();
   }
 
@@ -300,31 +328,29 @@ export class App {
     );
   }
 
-  /** 右側のパネル。モードによって一覧・編集・設定を出し分ける。 */
-  private renderSidePanel(
-    ctx: ScheduleContext,
-    calendarDefs: Map<string, BusinessCalendar>,
-  ): HTMLElement {
-    if (this.mode.kind === 'edit') {
+  /** ダイアログの中身。モードによって出し分ける。 */
+  private buildDialogContent(mode: Mode): HTMLElement | null {
+    const calendarDefs = new Map<string, BusinessCalendar>(
+      this.state.calendars.map((item) => [item.id, item]),
+    );
+
+    if (mode.kind === 'edit') {
       const editor = new RuleEditor(
-        this.mode.rule,
+        mode.rule,
         this.state.calendars,
-        ctx,
+        this.scheduleContext(this.businessCalendars()),
         {
           onSave: (rule) => this.saveRule(rule),
-          onCancel: () => {
-            this.mode = { kind: 'calendar' };
-            this.render();
-          },
+          onCancel: () => this.backToCalendar(),
           onDelete: (ruleId) => this.deleteRule(ruleId),
         },
-        this.mode.isNew,
+        mode.isNew,
         this.today,
       );
-      return h('div', { class: 'panel' }, editor.element);
+      return editor.element;
     }
 
-    if (this.mode.kind === 'settings') {
+    if (mode.kind === 'settings') {
       const settings = new SettingsView(
         this.state.calendars,
         this.holidays,
@@ -332,67 +358,112 @@ export class App {
           onChange: (calendars) => {
             this.state.calendars = calendars;
             this.persist();
-            // カレンダーの変更は営業日の判定に直結するので、その場でカレンダーを描き直す。
+            // カレンダーの変更は営業日の判定に直結するので、背面のカレンダーだけ描き直す。
             this.renderCalendarPaneOnly();
           },
           onExport: () => this.exportJson(),
-          onImport: (file, mode) => void this.importJson(file, mode),
+          onImport: (file, mode2) => void this.importJson(file, mode2),
           onClearAll: () => this.clearAll(),
-          onClose: () => {
-            this.mode = { kind: 'calendar' };
-            this.render();
-          },
+          onClose: () => this.backToCalendar(),
         },
         this.today,
       );
-      return h('div', { class: 'panel' }, settings.element);
+      return settings.element;
     }
 
-    if (this.mode.kind === 'help') {
-      return h('div', { class: 'panel' }, renderHelp(() => {
-        this.mode = { kind: 'calendar' };
-        this.render();
-      }));
+    if (mode.kind === 'help') {
+      return renderHelp(() => this.backToCalendar());
     }
 
-    if (this.mode.kind === 'day') {
-      const date = this.mode.date;
+    if (mode.kind === 'day') {
       const calendars = this.businessCalendars();
+      const ctx = this.scheduleContext(calendars);
       const businessCalendar = calendars.get(ctx.fallbackCalendarId);
       if (businessCalendar === undefined) throw new Error('営業日カレンダーが1件もありません');
-      const occurrences = this.buildOccurrences().occurrencesByDate.get(date) ?? [];
-      return h(
-        'div',
-        { class: 'panel' },
-        renderDayDetail(
-          date,
-          occurrences,
-          new Map(this.state.rules.map((rule) => [rule.id, rule])),
-          calendarDefs,
-          businessCalendar,
-          this.holidays,
-          {
-            onClose: () => {
-              this.mode = { kind: 'calendar' };
-              this.render();
-            },
-            onEditRule: (ruleId) => this.startEdit(ruleId),
-            onMove: (days) => this.moveSelectedDay(days),
-          },
-        ),
+      const occurrences = this.buildOccurrences().occurrencesByDate.get(mode.date) ?? [];
+      return renderDayDetail(
+        mode.date,
+        occurrences,
+        new Map(this.state.rules.map((rule) => [rule.id, rule])),
+        calendarDefs,
+        businessCalendar,
+        this.holidays,
+        {
+          onClose: () => this.backToCalendar(),
+          onEditRule: (ruleId) => this.startEdit(ruleId),
+          onMove: (days) => this.moveSelectedDay(days),
+        },
       );
     }
 
-    return renderRuleList(this.state.rules, calendarDefs, {
-      onLoadSamples: () => void this.loadSamples(),
-      onAdd: () => this.startAdd(),
-      onEdit: (ruleId) => this.startEdit(ruleId),
-      onToggle: (ruleId, enabled) => this.toggleRule(ruleId, enabled),
-      onOpenSettings: () => {
-        this.mode = { kind: 'settings' };
-        this.render();
-      },
-    });
+    if (mode.kind === 'rules') {
+      return renderRuleList(this.state.rules, calendarDefs, {
+        onLoadSamples: () => void this.loadSamples(),
+        onAdd: () => this.startAdd(),
+        onEdit: (ruleId) => this.startEdit(ruleId),
+        onToggle: (ruleId, enabled) => this.toggleRule(ruleId, enabled),
+        onOpenSettings: () => {
+          this.mode = { kind: 'settings' };
+          this.render();
+        },
+        onClose: () => this.backToCalendar(),
+      });
+    }
+
+    return null;
+  }
+
+  /**
+   * モードに合わせてダイアログを開閉する。
+   *
+   * 編集中は同じルールを開いている限り中身を作り直さない。作り直すと入力途中の
+   * 下書きとフォーカスを失うため。
+   */
+  private syncDialog(): void {
+    const key = dialogKeyOf(this.mode);
+
+    if (key === null) {
+      this.dialog?.element.remove();
+      this.dialog?.close();
+      this.dialog = null;
+      this.dialogKey = null;
+      return;
+    }
+
+    const isSameEditor = key === this.dialogKey && this.mode.kind === 'edit';
+    if (this.dialog !== null && isSameEditor) return;
+
+    const content = this.buildDialogContent(this.mode);
+    if (content === null) return;
+
+    const size = this.mode.kind === 'edit' || this.mode.kind === 'settings' ? 'lg' : 'md';
+
+    if (this.dialog !== null && key === this.dialogKey) {
+      this.dialog.setContent(content);
+      return;
+    }
+
+    // 種類が変わるときは開き直す。サイズと初期フォーカスを取り直すため。
+    if (this.dialog !== null) {
+      const previous = this.dialog;
+      this.dialog = null;
+      previous.element.remove();
+    }
+
+    this.dialog = createDialog(content, () => this.onDialogClosed(), size);
+    this.dialogKey = key;
+  }
+
+  /** ブラウザ側の操作（Esc・背景クリック）で閉じられたときの後始末。 */
+  private onDialogClosed(): void {
+    if (this.dialog === null) return;
+    this.dialog.element.remove();
+    this.dialog = null;
+    this.dialogKey = null;
+    if (this.mode.kind !== 'calendar') {
+      this.mode = { kind: 'calendar' };
+      this.render();
+    }
   }
 
   /** 設定変更のたびに右パネルごと作り直すと入力位置を失うため、左側だけ差し替える。 */
@@ -450,11 +521,29 @@ export class App {
     );
   }
 
+  /** ルールが1件も無いときの導線。カレンダーだけでは何もできないため。 */
+  private renderEmptyPrompt(): HTMLElement {
+    return h(
+      'div',
+      { class: 'empty-prompt' },
+      h('p', {}, 'まだルールがありません。'),
+      h(
+        'div',
+        { class: 'empty-prompt-actions' },
+        button('サンプルを読み込む', () => void this.loadSamples(), 'button button-primary'),
+        button('ルールを追加', () => this.startAdd(), 'button'),
+      ),
+      h(
+        'p',
+        { class: 'field-hint' },
+        '給与振込・月次締め・第5営業日の請求書発行など、実務でよく使う8件から始められます。',
+      ),
+    );
+  }
+
   render(): void {
-    const calendars = this.businessCalendars();
-    const ctx = this.scheduleContext(calendars);
-    const { occurrencesByDate, warnings } = this.buildOccurrences();
     const range = gridRangeOf(this.view.year, this.view.month);
+    const { occurrencesByDate, warnings } = this.buildOccurrences();
 
     const notices: string[] = [];
     if (!this.storeAvailable) {
@@ -465,10 +554,6 @@ export class App {
     }
     for (const warning of warnings) notices.push(warning.message);
 
-    const calendarDefs = new Map<string, BusinessCalendar>(
-      this.state.calendars.map((item) => [item.id, item]),
-    );
-
     const flash = this.flash;
     this.flash = null;
 
@@ -477,20 +562,20 @@ export class App {
       this.renderHeader(),
       ...(flash === null
         ? []
-        : [h('p', { class: `banner${flash.tone === 'error' ? ' banner-error' : ' banner-ok'}` }, flash.text)]),
+        : [
+            h(
+              'p',
+              { class: `banner${flash.tone === 'error' ? ' banner-error' : ' banner-ok'}` },
+              flash.text,
+            ),
+          ]),
       ...[...new Set(notices)].map((message) => h('p', { class: 'banner' }, message)),
-      h(
-        'div',
-        {
-          class: `layout${
-            this.mode.kind === 'calendar' || this.mode.kind === 'day' ? '' : ' layout-wide-panel'
-          }`,
-        },
-        this.buildCalendarPane(occurrencesByDate),
-        this.renderSidePanel(ctx, calendarDefs),
-      ),
+      this.buildCalendarPane(occurrencesByDate),
+      ...(this.state.rules.length === 0 ? [this.renderEmptyPrompt()] : []),
       this.renderFooter(),
     );
+
+    this.syncDialog();
   }
 }
 

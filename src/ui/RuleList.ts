@@ -14,6 +14,7 @@ export type RuleListHandlers = {
   onEdit: (ruleId: string) => void;
   onToggle: (ruleId: string, enabled: boolean) => void;
   onOpenSettings: () => void;
+  onClose: () => void;
 };
 
 function renderRule(
@@ -70,17 +71,17 @@ export function renderRuleList(
   calendars: ReadonlyMap<string, BusinessCalendar>,
   handlers: RuleListHandlers,
 ): HTMLElement {
-  const section = h('section', { class: 'panel', 'aria-labelledby': 'rules-heading' });
+  const section = h('section', { class: 'rule-panel', 'aria-labelledby': 'rules-heading' });
 
   section.append(
     h(
       'div',
       { class: 'panel-head' },
-      h('h2', { class: 'panel-title', id: 'rules-heading' }, 'ルール'),
+      h('h2', { class: 'editor-title', id: 'rules-heading' }, 'ルール'),
       h(
         'div',
         { class: 'panel-actions' },
-        button('＋ 追加', () => handlers.onAdd(), 'button button-sm'),
+        button('＋ 追加', () => handlers.onAdd(), 'button button-sm button-primary'),
         button('設定', () => handlers.onOpenSettings(), 'button button-sm button-quiet'),
       ),
     ),
@@ -95,12 +96,22 @@ export function renderRuleList(
         h('p', { class: 'empty-hint' }, '実務でよく使う8件のサンプルから始められます。'),
         button('サンプルを読み込む', () => handlers.onLoadSamples()),
       ),
+      h(
+        'div',
+        { class: 'editor-actions' },
+        button('閉じる', () => handlers.onClose(), 'button button-primary'),
+      ),
     );
     return section;
   }
 
   section.append(
     h('ul', { class: 'rules' }, ...rules.map((rule) => renderRule(rule, calendars, handlers))),
+    h(
+      'div',
+      { class: 'editor-actions' },
+      button('閉じる', () => handlers.onClose(), 'button button-primary'),
+    ),
   );
   return section;
 }

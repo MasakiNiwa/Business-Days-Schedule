@@ -12,9 +12,6 @@ import { h } from './dom';
 
 const WEEKDAY_HEADERS = [0, 1, 2, 3, 4, 5, 6] as const;
 
-/** 1セルに並べるチップの上限。超えた分は「+N件」にまとめて詳細で開かせる。 */
-export const MAX_CHIPS_PER_CELL = 3;
-
 export type CalendarHandlers = {
   onSelectDay: (date: string) => void;
 };
@@ -96,15 +93,15 @@ function renderCell(
         ? '臨時休業'
         : cell.closedReason.label);
 
-  const visible = cell.occurrences
+  // 件数で打ち切らず、その日の予定はすべて出す。セルは内容に合わせて伸びる。
+  // 定期ルールから導く性質上、1日に極端な件数が並ぶことは想定しにくいため、
+  // 省略するより縦に伸ばしてページをスクロールさせるほうが実務では読みやすい。
+  const chips = cell.occurrences
     .map((occurrence) => {
       const rule = rules.get(occurrence.ruleId);
-      return rule === undefined ? null : { occurrence, rule };
+      return rule === undefined ? null : renderOccurrence(occurrence, rule);
     })
-    .filter((entry): entry is { occurrence: Occurrence; rule: Rule } => entry !== null);
-
-  const shown = visible.slice(0, MAX_CHIPS_PER_CELL);
-  const hidden = visible.length - shown.length;
+    .filter((node): node is HTMLElement => node !== null);
 
   const dayButton = h(
     'button',
@@ -116,13 +113,6 @@ function renderCell(
     String(cell.day),
   );
   dayButton.addEventListener('click', () => handlers.onSelectDay(cell.date));
-
-  const chips = shown.map(({ occurrence, rule }) => renderOccurrence(occurrence, rule));
-  if (hidden > 0) {
-    const more = h('button', { type: 'button', class: 'chip chip-more' }, `＋${hidden}件`);
-    more.addEventListener('click', () => handlers.onSelectDay(cell.date));
-    chips.push(h('li', { class: 'chip-more-item' }, more));
-  }
 
   return h(
     'td',

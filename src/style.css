@@ -117,7 +117,8 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
   padding-bottom: 0.75rem;
   border-bottom: 1px solid var(--border);
   margin-bottom: 1rem;
@@ -170,6 +171,8 @@ button {
   border-radius: 6px;
   background: var(--bg);
   padding: 0.4rem 0.9rem;
+  /* 「ルール」「今日」が狭い画面で2行に割れないようにする。 */
+  white-space: nowrap;
 }
 
 .button-sm {
@@ -195,16 +198,12 @@ button {
 
 /* --- レイアウト -------------------------------------------------------- */
 
-.layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 21rem;
-  gap: 1.25rem;
-  align-items: start;
-}
-
-/* 編集・設定中はフォームのぶんパネルを広げる。 */
-.layout-wide-panel {
-  grid-template-columns: minmax(0, 1fr) 26rem;
+/*
+ * カレンダーは常に全幅。ルール一覧・編集・設定・ヘルプ・日付詳細はすべて
+ * モーダルに載せる。横にパネルを置くとセル幅が削られ、予定名が折り返しやすくなるため。
+ */
+.calendar-pane {
+  width: 100%;
 }
 
 /* --- カレンダー -------------------------------------------------------- */
@@ -233,9 +232,9 @@ button {
 
 .cell {
   vertical-align: top;
-  /* 折り返しで伸びる余地を残しつつ、予定が無い月でも高さを保つ。 */
+  /* 件数に応じて伸びる。予定が無い月でも高さが潰れないよう下限だけ決める。 */
   height: auto;
-  min-height: 7.5rem;
+  min-height: 6.5rem;
   padding: 0.3rem 0.35rem;
   border: 1px solid var(--border);
   background: var(--bg);
@@ -310,14 +309,15 @@ button {
 }
 
 
-/* 1行で切ると「源泉所得…」のように意味が落ちるため、2行まで折り返す。 */
+/*
+ * 予定名は省略せず全文を折り返す。
+ * line-clamp による2行制限は、標準プロパティを部分実装したブラウザで
+ * 「省略記号は出るのに溢れた行が切り取られない」状態になり、セルからはみ出した。
+ * 件数の上限も設けていないので、セルは内容に合わせて素直に伸ばす。
+ */
 .chip-label {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
   overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .color-blue { --chip: var(--color-blue); }
@@ -883,25 +883,6 @@ button {
   background: color-mix(in srgb, var(--chip) 30%, transparent);
 }
 
-.chip-more-item {
-  list-style: none;
-}
-
-.chip-more {
-  width: 100%;
-  border: 1px dashed var(--border-strong);
-  background: transparent;
-  color: var(--fg-muted);
-  font-size: 0.72rem;
-  padding: 1px 4px;
-  border-radius: 4px;
-  text-align: left;
-}
-
-.chip-more:hover {
-  background: var(--bg-sunken);
-  color: var(--fg);
-}
 
 /* --- 日付ボタン -------------------------------------------------------- */
 
@@ -1047,16 +1028,100 @@ button {
   }
 }
 
+
+/* --- モーダル ---------------------------------------------------------- */
+
+.modal {
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--fg);
+  padding: 0;
+  width: min(92vw, 32rem);
+  max-height: 88vh;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 25%);
+}
+
+.modal-lg {
+  width: min(94vw, 44rem);
+}
+
+.modal::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+
+.modal-body {
+  overflow-y: auto;
+  max-height: 88vh;
+  padding: 1.1rem 1.25rem 1.25rem;
+  overscroll-behavior: contain;
+}
+
+.modal-close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.6rem;
+  z-index: 1;
+  width: 2rem;
+  height: 2rem;
+  font-size: 1.2rem;
+  line-height: 1;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-muted);
+}
+
+.modal-close:hover {
+  background: var(--bg-sunken);
+  color: var(--fg);
+}
+
+.modal-close:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
+/* タイトルが閉じるボタンと重ならないように右側を空ける。 */
+.modal .editor-title,
+.modal .panel-head {
+  padding-right: 2.2rem;
+}
+
+.rule-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+/* --- ルールが無いときの導線 -------------------------------------------- */
+
+.empty-prompt {
+  margin-top: 1.25rem;
+  padding: 1.25rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  text-align: center;
+  color: var(--fg-muted);
+}
+
+.empty-prompt p {
+  margin: 0 0 0.6rem;
+}
+
+.empty-prompt-actions {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+  flex-wrap: wrap;
+}
+
 /* --- レスポンシブ ------------------------------------------------------ */
 
 @media (max-width: 60rem) {
-  .layout,
-  .layout-wide-panel {
-    grid-template-columns: 1fr;
-  }
-
   .cell {
-    min-height: 6.5rem;
+    min-height: 5.5rem;
   }
 }
 
@@ -1071,7 +1136,18 @@ button {
 
   .month-label {
     font-size: 1.1rem;
-    min-width: 7em;
+    min-width: 0;
+    flex: 1;
+    text-align: left;
+  }
+
+  .month-nav,
+  .header-actions {
+    flex: 1 1 100%;
+  }
+
+  .header-actions {
+    justify-content: flex-end;
   }
 
   /* 幅が狭くツールチップも使えないため、省略せず折り返してセルを伸ばす。 */
@@ -1103,13 +1179,29 @@ button {
   .chip {
     font-size: 0.68rem;
   }
+
+  .modal,
+  .modal-lg {
+    width: 100vw;
+    max-width: 100vw;
+    max-height: 92vh;
+    margin: auto auto 0;
+    border-radius: 12px 12px 0 0;
+    border-bottom: none;
+  }
+
+  .modal-body {
+    max-height: 92vh;
+    padding: 1rem 0.9rem 1.5rem;
+  }
 }
 
 /* --- 印刷 -------------------------------------------------------------- */
 
 @media print {
   .app-header button,
-  .panel,
+  .modal,
+  .empty-prompt,
   .app-footer,
   .banner,
   .legend {
