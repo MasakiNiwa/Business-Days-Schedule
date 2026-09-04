@@ -1,13 +1,26 @@
 /**
  * ルール一覧（docs/SPEC.md §8.1）。
- * M2 では読み取り専用。追加・編集・削除は M3 で実装する。
+ * M3 から追加・編集・削除・有効/無効の切り替えができる。
  */
 
 import { describeNotice, describePeriod, describeRule } from '../core/describe';
 import type { BusinessCalendar, Rule } from '../types';
+import { button } from './controls';
 import { h } from './dom';
 
-function renderRule(rule: Rule, calendars: ReadonlyMap<string, BusinessCalendar>): HTMLElement {
+export type RuleListHandlers = {
+  onLoadSamples: () => void;
+  onAdd: () => void;
+  onEdit: (ruleId: string) => void;
+  onToggle: (ruleId: string, enabled: boolean) => void;
+  onOpenSettings: () => void;
+};
+
+function renderRule(
+  rule: Rule,
+  calendars: ReadonlyMap<string, BusinessCalendar>,
+  handlers: RuleListHandlers,
+): HTMLElement {
   const calendarName = calendars.get(rule.calendarId)?.name ?? `${rule.calendarId}（未定義）`;
   const period = describePeriod(rule.period);
 
@@ -21,6 +34,10 @@ function renderRule(rule: Rule, calendars: ReadonlyMap<string, BusinessCalendar>
   if (rule.skipDates.length > 0) {
     meta.push(h('span', { class: 'rule-skip' }, `除外 ${rule.skipDates.length} 件`));
   }
+
+  const toggle = h('input', { type: 'checkbox', 'aria-label': `${rule.title} を有効にする` });
+  toggle.checked = rule.enabled;
+  toggle.addEventListener('change', () => handlers.onToggle(rule.id, toggle.checked));
 
   return h(
     'li',
@@ -39,12 +56,14 @@ function renderRule(rule: Rule, calendars: ReadonlyMap<string, BusinessCalendar>
       meta.length === 0 ? null : h('p', { class: 'rule-meta' }, ...meta),
       rule.note === undefined || rule.note === '' ? null : h('p', { class: 'rule-note' }, rule.note),
     ),
+    h(
+      'div',
+      { class: 'rule-actions' },
+      h('label', { class: 'switch', title: '有効/無効' }, toggle),
+      button('編集', () => handlers.onEdit(rule.id), 'button button-sm button-quiet'),
+    ),
   );
 }
-
-export type RuleListHandlers = {
-  onLoadSamples: () => void;
-};
 
 export function renderRuleList(
   rules: readonly Rule[],
@@ -52,25 +71,36 @@ export function renderRuleList(
   handlers: RuleListHandlers,
 ): HTMLElement {
   const section = h('section', { class: 'panel', 'aria-labelledby': 'rules-heading' });
-  section.append(h('h2', { class: 'panel-title', id: 'rules-heading' }, 'ルール'));
+
+  section.append(
+    h(
+      'div',
+      { class: 'panel-head' },
+      h('h2', { class: 'panel-title', id: 'rules-heading' }, 'ルール'),
+      h(
+        'div',
+        { class: 'panel-actions' },
+        button('＋ 追加', () => handlers.onAdd(), 'button button-sm'),
+        button('設定', () => handlers.onOpenSettings(), 'button button-sm button-quiet'),
+      ),
+    ),
+  );
 
   if (rules.length === 0) {
-    const button = h('button', { type: 'button', class: 'button' }, 'サンプルを読み込む');
-    button.addEventListener('click', handlers.onLoadSamples);
     section.append(
       h(
         'div',
         { class: 'empty' },
         h('p', {}, 'まだルールがありません。'),
         h('p', { class: 'empty-hint' }, '実務でよく使う8件のサンプルから始められます。'),
-        button,
+        button('サンプルを読み込む', () => handlers.onLoadSamples()),
       ),
     );
     return section;
   }
 
   section.append(
-    h('ul', { class: 'rules' }, ...rules.map((rule) => renderRule(rule, calendars))),
+    h('ul', { class: 'rules' }, ...rules.map((rule) => renderRule(rule, calendars, handlers))),
   );
   return section;
 }

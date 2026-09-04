@@ -13,6 +13,7 @@ import { expandRules, groupByDate } from '../src/core/schedule';
 import type { BusinessCalendar, Rule } from '../src/types';
 import { renderCalendar, renderLegend } from '../src/ui/CalendarView';
 import { renderRuleList } from '../src/ui/RuleList';
+import type { RuleListHandlers } from '../src/ui/RuleList';
 import { companyCalendar, companyCalendarDef, holidays, makeRule, scheduleContext } from './helpers';
 
 const salaryRule = makeRule({
@@ -149,13 +150,46 @@ describe('renderLegend', () => {
 describe('renderRuleList', () => {
   const calendars = new Map<string, BusinessCalendar>([['company', companyCalendarDef]]);
 
+  const handlers = (): RuleListHandlers => ({
+    onLoadSamples: vi.fn(),
+    onAdd: vi.fn(),
+    onEdit: vi.fn(),
+    onToggle: vi.fn(),
+    onOpenSettings: vi.fn(),
+  });
+
+  const clickByText = (root: ParentNode, text: string): void => {
+    const target = [...root.querySelectorAll('button')].find((b) => b.textContent === text);
+    target?.dispatchEvent(new MouseEvent('click'));
+  };
+
   it('ルールが無ければサンプル読み込みを促す', () => {
-    const onLoadSamples = vi.fn();
-    const section = renderRuleList([], calendars, { onLoadSamples });
-    const button = section.querySelector('button');
-    expect(button?.textContent).toBe('サンプルを読み込む');
-    button?.dispatchEvent(new MouseEvent('click'));
-    expect(onLoadSamples).toHaveBeenCalledOnce();
+    const h = handlers();
+    const section = renderRuleList([], calendars, h);
+    clickByText(section, 'サンプルを読み込む');
+    expect(h.onLoadSamples).toHaveBeenCalledOnce();
+  });
+
+  it('追加と設定を呼べる', () => {
+    const h = handlers();
+    const section = renderRuleList([], calendars, h);
+    clickByText(section, '＋ 追加');
+    clickByText(section, '設定');
+    expect(h.onAdd).toHaveBeenCalledOnce();
+    expect(h.onOpenSettings).toHaveBeenCalledOnce();
+  });
+
+  it('編集と有効/無効の切り替えを呼べる', () => {
+    const h = handlers();
+    const section = renderRuleList([salaryRule], calendars, h);
+    clickByText(section, '編集');
+    expect(h.onEdit).toHaveBeenCalledWith('salary');
+
+    const toggle = section.querySelector<HTMLInputElement>('.switch input');
+    expect(toggle?.checked).toBe(true);
+    toggle!.checked = false;
+    toggle?.dispatchEvent(new Event('change'));
+    expect(h.onToggle).toHaveBeenCalledWith('salary', false);
   });
 
   it('ルールの説明・カレンダー名・通知を出す', () => {
@@ -167,7 +201,7 @@ describe('renderRuleList', () => {
       period: { start: '2026-04-01', end: null },
       skipDates: ['2026-08-25'],
     });
-    const section = renderRuleList([rule], calendars, { onLoadSamples: vi.fn() });
+    const section = renderRuleList([rule], calendars, handlers());
     expect(section.querySelector('.rule-title')?.textContent).toBe('給与振込');
     expect(section.querySelector('.rule-desc')?.textContent).toBe('毎月25日 / 休業日なら前営業日');
     const meta = section.querySelector('.rule-meta')?.textContent ?? '';
@@ -179,9 +213,7 @@ describe('renderRuleList', () => {
   });
 
   it('無効なルールに印を付ける', () => {
-    const section = renderRuleList([makeRule({ ...salaryRule, enabled: false })], calendars, {
-      onLoadSamples: vi.fn(),
-    });
+    const section = renderRuleList([makeRule({ ...salaryRule, enabled: false })], calendars, handlers());
     expect(section.querySelector('.rule')?.className).toContain('is-disabled');
     expect(section.querySelector('.rule-badge')?.textContent).toBe('無効');
   });
@@ -190,7 +222,7 @@ describe('renderRuleList', () => {
     const section = renderRuleList(
       [makeRule({ ...salaryRule, calendarId: 'missing' })],
       calendars,
-      { onLoadSamples: vi.fn() },
+      handlers(),
     );
     expect(section.querySelector('.rule-calendar')?.textContent).toBe('missing（未定義）');
   });
