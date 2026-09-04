@@ -61,7 +61,7 @@ describe('プレビュー', () => {
     const shifted = [...form.querySelectorAll('.preview-list li.is-shifted')];
     expect(shifted.length).toBeGreaterThan(0);
     expect(shifted[0]?.textContent).toContain('2026-10-25');
-    expect(shifted[0]?.textContent).toContain('前倒し');
+    expect(shifted[0]?.textContent).toContain('← 2026-10-25 から前倒し');
   });
 
   it('補正の向きを変えるとプレビューが即座に変わる', () => {

@@ -19,6 +19,7 @@ describe('load / save', () => {
     expect(state.rules).toEqual([]);
     expect(state.calendars.map((c) => c.id)).toEqual(['company', 'bank']);
     expect(state.prefs.listDays).toBe(90);
+    expect(state.prefs.theme).toBe('auto');
   });
 
   it('保存して読み戻せる', () => {
@@ -41,6 +42,14 @@ describe('load / save', () => {
       rules: [makeRule({ title: '正常' }), makeRule({ id: 'bad', title: '' })],
     });
     expect(loadState(store).rules.map((r) => r.title)).toEqual(['正常']);
+  });
+
+  it('配色モードを保存して読み戻せる', () => {
+    const store = createMemoryStore();
+    const state = createDefaultState();
+    state.prefs.theme = 'dark';
+    saveState(store, state);
+    expect(loadState(store).prefs.theme).toBe('dark');
   });
 
   it('clearState で消える', () => {

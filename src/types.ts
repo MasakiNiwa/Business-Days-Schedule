@@ -122,7 +122,11 @@ export type Recurrence =
 // 営業日補正・事前通知・ルール (docs/SPEC.md §5.3 - §5.5)
 // ---------------------------------------------------------------------------
 
-export type AdjustMode = 'none' | 'prev' | 'next' | 'nearest';
+/**
+ * both … 休業日なら前営業日と翌営業日の両方に表示する。
+ *        取引先ごとに前倒し・後ろ倒しが分かれる入金予定などを、1つのルールで扱うため。
+ */
+export type AdjustMode = 'none' | 'prev' | 'next' | 'nearest' | 'both';
 
 export type Adjustment = {
   mode: AdjustMode;

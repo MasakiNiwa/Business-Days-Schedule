@@ -32,8 +32,9 @@
   font-size: 15px;
 }
 
+/* 明示的に選ばれていない限り OS の設定に従う。data-theme が立っていればそちらを優先する。 */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --fg: #e6e9ee;
     --fg-muted: #a3acba;
     --fg-faint: #6c7686;
@@ -59,6 +60,33 @@
     --color-pink: #e8629f;
     --color-gray: #8b96a6;
   }
+}
+
+:root[data-theme='dark'] {
+    --fg: #e6e9ee;
+    --fg-muted: #a3acba;
+    --fg-faint: #6c7686;
+    --bg: #15181d;
+    --bg-sunken: #1c2027;
+    --bg-closed: #22262e;
+    --border: #2f3540;
+    --border-strong: #454d5a;
+    --accent: #6ea8ff;
+    --red: #f2837b;
+    --blue: #7aa7ff;
+    --danger-bg: #3a1f1d;
+    --danger-fg: #f4a8a1;
+    --notice-bg: #33290f;
+    --notice-fg: #e8cf8a;
+
+    --color-blue: #5b8def;
+    --color-green: #3fae74;
+    --color-red: #e4695f;
+    --color-orange: #e0982f;
+    --color-purple: #9c6ef0;
+    --color-teal: #2bb3a3;
+    --color-pink: #e8629f;
+    --color-gray: #8b96a6;
 }
 
 * {
@@ -205,7 +233,9 @@ button {
 
 .cell {
   vertical-align: top;
-  height: 6.5rem;
+  /* 折り返しで伸びる余地を残しつつ、予定が無い月でも高さを保つ。 */
+  height: auto;
+  min-height: 7.5rem;
   padding: 0.3rem 0.35rem;
   border: 1px solid var(--border);
   background: var(--bg);
@@ -231,11 +261,6 @@ button {
   margin-bottom: 0.2rem;
 }
 
-.cell-day {
-  font-size: 0.95rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
 
 .cell.is-red .cell-day {
   color: var(--red);
@@ -266,7 +291,7 @@ button {
 
 .chip {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.15rem;
   font-size: 0.75rem;
   line-height: 1.35;
@@ -284,15 +309,15 @@ button {
   color: var(--fg-muted);
 }
 
-.chip-mark {
-  flex: none;
-  font-size: 0.7rem;
-}
 
+/* 1行で切ると「源泉所得…」のように意味が落ちるため、2行まで折り返す。 */
 .chip-label {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .color-blue { --chip: var(--color-blue); }
@@ -830,6 +855,198 @@ button {
   overflow-wrap: anywhere;
 }
 
+
+/* --- ヘッダーの操作 ---------------------------------------------------- */
+
+.header-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.nav[aria-pressed='true'] {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--bg);
+}
+
+/* --- 予定チップの補正マーク -------------------------------------------- */
+
+.chip-mark {
+  flex: none;
+  margin-top: 1px;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  padding: 0 2px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--chip) 30%, transparent);
+}
+
+.chip-more-item {
+  list-style: none;
+}
+
+.chip-more {
+  width: 100%;
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 0.72rem;
+  padding: 1px 4px;
+  border-radius: 4px;
+  text-align: left;
+}
+
+.chip-more:hover {
+  background: var(--bg-sunken);
+  color: var(--fg);
+}
+
+/* --- 日付ボタン -------------------------------------------------------- */
+
+.cell-day {
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  border: none;
+  background: transparent;
+  color: inherit;
+  padding: 0 0.15rem;
+  border-radius: 4px;
+  line-height: 1.3;
+}
+
+.cell-day:hover {
+  background: var(--bg-sunken);
+  outline: 1px solid var(--border-strong);
+}
+
+.cell-day:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
+.cell.is-selected {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+}
+
+.cell.is-selected.is-closed {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-closed));
+}
+
+/* --- 日付の詳細 -------------------------------------------------------- */
+
+.day-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.day-status {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+  display: flex;
+  gap: 0.5rem;
+}
+
+.day-holiday {
+  color: var(--red);
+}
+
+.day-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.day-item {
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-start;
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.day-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.day-item.is-notice .day-item-title {
+  font-weight: 400;
+  color: var(--fg-muted);
+}
+
+.day-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.day-item-body p {
+  margin: 0;
+}
+
+.day-item-title {
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.day-item-origin {
+  font-size: 0.78rem;
+  color: var(--accent);
+}
+
+.day-item-desc,
+.day-item-note {
+  font-size: 0.78rem;
+  color: var(--fg-faint);
+}
+
+/* --- ヘルプ ------------------------------------------------------------ */
+
+.help {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+.help-list {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.4rem 0.8rem;
+  font-size: 0.82rem;
+}
+
+.help-list dt {
+  font-weight: 600;
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+.help-list dd {
+  margin: 0;
+  color: var(--fg-muted);
+  line-height: 1.55;
+}
+
+@media (max-width: 30rem) {
+  .help-list {
+    grid-template-columns: 1fr;
+    gap: 0.1rem;
+  }
+
+  .help-list dd {
+    margin-bottom: 0.5rem;
+  }
+}
+
 /* --- レスポンシブ ------------------------------------------------------ */
 
 @media (max-width: 60rem) {
@@ -839,7 +1056,7 @@ button {
   }
 
   .cell {
-    height: 5.5rem;
+    min-height: 6.5rem;
   }
 }
 

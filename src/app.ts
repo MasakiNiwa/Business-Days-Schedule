@@ -7,7 +7,7 @@
 
 import { createBusinessDayCalendar, COMPANY_CALENDAR_ID } from './core/businessDay';
 import type { BusinessDayCalendar } from './core/businessDay';
-import { monthOf, todayInTokyo, yearOf } from './core/dateUtil';
+import { addDays, monthOf, todayInTokyo, yearOf } from './core/dateUtil';
 import { createHolidayLookup, fetchHolidayData } from './core/holidays';
 import type { HolidayLookup } from './core/holidays';
 import { buildMonthGrid, gridRangeOf, shiftMonth } from './core/monthGrid';
@@ -27,6 +27,9 @@ import {
 import type { AppState, KeyValueStore } from './core/storage';
 import type { BusinessCalendar, DateStr, Month, Rule } from './types';
 import { renderCalendar, renderLegend } from './ui/CalendarView';
+import { renderDayDetail } from './ui/DayDetail';
+import { renderHelp } from './ui/HelpView';
+import { applyTheme, nextTheme, themeIcon, themeLabel } from './ui/theme';
 import { button } from './ui/controls';
 import { clear, h } from './ui/dom';
 import { RuleEditor } from './ui/RuleEditor';
@@ -39,7 +42,9 @@ const SAMPLES_URL = `${import.meta.env.BASE_URL}data/samples/business-basics.jso
 type Mode =
   | { kind: 'calendar' }
   | { kind: 'edit'; rule: Rule; isNew: boolean }
-  | { kind: 'settings' };
+  | { kind: 'settings' }
+  | { kind: 'help' }
+  | { kind: 'day'; date: DateStr };
 
 export class App {
   private state: AppState;
@@ -61,6 +66,7 @@ export class App {
     this.state = loadState(this.store);
     this.today = todayInTokyo();
     this.view = { year: yearOf(this.today), month: monthOf(this.today) };
+    applyTheme(this.state.prefs.theme);
   }
 
   // -------------------------------------------------------------------------
@@ -102,6 +108,31 @@ export class App {
 
   private goToToday(): void {
     this.view = { year: yearOf(this.today), month: monthOf(this.today) };
+    this.render();
+  }
+
+  private cycleTheme(): void {
+    this.state.prefs = { ...this.state.prefs, theme: nextTheme(this.state.prefs.theme) };
+    applyTheme(this.state.prefs.theme);
+    this.persist();
+    this.render();
+  }
+
+  private selectDay(date: DateStr): void {
+    // 同じ日をもう一度押したら閉じる。
+    this.mode =
+      this.mode.kind === 'day' && this.mode.date === date
+        ? { kind: 'calendar' }
+        : { kind: 'day', date };
+    this.render();
+  }
+
+  private moveSelectedDay(days: number): void {
+    if (this.mode.kind !== 'day') return;
+    const date = addDays(this.mode.date, days);
+    this.mode = { kind: 'day', date };
+    // 月をまたいだら表示月も合わせる。
+    this.view = { year: yearOf(date), month: monthOf(date) };
     this.render();
   }
 
@@ -215,6 +246,21 @@ export class App {
     const next = button('›', () => this.goToMonth(1), 'nav');
     next.setAttribute('aria-label', '次の月');
 
+    const theme = this.state.prefs.theme;
+    const themeButton = button(themeIcon(theme), () => this.cycleTheme(), 'nav');
+    themeButton.setAttribute('aria-label', `配色: ${themeLabel(theme)}（クリックで切り替え）`);
+    themeButton.setAttribute('title', `配色: ${themeLabel(theme)}`);
+
+    const settingsButton = button('⚙', () => this.openMode('settings'), 'nav');
+    settingsButton.setAttribute('aria-label', '設定');
+    settingsButton.setAttribute('title', '設定');
+    if (this.mode.kind === 'settings') settingsButton.setAttribute('aria-pressed', 'true');
+
+    const helpButton = button('?', () => this.openMode('help'), 'nav');
+    helpButton.setAttribute('aria-label', 'ヘルプ');
+    helpButton.setAttribute('title', 'ヘルプ');
+    if (this.mode.kind === 'help') helpButton.setAttribute('aria-pressed', 'true');
+
     return h(
       'header',
       { class: 'app-header' },
@@ -226,7 +272,14 @@ export class App {
         next,
         button('今日', () => this.goToToday(), 'button button-sm'),
       ),
+      h('div', { class: 'header-actions' }, themeButton, settingsButton, helpButton),
     );
+  }
+
+  /** 設定・ヘルプはトグル動作にする。同じボタンをもう一度押せば閉じる。 */
+  private openMode(kind: 'settings' | 'help'): void {
+    this.mode = this.mode.kind === kind ? { kind: 'calendar' } : { kind };
+    this.render();
   }
 
   private renderFooter(): HTMLElement {
@@ -295,6 +348,41 @@ export class App {
       return h('div', { class: 'panel' }, settings.element);
     }
 
+    if (this.mode.kind === 'help') {
+      return h('div', { class: 'panel' }, renderHelp(() => {
+        this.mode = { kind: 'calendar' };
+        this.render();
+      }));
+    }
+
+    if (this.mode.kind === 'day') {
+      const date = this.mode.date;
+      const calendars = this.businessCalendars();
+      const businessCalendar = calendars.get(ctx.fallbackCalendarId);
+      if (businessCalendar === undefined) throw new Error('営業日カレンダーが1件もありません');
+      const occurrences = this.buildOccurrences().occurrencesByDate.get(date) ?? [];
+      return h(
+        'div',
+        { class: 'panel' },
+        renderDayDetail(
+          date,
+          occurrences,
+          new Map(this.state.rules.map((rule) => [rule.id, rule])),
+          calendarDefs,
+          businessCalendar,
+          this.holidays,
+          {
+            onClose: () => {
+              this.mode = { kind: 'calendar' };
+              this.render();
+            },
+            onEditRule: (ruleId) => this.startEdit(ruleId),
+            onMove: (days) => this.moveSelectedDay(days),
+          },
+        ),
+      );
+    }
+
     return renderRuleList(this.state.rules, calendarDefs, {
       onLoadSamples: () => void this.loadSamples(),
       onAdd: () => this.startAdd(),
@@ -349,15 +437,16 @@ export class App {
     });
 
     const rulesById = new Map<string, Rule>(this.state.rules.map((rule) => [rule.id, rule]));
-    const hasNotice = [...occurrencesByDate.values()]
-      .flat()
-      .some((occurrence) => occurrence.kind === 'notice');
+    const all = [...occurrencesByDate.values()].flat();
+    const hasNotice = all.some((occurrence) => occurrence.kind === 'notice');
+    const hasShift = all.some((occurrence) => occurrence.shifted);
+    const selectedDate = this.mode.kind === 'day' ? this.mode.date : null;
 
     return h(
       'section',
       { class: 'calendar-pane', 'aria-label': '月カレンダー' },
-      renderCalendar(grid, rulesById),
-      renderLegend(hasNotice),
+      renderCalendar(grid, rulesById, { onSelectDay: (date) => this.selectDay(date) }, selectedDate),
+      renderLegend(hasNotice, hasShift),
     );
   }
 
@@ -392,7 +481,11 @@ export class App {
       ...[...new Set(notices)].map((message) => h('p', { class: 'banner' }, message)),
       h(
         'div',
-        { class: `layout${this.mode.kind === 'calendar' ? '' : ' layout-wide-panel'}` },
+        {
+          class: `layout${
+            this.mode.kind === 'calendar' || this.mode.kind === 'day' ? '' : ' layout-wide-panel'
+          }`,
+        },
         this.buildCalendarPane(occurrencesByDate),
         this.renderSidePanel(ctx, calendarDefs),
       ),

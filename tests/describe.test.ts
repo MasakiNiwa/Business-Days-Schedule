@@ -54,6 +54,9 @@ describe('describeAdjustment', () => {
     expect(describeAdjustment({ mode: 'prev', keepInMonth: false })).toBe('休業日なら前営業日');
     expect(describeAdjustment({ mode: 'next', keepInMonth: false })).toBe('休業日なら翌営業日');
     expect(describeAdjustment({ mode: 'nearest', keepInMonth: false })).toBe('休業日なら近い営業日');
+    expect(describeAdjustment({ mode: 'both', keepInMonth: false })).toBe(
+      '休業日なら前後の営業日の両方',
+    );
     expect(describeAdjustment({ mode: 'none', keepInMonth: false })).toBe('補正なし');
     expect(describeAdjustment({ mode: 'prev', keepInMonth: true })).toBe('休業日なら前営業日（当月内）');
   });

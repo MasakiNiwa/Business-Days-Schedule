@@ -11,7 +11,7 @@ import { buildMonthGrid } from '../src/core/monthGrid';
 import type { MonthGridContext } from '../src/core/monthGrid';
 import { expandRules, groupByDate } from '../src/core/schedule';
 import type { BusinessCalendar, Rule } from '../src/types';
-import { renderCalendar, renderLegend } from '../src/ui/CalendarView';
+import { MAX_CHIPS_PER_CELL, renderCalendar, renderLegend } from '../src/ui/CalendarView';
 import { renderRuleList } from '../src/ui/RuleList';
 import type { RuleListHandlers } from '../src/ui/RuleList';
 import { companyCalendar, companyCalendarDef, holidays, makeRule, scheduleContext } from './helpers';
@@ -24,7 +24,13 @@ const salaryRule = makeRule({
   adjust: { mode: 'prev', keepInMonth: false },
 });
 
-function gridFor(year: number, month: 1 | 4 | 9 | 12, rules: Rule[] = []): HTMLElement {
+function gridFor(
+  year: number,
+  month: 1 | 4 | 9 | 10 | 12,
+  rules: Rule[] = [],
+  onSelectDay?: (date: string) => void,
+  selectedDate: string | null = null,
+): HTMLElement {
   const { occurrences } = expandRules(
     rules,
     { start: `${year}-${String(month).padStart(2, '0')}-01`, end: `${year}-${String(month).padStart(2, '0')}-28` },
@@ -39,6 +45,8 @@ function gridFor(year: number, month: 1 | 4 | 9 | 12, rules: Rule[] = []): HTMLE
   return renderCalendar(
     buildMonthGrid(year, month, ctx),
     new Map(rules.map((rule) => [rule.id, rule])),
+    { onSelectDay: onSelectDay ?? (() => undefined) },
+    selectedDate,
   );
 }
 
@@ -96,16 +104,17 @@ describe('renderCalendar', () => {
     expect(labelOf('12')).toBe('成人の日');
   });
 
-  it('補正された予定に ⟳ と元の日付を出す', () => {
+  it('補正された予定に向きと元の日を出す', () => {
     // 2026-04-25(土) → 04-24(金)
     const table = gridFor(2026, 4, [salaryRule]);
     const chips = [...table.querySelectorAll('.chip')];
     expect(chips).toHaveLength(1);
     const chip = chips[0];
-    expect(chip?.querySelector('.chip-mark')?.textContent).toBe('⟳');
+    expect(chip?.querySelector('.chip-mark')?.textContent).toBe('←25');
+    expect(chip?.querySelector('.chip-mark')?.getAttribute('aria-label')).toBe('25日から前倒し');
     expect(chip?.querySelector('.chip-label')?.textContent).toBe('給与振込');
     expect(chip?.getAttribute('title')).toContain('本来は 2026-04-25');
-    expect(chip?.getAttribute('title')).toContain('前倒し');
+    expect(chip?.getAttribute('title')).toContain('前営業日へ');
     expect(chip?.className).toContain('color-blue');
   });
 
@@ -127,6 +136,53 @@ describe('renderCalendar', () => {
     expect(notice?.getAttribute('title')).toContain('振込データ作成');
   });
 
+  it('上限を超えたチップは「＋N件」にまとめる', () => {
+    const rules = ['a', 'b', 'c', 'd', 'e'].map((id) =>
+      makeRule({
+        id,
+        title: `予定${id}`,
+        recurrence: { type: 'monthlyByDay', interval: 1, days: [15], overflow: 'clamp' },
+        adjust: { mode: 'none', keepInMonth: false },
+      }),
+    );
+    const table = gridFor(2026, 9, rules);
+    const cell = [...table.querySelectorAll('tbody td')].find(
+      (node) => node.querySelector('.cell-day')?.textContent === '15',
+    );
+    expect(cell?.querySelectorAll('.chip:not(.chip-more)')).toHaveLength(MAX_CHIPS_PER_CELL);
+    expect(cell?.querySelector('.chip-more')?.textContent).toBe('＋2件');
+  });
+
+  it('日付と「＋N件」から当日の詳細を開ける', () => {
+    const onSelectDay = vi.fn();
+    const table = gridFor(2026, 9, [], onSelectDay);
+    const dayButton = [...table.querySelectorAll<HTMLButtonElement>('.cell-day')].find(
+      (node) => node.textContent === '4',
+    );
+    dayButton?.dispatchEvent(new MouseEvent('click'));
+    expect(onSelectDay).toHaveBeenCalledWith('2026-09-04');
+  });
+
+  it('選択中の日にしるしを付ける', () => {
+    const table = gridFor(2026, 9, [], undefined, '2026-09-10');
+    const selected = table.querySelectorAll('.is-selected');
+    expect(selected).toHaveLength(1);
+    expect(selected[0]?.querySelector('.cell-day')?.textContent).toBe('10');
+  });
+
+  it('both のルールは同じ日から前後2件に分かれる', () => {
+    const rule = makeRule({
+      id: 'incoming',
+      title: '入金予定',
+      recurrence: { type: 'monthlyByDay', interval: 1, days: [10], overflow: 'clamp' },
+      adjust: { mode: 'both', keepInMonth: false },
+    });
+    // 2026-10-10(土) → 10-09 と 10-13
+    const table = gridFor(2026, 10, [rule]);
+    const marks = [...table.querySelectorAll('.chip-mark')].map((node) => node.textContent);
+    expect(marks).toEqual(['←10', '→10']);
+  });
+
   it('ルール名の HTML はエスケープされる', () => {
     const evil = makeRule({
       ...salaryRule,
@@ -142,8 +198,11 @@ describe('renderCalendar', () => {
 
 describe('renderLegend', () => {
   it('事前通知があるときだけ破線の説明を出す', () => {
-    expect(renderLegend(false).textContent).not.toContain('破線');
-    expect(renderLegend(true).textContent).toContain('破線');
+    expect(renderLegend(false, false).textContent).not.toContain('破線');
+    expect(renderLegend(true, false).textContent).toContain('破線');
+    expect(renderLegend(false, true).textContent).toContain('数字は元の日');
+    expect(renderLegend(false, false).textContent).toContain('前後の営業日へ移動');
+    expect(renderLegend(false, false).textContent).toContain('日付をクリック');
   });
 });
 

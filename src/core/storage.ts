@@ -21,11 +21,14 @@ export type Preferences = {
   defaultView: 'calendar' | 'list';
   /** 一覧表示で先読みする日数。 */
   listDays: number;
+  /** 配色モード。'auto' は OS の設定に従う。 */
+  theme: 'auto' | 'light' | 'dark';
 };
 
 export const DEFAULT_PREFERENCES: Preferences = {
   defaultView: 'calendar',
   listDays: 90,
+  theme: 'auto',
 };
 
 export type AppState = {

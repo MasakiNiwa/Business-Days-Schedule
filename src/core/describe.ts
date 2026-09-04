@@ -102,6 +102,8 @@ export function describeAdjustment(adjust: Adjustment, recurrence?: Recurrence):
       return `休業日なら翌営業日${scope}`;
     case 'nearest':
       return `休業日なら近い営業日${scope}`;
+    case 'both':
+      return `休業日なら前後の営業日の両方${scope}`;
   }
 }
 

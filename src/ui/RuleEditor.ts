@@ -471,6 +471,7 @@ export class RuleEditor {
       [
         { value: 'prev', label: '前営業日へ（前倒し）' },
         { value: 'next', label: '翌営業日へ（後ろ倒し）' },
+        { value: 'both', label: '前後の営業日の両方へ' },
         { value: 'nearest', label: '近い方の営業日へ' },
         { value: 'none', label: '補正しない' },
       ],
@@ -487,7 +488,11 @@ export class RuleEditor {
       'section',
       { class: 'editor-section' },
       h('h3', { class: 'editor-heading' }, '休業日にあたったとき'),
-      field('補正', modeSelect),
+      field(
+        '補正',
+        modeSelect,
+        '「前後の営業日の両方へ」は、取引先ごとに前倒し・後ろ倒しが分かれるときに使います。1つの基準日から前後2件が表示されます。',
+      ),
       keepInMonth,
     );
 
@@ -693,11 +698,14 @@ export class RuleEditor {
           { class: occurrence.shifted ? 'is-shifted' : '' },
           h('span', { class: 'preview-date' }, occurrence.date),
           h('span', { class: 'preview-weekday' }, `(${WEEKDAY_NAMES[weekdayOf(occurrence.date)]})`),
+          // カレンダー上の ← → と同じ向き記号を使い、読み替えの手間をなくす。
           occurrence.shifted
             ? h(
                 'span',
-                { class: 'preview-note' },
-                `⟳ ${occurrence.rawDate} から${occurrence.shiftDirection === 'prev' ? '前倒し' : '後ろ倒し'}`,
+                { class: `preview-note is-${occurrence.shiftDirection ?? 'prev'}` },
+                `${occurrence.shiftDirection === 'prev' ? '←' : '→'} ${occurrence.rawDate} から${
+                  occurrence.shiftDirection === 'prev' ? '前倒し' : '後ろ倒し'
+                }`,
               )
             : null,
         ),

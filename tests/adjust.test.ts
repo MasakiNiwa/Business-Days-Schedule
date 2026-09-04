@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { adjustToBusinessDay } from '../src/core/adjust';
+import { adjustToBusinessDay, adjustToBusinessDays } from '../src/core/adjust';
 import type { Adjustment } from '../src/types';
 import { companyCalendar, makeCalendar } from './helpers';
 
@@ -102,6 +102,49 @@ describe('keepInMonth', () => {
       closedRanges: [{ from: '08-01', to: '08-31', label: '長期休業' }],
     });
     expect(adjustToBusinessDay('2026-08-15', adj('prev', true), calendar)).toBeNull();
+  });
+});
+
+describe('both（前後の両方）', () => {
+  it('休業日なら前後2件を日付昇順で返す', () => {
+    // 2026-10-10(土)。10-12 はスポーツの日なので翌営業日は 10-13。
+    expect(adjustToBusinessDays('2026-10-10', adj('both'), companyCalendar)).toEqual([
+      { date: '2026-10-09', shifted: true, direction: 'prev' },
+      { date: '2026-10-13', shifted: true, direction: 'next' },
+    ]);
+  });
+
+  it('営業日ならそのまま1件', () => {
+    expect(adjustToBusinessDays('2026-10-15', adj('both'), companyCalendar)).toEqual([
+      { date: '2026-10-15', shifted: false, direction: null },
+    ]);
+  });
+
+  it('keepInMonth なら当月内に収まる側だけ残す', () => {
+    // 2026-10-31(土)。prev は 10-30、next は 11-02（翌月）。
+    expect(adjustToBusinessDays('2026-10-31', adj('both'), companyCalendar)).toEqual([
+      { date: '2026-10-30', shifted: true, direction: 'prev' },
+      { date: '2026-11-02', shifted: true, direction: 'next' },
+    ]);
+    expect(adjustToBusinessDays('2026-10-31', adj('both', true), companyCalendar)).toEqual([
+      { date: '2026-10-30', shifted: true, direction: 'prev' },
+    ]);
+  });
+
+  it('営業日が見つからなければ空', () => {
+    const alwaysClosed = makeCalendar({ weekendDays: [0, 1, 2, 3, 4, 5, 6] });
+    expect(adjustToBusinessDays('2026-10-10', adj('both'), alwaysClosed)).toEqual([]);
+  });
+});
+
+describe('adjustToBusinessDay（単一結果のラッパ）', () => {
+  it('both では最初の1件を返す', () => {
+    expect(adjustToBusinessDay('2026-10-10', adj('both'), companyCalendar)?.date).toBe('2026-10-09');
+  });
+
+  it('見つからなければ null', () => {
+    const alwaysClosed = makeCalendar({ weekendDays: [0, 1, 2, 3, 4, 5, 6] });
+    expect(adjustToBusinessDay('2026-10-10', adj('both'), alwaysClosed)).toBeNull();
   });
 });
 

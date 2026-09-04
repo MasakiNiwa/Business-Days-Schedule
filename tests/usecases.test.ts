@@ -203,6 +203,36 @@ describe('§6 実務ユースケース対応表', () => {
     ]);
   });
 
+  it('17. 他社入金: 5の倍数と月末、取引先ごとに前倒し・後ろ倒しが分かれる', () => {
+    const rule = makeRule({
+      title: '入金予定',
+      recurrence: {
+        type: 'monthlyByDay',
+        interval: 1,
+        days: [5, 10, 15, 20, 25, 'last'],
+        overflow: 'clamp',
+      },
+      adjust: { mode: 'both', keepInMonth: false },
+    });
+    const occurrences = run(rule, { start: '2026-10-01', end: '2026-10-31' }).filter(
+      (o) => o.kind === 'main',
+    );
+
+    // 10-10(土) と 10-25(日) と 10-31(土) がそれぞれ前後へ分かれる。
+    // 10-12 はスポーツの日なので 10-10 の翌営業日は 10-13。
+    expect(occurrences.map((o) => [o.date, o.rawDate, o.shiftDirection])).toEqual([
+      ['2026-10-05', '2026-10-05', null],
+      ['2026-10-09', '2026-10-10', 'prev'],
+      ['2026-10-13', '2026-10-10', 'next'],
+      ['2026-10-15', '2026-10-15', null],
+      ['2026-10-20', '2026-10-20', null],
+      ['2026-10-23', '2026-10-25', 'prev'],
+      ['2026-10-26', '2026-10-25', 'next'],
+      ['2026-10-30', '2026-10-31', 'prev'],
+    ]);
+    // 10-31 の後ろ倒し分は 11-02 なので、10月の表示範囲には現れない。
+  });
+
   it('15. 年末年始休業は営業日カレンダーで表現する', () => {
     const calendar = scheduleContext.calendars.get('company');
     expect(calendar?.closedReason('2026-12-30')).toEqual({

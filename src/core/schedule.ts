@@ -12,7 +12,7 @@
 
 import type { BusinessDayCalendar } from './businessDay';
 import type { DateRange, DateStr, Notice, Occurrence, Rule } from '../types';
-import { adjustToBusinessDay } from './adjust';
+import { adjustToBusinessDays } from './adjust';
 import {
   addDays,
   addMonths,
@@ -125,11 +125,12 @@ function expandRule(
     if (!isWithin(rawDate, rule.period.start, rule.period.end)) continue;
     if (skip.has(rawDate)) continue;
 
+    // adjust.mode: 'both' は1つの基準日から前後2件を返す。
     const adjusted = noAdjust
-      ? { date: rawDate, shifted: false, direction: null as 'prev' | 'next' | null }
-      : adjustToBusinessDay(rawDate, rule.adjust, calendar);
+      ? [{ date: rawDate, shifted: false, direction: null as 'prev' | 'next' | null }]
+      : adjustToBusinessDays(rawDate, rule.adjust, calendar);
 
-    if (adjusted === null) {
+    if (adjusted.length === 0) {
       warnings.push({
         ruleId: rule.id,
         rawDate,
@@ -139,15 +140,17 @@ function expandRule(
       continue;
     }
 
-    if (byEffectiveDate.has(adjusted.date)) continue;
-    byEffectiveDate.set(adjusted.date, {
-      ruleId: rule.id,
-      kind: 'main',
-      rawDate,
-      date: adjusted.date,
-      shifted: adjusted.shifted,
-      shiftDirection: adjusted.direction,
-    });
+    for (const result of adjusted) {
+      if (byEffectiveDate.has(result.date)) continue;
+      byEffectiveDate.set(result.date, {
+        ruleId: rule.id,
+        kind: 'main',
+        rawDate,
+        date: result.date,
+        shifted: result.shifted,
+        shiftDirection: result.direction,
+      });
+    }
   }
 
   for (const occurrence of byEffectiveDate.values()) {
