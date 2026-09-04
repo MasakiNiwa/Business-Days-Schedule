@@ -1,0 +1,620 @@
+# Business Days Schedule — 仕様書 v1.0 (draft)
+
+営業日の概念を持ち、休祝日にかかった予定を自動で前営業日／翌営業日にずらして表示する、
+**反復ルール駆動**のカレンダー。GitHub Pages で静的公開する。
+
+---
+
+## 1. 目的とスコープ
+
+### 1.1 解きたい課題
+
+実務のスケジュールは「日付」ではなく「**ルール**」で決まっている。
+
+- 給与振込は「毎月25日。ただし土日祝なら**前**営業日」
+- 社会保険料の納付は「毎月末日。ただし土日祝なら**翌**営業日」
+- 請求書発行は「毎月**第5営業日**」
+- 支払処理は「**月末2営業日前**」
+
+一般的なカレンダーアプリはこの「営業日補正」を持たないため、毎月人間が手で日付をずらしている。
+本アプリはその補正を自動化することだけに集中する。
+
+### 1.2 スコープ内 (In Scope)
+
+| # | 機能 |
+|---|---|
+| F-1 | 日本の祝日データを自動更新して取り込む |
+| F-2 | 営業日カレンダー（土日・祝日・自社休業日・臨時営業日）の定義 |
+| F-3 | 反復ルールの追加・編集・削除・有効／無効切替 |
+| F-4 | 反復ルールの営業日補正（前倒し／後ろ倒し／補正なし／最近接） |
+| F-5 | 月カレンダー表示・一覧表示 |
+| F-6 | N営業日前の事前通知（準備日）表示 |
+| F-7 | ルール定義の JSON エクスポート／インポート |
+
+### 1.3 スコープ外 (Out of Scope) — 意図的に作らない
+
+| # | 非目標 | 理由 |
+|---|---|---|
+| N-1 | **ルールを持たない単発予定の登録** | 汎用カレンダーの領域。既存アプリに任せる。本アプリの一貫性（＝すべての表示はルールから導出される）を守る |
+| N-2 | サーバー・ログイン・複数ユーザー同期 | 静的ホスティングの範囲を出ない |
+| N-3 | 通知メール・プッシュ通知 | 画面表示のみ |
+| N-4 | 日本以外の祝日 | v1 では対象外（データ層は差し替え可能に設計する） |
+
+> N-1 の例外として **「ルールの除外日」** は許可する（例: 毎月10日のルールだが 2026-08-10 だけ無し）。
+> これは新しい単発予定の追加ではなく、既存ルールの例外指定であるため方針と矛盾しない。
+
+### 1.4 想定利用者
+
+個人（バックオフィス／経理／総務／個人事業主）。ブラウザ1台で完結する。
+
+---
+
+## 2. 用語定義
+
+| 用語 | 定義 |
+|---|---|
+| **休業日** | 営業日カレンダー上、業務を行わない日。週末＋祝日＋自社休業日から臨時営業日を除いたもの |
+| **営業日** | 休業日でない日 |
+| **祝日** | 「国民の祝日に関する法律」に基づく祝日・振替休日・国民の休日 |
+| **ルール (Rule)** | 反復条件・営業日補正・期間などをまとめた1件の定義 |
+| **発生日 (Occurrence)** | ルールを展開して得られる1つの日付 |
+| **基準日 (Raw Date)** | 営業日補正を適用する前の日付 |
+| **確定日 (Effective Date)** | 営業日補正を適用した後の、実際に表示される日付 |
+
+---
+
+## 3. 祝日データ
+
+### 3.1 データソースの決定
+
+内閣府 CSV (`https://www8.cao.go.jp/chosei/shukujitsu/syukujitsu.csv`) は
+Shift_JIS・行末 CRLF・掲載範囲が「1955年〜翌年」に限られるなど扱いが難しい。
+
+**一次ソースとして [`holiday-jp/holiday_jp`](https://github.com/holiday-jp/holiday_jp) の `holidays.yml` を採用する。**
+
+| 項目 | 内容 |
+|---|---|
+| 取得 URL | `https://raw.githubusercontent.com/holiday-jp/holiday_jp/master/holidays.yml` |
+| 収録範囲 | 1970-01-01 〜 2050-12-31（約1,330件） |
+| 文字コード | UTF-8 |
+| 形式 | `2026-01-01: 元日` の1行1レコード（YAMLマップ） |
+| 振替休日 | 収録済み（例: `2026-05-06: こどもの日 振替休日`） |
+| 国民の休日 | 収録済み（例: `2026-09-22: 休日`） |
+| 更新 | 内閣府の発表に追随してメンテナンスされている |
+
+採用理由:
+- UTF-8 の素直なテキストで、パースに外部ライブラリ・文字コード変換が不要
+- 将来分（春分・秋分の計算値を含む）まで収録されており、来年以降のカレンダーが空にならない
+- GitHub 上のファイルなので取得が安定し、コミット SHA で版を固定・追跡できる
+
+> **注意（正確性の限界）**: 春分の日・秋分の日は前年2月の官報公示で正式確定する。
+> それ以前の年の値、および将来の祝日法改正・臨時の祝日（改元・オリンピック等）は反映されていない可能性がある。
+> UI 上に「◯年◯月◯日時点のデータ」と出典を明示する（§8.5）。
+
+### 3.2 二次ソースによる検証
+
+一次ソースを盲信しないため、CI 上で内閣府 CSV との突合を行う。
+
+- GitHub Actions ランナー（プロキシ制約なし）から内閣府 CSV を取得
+- Shift_JIS → UTF-8 変換後、**直近3年分**を一次ソースと比較
+- 不一致があれば **Issue を自動起票**（`holiday-data-mismatch` ラベル）
+- 内閣府 CSV の取得に失敗しても検証ステップのみ失敗扱いとし、本体の更新は継続する（`continue-on-error: true`）
+
+### 3.3 生成物: `public/data/holidays.json`
+
+```jsonc
+{
+  "meta": {
+    "source": "holiday-jp/holiday_jp",
+    "sourceUrl": "https://raw.githubusercontent.com/holiday-jp/holiday_jp/master/holidays.yml",
+    "sourceSha": "a1b2c3d...",          // 取得時のコミット SHA
+    "fetchedAt": "2026-09-04T18:00:00Z",
+    "range": { "from": "1970-01-01", "to": "2050-12-31" },
+    "count": 1329,
+    "verifiedAgainstCao": true           // 二次検証の結果
+  },
+  "holidays": {
+    "2026-01-01": "元日",
+    "2026-01-12": "成人の日",
+    "2026-05-06": "こどもの日 振替休日",
+    "2026-09-22": "休日"
+  }
+}
+```
+
+- 全期間を単一ファイルで持つ（約40KB、gzip で数KB。分割の必要なし）
+- 日付キーは `YYYY-MM-DD` 昇順で安定ソートし、差分を読みやすく保つ
+
+### 3.4 更新ワークフロー `.github/workflows/update-holidays.yml`
+
+| 項目 | 内容 |
+|---|---|
+| トリガー | `schedule`（毎週月曜 03:00 JST ＝ 日曜 18:00 UTC）＋ `workflow_dispatch` |
+| 手順 | ① 一次ソース取得 → ② `holidays.json` 生成 → ③ 二次検証 → ④ 差分があればコミット |
+| 差分なし | コミットせず正常終了（`git diff --quiet` で判定） |
+| 取得失敗 | ワークフローを **失敗** させ、既存の `holidays.json` は保持する（空ファイルで上書きしない） |
+| 権限 | `contents: write`, `issues: write` |
+
+コミット後は Pages のデプロイワークフローが走り、公開サイトに反映される。
+
+---
+
+## 4. 営業日カレンダー
+
+### 4.1 定義
+
+```ts
+type BusinessCalendar = {
+  id: string;                 // "company" | "bank" | 任意
+  name: string;               // 表示名
+  weekendDays: Weekday[];     // 既定 [0, 6]（日・土）。土曜出勤なら [0]
+  useNationalHolidays: boolean; // 既定 true
+  closedRanges: AnnualRange[];  // 毎年繰り返す休業期間（年末年始・夏季休業など）
+  closedDates: DateStr[];       // 臨時休業日（単発）
+  openDates: DateStr[];         // 休業日だが営業する日（祝日出勤など）
+};
+
+type AnnualRange = {
+  from: "MM-DD";   // 例 "12-29"
+  to:   "MM-DD";   // 例 "01-03"（年をまたぐ指定を許可）
+  label: string;   // "年末年始休業"
+};
+```
+
+### 4.2 判定ロジック（優先順位）
+
+```
+isBusinessDay(date):
+  1. openDates に含まれる            → 営業日   (最優先)
+  2. closedDates に含まれる          → 休業日
+  3. closedRanges のいずれかに該当   → 休業日
+  4. useNationalHolidays かつ祝日     → 休業日
+  5. weekendDays に曜日が含まれる     → 休業日
+  6. それ以外                        → 営業日
+```
+
+`openDates` を最優先にすることで「祝日だが出社」を無条件に表現できる。
+
+### 4.3 プリセット
+
+| ID | 名称 | 定義 |
+|---|---|---|
+| `company` | 自社カレンダー（既定） | 土日＋祝日。年末年始 12/29〜1/3 を既定で休業に設定 |
+| `bank` | 銀行休業日 | 土日＋祝日＋12/31〜1/3 |
+
+ルールごとに `calendarId` を指定できる。
+「社内締めは自社カレンダー、振込は銀行カレンダー」といった使い分けが1画面で成立する。
+
+---
+
+## 5. スケジュールルールのデータモデル
+
+### 5.1 Rule
+
+```ts
+type Rule = {
+  id: string;                 // UUID v4
+  title: string;              // 例 "給与振込"
+  color: ColorToken;          // プリセット8色から選択
+  note?: string;              // 備考（ツールチップに表示）
+  enabled: boolean;           // 一時的に無効化できる
+  calendarId: string;         // 参照する営業日カレンダー（既定 "company"）
+
+  recurrence: Recurrence;     // §5.2
+  adjust: Adjustment;         // §5.3
+  notices: Notice[];          // §5.4（事前通知）
+
+  period: { start: DateStr | null; end: DateStr | null };  // 有効期間（null は無期限）
+  skipDates: DateStr[];       // 除外する【基準日】のリスト
+
+  createdAt: string;
+  updatedAt: string;
+};
+
+type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;   // 0=日曜
+type Month   = 1 | 2 | ... | 12;
+type DateStr = `${number}-${number}-${number}`;  // "YYYY-MM-DD"
+```
+
+### 5.2 Recurrence（反復条件）— 4種類
+
+種類を絞りつつ、`months` フィルタと配列指定の組み合わせで実務パターンを網羅する。
+
+#### (a) `weekly` — 毎週 / 隔週
+
+```ts
+{
+  type: "weekly",
+  interval: number,      // 1=毎週, 2=隔週, 4=4週ごと
+  weekdays: Weekday[],   // 例 [1, 5] = 月曜と金曜
+  anchor?: DateStr       // interval >= 2 のときの位相基準（省略時は period.start、それも無ければ 1970-01-05(月)）
+}
+```
+
+#### (b) `monthlyByDay` — 毎月N日 / 月末
+
+```ts
+{
+  type: "monthlyByDay",
+  interval: number,              // 1=毎月, 3=3か月ごと
+  months?: Month[],              // 対象月フィルタ。省略＝全月。例 [3,6,9,12] で四半期
+  days: (number | "last")[],     // 例 [25] / [10, 25] / ["last"]
+  overflow: "clamp" | "skip"     // 31日指定で2月など、存在しない日の扱い。既定 "clamp"
+}
+```
+
+- `"last"` は月の暦上の末日（2月なら28/29日）
+- `overflow: "clamp"` … 31日指定 → 2月は28/29日に丸める
+- `overflow: "skip"` … その月は発生させない
+- `months` を1つだけ指定すれば年次ルールになる（例: `months:[4], days:[1]` = 毎年4月1日）
+
+#### (c) `monthlyByWeekday` — 毎月第N曜日
+
+```ts
+{
+  type: "monthlyByWeekday",
+  interval: number,
+  months?: Month[],
+  nth: (1 | 2 | 3 | 4 | 5 | -1)[],   // -1 = 最終。例 [2, 4] = 第2・第4
+  weekday: Weekday
+}
+```
+
+- 第5週が存在しない月は `nth: 5` を発生させない（`-1` を使えば最終週を確実に取れる）
+
+#### (d) `monthlyByBusinessDay` — 毎月第N営業日 / 月末からN営業日前
+
+```ts
+{
+  type: "monthlyByBusinessDay",
+  interval: number,
+  months?: Month[],
+  nth: number[]      // 正 = 月初から数えてN営業日目（1 = 第1営業日）
+                     // 負 = 月末から数えてN営業日目（-1 = 最終営業日, -3 = 月末3営業日前）
+}
+```
+
+- 該当月の営業日数が `|nth|` 未満なら発生させない
+- **このタイプは §5.3 の営業日補正を適用しない**（定義上すでに営業日であるため）
+
+> **設計メモ**: 「毎年」「四半期」「毎営業日」を独立した型にしない。
+> 年次は `monthlyByDay` + `months:[m]`、四半期は `months:[3,6,9,12]` で表現できる。
+> UI 側では「年次」「四半期」というプリセットボタンを用意し、内部的には上記へ変換する（糖衣構文）。
+
+### 5.3 Adjustment（営業日補正）
+
+```ts
+type Adjustment = {
+  mode: "none" | "prev" | "next" | "nearest";
+  keepInMonth: boolean;   // true のとき、補正が月をまたぐ場合は逆方向へ補正する。既定 false
+};
+```
+
+| mode | 挙動 |
+|---|---|
+| `none` | 補正しない（休業日でもその日に表示） |
+| `prev` | 休業日なら**遡って**最初の営業日へ（給与振込・締め処理） |
+| `next` | 休業日なら**進んで**最初の営業日へ（納付期限） |
+| `nearest` | 前後で近い方の営業日へ。**距離が同じなら `prev` を優先**（前倒しの方が実務上安全） |
+
+`keepInMonth: true` の例:
+- 2026年8月1日は土曜。`mode: "prev"` なら通常は7月31日（金）だが、月をまたぐため8月3日（月）へ補正
+- 月次処理を当月内に収めたい場合に使う
+
+補正の探索は最大 **31日** まで。それを超えても営業日が見つからない場合（設定ミスで全日休業など）は
+その発生日を破棄し、UI に警告を表示する。
+
+### 5.4 Notice（事前通知 / 準備日）
+
+```ts
+type Notice = {
+  offset: number;                 // 負の値のみ。-3 = 3日前
+  unit: "business" | "calendar";  // 営業日換算 / 暦日換算
+  label: string;                  // 例 "振込データ作成"
+};
+```
+
+- 起点は**確定日**（補正後の日付）
+- `unit: "business"` の場合、休業日をスキップして数える
+- 表示は本体ルールと視覚的に区別する（淡色・破線枠）
+
+### 5.5 スキーマ例
+
+```jsonc
+{
+  "id": "8f1c…",
+  "title": "給与振込",
+  "color": "blue",
+  "enabled": true,
+  "calendarId": "bank",
+  "recurrence": { "type": "monthlyByDay", "interval": 1, "days": [25], "overflow": "clamp" },
+  "adjust": { "mode": "prev", "keepInMonth": false },
+  "notices": [{ "offset": -3, "unit": "business", "label": "振込データ作成" }],
+  "period": { "start": "2026-04-01", "end": null },
+  "skipDates": []
+}
+```
+
+---
+
+## 6. 実務ユースケース対応表
+
+仕様が「痒いところに手が届く」ことの検証。以下はすべて **1ルール** で表現できる。
+
+| # | 実務上の決まりごと | 表現 |
+|---|---|---|
+| 1 | 給与振込：毎月25日、休日なら**前**営業日 | `monthlyByDay days:[25]` + `adjust:prev` |
+| 2 | 月次締め：**月末営業日** | `monthlyByDay days:["last"]` + `adjust:prev` |
+| 3 | 源泉所得税納付：毎月10日、休日なら**翌**営業日 | `monthlyByDay days:[10]` + `adjust:next` |
+| 4 | 社会保険料引落：毎月末日、休日なら**翌**営業日 | `monthlyByDay days:["last"]` + `adjust:next` |
+| 5 | 請求書発行：毎月**第5営業日** | `monthlyByBusinessDay nth:[5]` |
+| 6 | 支払処理：**月末2営業日前** | `monthlyByBusinessDay nth:[-2]` |
+| 7 | 定例会議：**第2・第4火曜** | `monthlyByWeekday nth:[2,4] weekday:2` |
+| 8 | 部会：**毎月最終金曜** | `monthlyByWeekday nth:[-1] weekday:5` |
+| 9 | 週次報告：毎週金曜、休日なら前営業日 | `weekly weekdays:[5]` + `adjust:prev` |
+| 10 | 1on1：**隔週月曜** | `weekly interval:2 weekdays:[1] anchor:"2026-04-06"` |
+| 11 | 四半期報告：**3/6/9/12月の月末営業日** | `monthlyByDay months:[3,6,9,12] days:["last"]` + `adjust:prev` |
+| 12 | 期首棚卸：毎年4月1日、休日なら翌営業日 | `monthlyByDay months:[4] days:[1]` + `adjust:next` |
+| 13 | 給与＋支払を同一ルールで：毎月10日と25日 | `monthlyByDay days:[10,25]` + `adjust:prev` |
+| 14 | 決算：3月末営業日の**3営業日前から準備** | #11 に `notices:[{offset:-3, unit:"business"}]` |
+| 15 | 年末年始は全社休業 | `BusinessCalendar.closedRanges` に `12-29`〜`01-03` |
+| 16 | 8月13日の締めだけ今年は無し | 該当ルールの `skipDates` に `"2026-08-13"` |
+
+---
+
+## 7. 展開アルゴリズム
+
+### 7.1 全体フロー
+
+```
+expandRules(rules, calendars, holidays, viewRange) -> Occurrence[]
+
+for each rule where enabled:
+  1. 反復条件を viewRange（＋前後1か月のマージン）で展開 → 基準日リスト
+  2. period.start / period.end で絞り込み
+  3. skipDates に含まれる基準日を除外
+  4. 各基準日に営業日補正を適用 → 確定日
+     （monthlyByBusinessDay は補正をスキップ）
+  5. 同一ルール内で確定日が重複したものを1件に統合
+  6. notices を展開して副次的な Occurrence を生成
+  7. viewRange 外を切り落とす
+```
+
+**マージンが必要な理由**: 月末の `prev` 補正で前月へ、月初の `next` 補正で翌月へ移動しうるため、
+表示範囲の前後1か月を展開してから切り落とす。
+
+### 7.2 Occurrence
+
+```ts
+type Occurrence = {
+  ruleId: string;
+  kind: "main" | "notice";
+  rawDate: DateStr;        // 補正前の基準日
+  date: DateStr;           // 補正後の確定日
+  shifted: boolean;        // rawDate !== date
+  shiftDirection: "prev" | "next" | null;
+  noticeLabel?: string;
+};
+```
+
+`shifted === true` の場合、UI に補正マーク（⟳）と元日付を表示する。
+
+### 7.3 日付演算の実装方針（重要）
+
+**タイムゾーンによるオフバイワンを構造的に防ぐ。**
+
+- アプリの日付は常に `"YYYY-MM-DD"` 文字列で保持する
+- 内部演算は `Date.UTC(y, m-1, d)` で生成した Date（＝UTC 00:00）で行い、
+  取り出しは必ず `getUTCFullYear` / `getUTCMonth` / `getUTCDate` を使う
+- `new Date("2026-01-01")` や `getDate()`（ローカル時刻系）は **使用禁止**（ESLint ルールで機械的に禁止する）
+- 「今日」の判定のみ、`Asia/Tokyo` に固定して算出する（`Intl.DateTimeFormat` の `timeZone: "Asia/Tokyo"`）
+
+---
+
+## 8. UI 仕様
+
+### 8.1 画面構成
+
+```
+┌─────────────────────────────────────────────┐
+│ [<] 2026年9月 [>] [今日]   [月表示|一覧] [⚙設定] │
+├──────────────────────────┬──────────────────┤
+│                          │  ルール一覧        │
+│      月カレンダー          │  ┌──────────────┐│
+│                          │  │● 給与振込  ✎🗑││
+│                          │  │● 月次締め  ✎🗑││
+│                          │  └──────────────┘│
+│                          │  [＋ ルールを追加]  │
+└──────────────────────────┴──────────────────┘
+```
+
+- 768px 未満では1カラムに折り返し、ルール一覧はドロワーで開く
+
+### 8.2 月カレンダーのセル
+
+| 要素 | 内容 |
+|---|---|
+| 日付 | 平日=標準色 / 土=青 / 日・祝=赤 / 自社休業日=グレー背景 |
+| 祝日名 | 祝日の場合に小さく表示（例「敬老の日」） |
+| 休業ラベル | `closedRanges` に該当する場合その label（例「年末年始休業」） |
+| 予定チップ | ルールの色＋タイトル。補正済みなら `⟳` を付す |
+| 事前通知チップ | 淡色・破線枠でルール色を継承 |
+| 今日 | 枠を強調 |
+
+予定チップにホバー／タップすると、補正前の日付・補正方向・備考をポップオーバー表示する。
+
+### 8.3 一覧表示
+
+今日から90日分（設定で変更可）の発生日を時系列で列挙。
+`日付 / 曜日 / ルール名 / 補正前日付 / 備考` の表形式。印刷用 CSS を用意する。
+
+### 8.4 ルール編集フォーム
+
+- 反復条件は「毎週 / 毎月N日 / 毎月第N曜日 / 毎月第N営業日」のタブで切替
+- 「年次」「四半期」はプリセットボタンとして提示し、内部的に `months` へ変換
+- **フォーム下部に「次回以降の発生日 プレビュー（10件）」を常時表示**
+  → 補正の効き方をその場で確認できるようにする。誤設定を最も効果的に防ぐ
+- 保存前にバリデーション（§10.2）
+
+### 8.5 設定画面
+
+- 営業日カレンダーの編集（週末曜日、祝日を使うか、休業期間、臨時休業日、臨時営業日）
+- 祝日データの出典・取得日時・収録範囲の表示
+- JSON エクスポート／インポート
+- 全データ削除
+
+---
+
+## 9. 永続化とデータ入出力
+
+### 9.1 保存先
+
+`localStorage` を正とする。サーバー・認証なし。
+
+| キー | 内容 |
+|---|---|
+| `bds.v1.rules` | `Rule[]` |
+| `bds.v1.calendars` | `BusinessCalendar[]` |
+| `bds.v1.prefs` | 表示設定（既定ビュー、一覧の日数など） |
+| `bds.v1.schemaVersion` | スキーマ版数。マイグレーションの起点 |
+
+`localStorage` が使えない環境（プライベートモード等）では、メモリ上で動作しつつ
+「この端末には保存されません」と警告バナーを出す。
+
+### 9.2 エクスポート／インポート
+
+単一 JSON ファイル `business-days-schedule-YYYYMMDD.json`:
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "exportedAt": "2026-09-04T10:00:00+09:00",
+  "calendars": [ /* BusinessCalendar[] */ ],
+  "rules": [ /* Rule[] */ ],
+  "prefs": { }
+}
+```
+
+- インポート時は「置換」「マージ（ID 重複は取り込み側を採用）」を選択
+- スキーマ検証に失敗したファイルは取り込まず、エラー箇所を明示
+- 端末間の移行・バックアップ・バージョン管理（このファイル自体を Git 管理する）に使う
+
+### 9.3 サンプル定義の同梱
+
+`public/data/samples/` に §6 のユースケースを反映したサンプル JSON を置き、
+初回起動時に「サンプルを読み込む」導線を提供する。
+
+---
+
+## 10. 品質・エッジケース
+
+### 10.1 テスト観点（Vitest）
+
+| 領域 | ケース |
+|---|---|
+| 営業日判定 | `openDates` が祝日・週末より優先されること／`closedRanges` の年跨ぎ（12-29〜01-03） |
+| monthlyByDay | 31日指定 × 2月（clamp / skip）／うるう年 2/29／`"last"` の各月 |
+| monthlyByWeekday | 第5週が無い月／`nth: -1` と `nth: 5` が一致する月・しない月 |
+| monthlyByBusinessDay | 営業日数が不足する月／`-1` が月末営業日と一致すること |
+| weekly | `interval: 2` の位相が `anchor` 起点で正しいこと／年跨ぎで位相がずれないこと |
+| 補正 | `prev`/`next`/`nearest`（同距離は prev）／`keepInMonth` の反転／連続休業（GW・年末年始）の跨ぎ |
+| 通知 | `unit: "business"` が休業日をスキップすること |
+| 境界 | 表示範囲の端で補正により入退場する発生日／`period` 境界 |
+| 日付演算 | TZ を UTC / Asia/Tokyo / America/New_York に切り替えても結果が同一であること |
+| I/O | 不正 JSON のインポートが拒否されること／エクスポート→インポートの往復同一性 |
+
+祝日データはテスト用に固定スナップショットを使い、外部取得に依存させない。
+
+### 10.2 バリデーション
+
+- `weekly` は `weekdays` が1つ以上
+- `interval >= 1`
+- `days` の要素は 1〜31 または `"last"`
+- `period.start <= period.end`
+- `notices[].offset < 0`
+- 保存時にプレビューが0件になるルールは警告（保存自体は許可）
+
+### 10.3 非機能
+
+| 項目 | 目標 |
+|---|---|
+| 初期表示 | 3G 相当で 2 秒以内（バンドル < 150KB gzip、外部ランタイム依存なし） |
+| オフライン | 祝日 JSON をキャッシュし、2回目以降はオフラインで動作（Service Worker は v2 で検討） |
+| a11y | キーボード操作可能、コントラスト比 4.5:1 以上、色のみに依存しない情報伝達（補正は `⟳` 記号も併用） |
+| ブラウザ | 直近2バージョンの Chrome / Edge / Safari / Firefox |
+
+---
+
+## 11. 技術構成
+
+### 11.1 スタック
+
+- **Vite + TypeScript**（strict）
+- **Vitest** — ロジック層のユニットテスト
+- UI フレームワークなし（素の DOM + テンプレート）。ロジックが本体であり、UI は薄く保つ
+- 実行時の外部ライブラリ依存: **なし**
+
+### 11.2 ディレクトリ構成
+
+```
+.
+├── index.html
+├── src/
+│   ├── main.ts
+│   ├── types.ts
+│   ├── core/                  # UI 非依存の純粋ロジック（テスト対象）
+│   │   ├── dateUtil.ts        # YYYY-MM-DD 文字列の日付演算（UTC ベース）
+│   │   ├── holidays.ts        # 祝日 JSON のロードと参照
+│   │   ├── businessDay.ts     # 営業日判定・前後移動・第N営業日
+│   │   ├── recurrence.ts      # 反復条件の展開
+│   │   ├── adjust.ts          # 営業日補正
+│   │   ├── schedule.ts        # 展開の統合（§7.1）
+│   │   └── storage.ts         # localStorage / import / export / migration
+│   └── ui/
+│       ├── CalendarView.ts
+│       ├── ListView.ts
+│       ├── RuleEditor.ts
+│       └── SettingsView.ts
+├── public/
+│   └── data/
+│       ├── holidays.json      # 自動生成（コミットする）
+│       └── samples/
+├── scripts/
+│   └── build-holidays.ts      # holidays.yml → holidays.json
+├── tests/
+└── .github/workflows/
+    ├── ci.yml                 # push / PR: typecheck + lint + test + build
+    ├── update-holidays.yml    # 週次: 祝日データ更新
+    └── deploy.yml             # main への push: build → GitHub Pages
+```
+
+`src/core/` は DOM に一切依存させない。これによりロジックを完全にテスト可能に保つ。
+
+### 11.3 デプロイ
+
+- GitHub Actions (`actions/deploy-pages`) で `dist/` を Pages へ公開
+- `vite.config.ts` の `base` はリポジトリ名 `/Business-Days-Schedule/` を指定
+- 公開 URL: `https://masakiniwa.github.io/Business-Days-Schedule/`
+
+---
+
+## 12. マイルストーン
+
+| 版 | 内容 |
+|---|---|
+| **M1** | `core/` のロジック一式＋テスト。祝日 JSON 生成スクリプトと更新ワークフロー。UI なし |
+| **M2** | 月カレンダー表示・ルール一覧（読み取り専用）。GitHub Pages 公開 |
+| **M3** | ルールの追加・編集・削除、プレビュー、営業日カレンダー設定 |
+| **M4** | 一覧表示・事前通知・JSON 入出力・印刷 CSS |
+| **M5** | 二次ソース検証、a11y 対応、サンプル定義 |
+
+---
+
+## 13. 今後の検討事項（v2 以降）
+
+- URL ハッシュへの定義埋め込みによる共有（圧縮）
+- iCalendar (.ics) エクスポート
+- Service Worker によるオフライン対応
+- 複数の営業日カレンダーの自由な追加（v1 はプリセット2種）
+- 「決算期末から N 営業日」など会計期間を基準にした反復条件
+- 日本以外の祝日データ
