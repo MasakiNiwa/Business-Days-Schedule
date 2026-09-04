@@ -122,8 +122,10 @@ Shift_JIS・行末 CRLF・掲載範囲が「1955年〜翌年」に限られる�
 }
 ```
 
-- 全期間を単一ファイルで持つ（約40KB、gzip で数KB。分割の必要なし）
+- 全期間を単一ファイルで持つ（約48KB、gzip で数KB。分割の必要なし）
 - 日付キーは `YYYY-MM-DD` 昇順で安定ソートし、差分を読みやすく保つ
+- `meta.range` は暦年の境界へ丸める。収録最終日（2050-11-23 など）をそのまま範囲末尾にすると、
+  その後の平日が「データ範囲外」と誤判定されてしまうため
 
 ### 3.4 更新ワークフロー `.github/workflows/update-holidays.yml`
 
@@ -181,6 +183,9 @@ isBusinessDay(date):
 |---|---|---|
 | `company` | 自社カレンダー（既定） | 土日＋祝日。年末年始 12/29〜1/3 を既定で休業に設定 |
 | `bank` | 銀行休業日 | 土日＋祝日＋12/31〜1/3 |
+
+年末年始の休業日数は会社ごとに異なるため、`company` の 12/29〜1/3 はあくまで初期値であり、
+設定画面から変更できる。
 
 ルールごとに `calendarId` を指定できる。
 「社内締めは自社カレンダー、振込は銀行カレンダー」といった使い分けが1画面で成立する。
@@ -406,7 +411,9 @@ type Occurrence = {
 - アプリの日付は常に `"YYYY-MM-DD"` 文字列で保持する
 - 内部演算は `Date.UTC(y, m-1, d)` で生成した Date（＝UTC 00:00）で行い、
   取り出しは必ず `getUTCFullYear` / `getUTCMonth` / `getUTCDate` を使う
-- `new Date("2026-01-01")` や `getDate()`（ローカル時刻系）は **使用禁止**（ESLint ルールで機械的に禁止する）
+- `new Date("2026-01-01")` や `getDate()`（ローカル時刻系）は **使用禁止**。
+  `tests/dateApiGuard.test.ts` が `src/` を走査して混入を検出する（`dateUtil.ts` のみ例外）。
+  ESLint を導入していないのは、この1点のためだけに依存を増やす必要がないため
 - 「今日」の判定のみ、`Asia/Tokyo` に固定して算出する（`Intl.DateTimeFormat` の `timeZone: "Asia/Tokyo"`）
 
 ---
@@ -522,6 +529,9 @@ type Occurrence = {
 | 境界 | 表示範囲の端で補正により入退場する発生日／`period` 境界 |
 | 日付演算 | TZ を UTC / Asia/Tokyo / America/New_York に切り替えても結果が同一であること |
 | I/O | 不正 JSON のインポートが拒否されること／エクスポート→インポートの往復同一性 |
+| 配信データ | `public/data/holidays.json` が実在日付・昇順・今年と来年をカバーしていること |
+| サンプル | 同梱サンプルがそのまま取り込め、警告なしで1年分展開できること |
+| 実務ユースケース | §6 の16件が各1ルールで意図どおりの日付になること |
 
 祝日データはテスト用に固定スナップショットを使い、外部取得に依存させない。
 
@@ -569,8 +579,9 @@ type Occurrence = {
 │   │   ├── recurrence.ts      # 反復条件の展開
 │   │   ├── adjust.ts          # 営業日補正
 │   │   ├── schedule.ts        # 展開の統合（§7.1）
-│   │   └── storage.ts         # localStorage / import / export / migration
-│   └── ui/
+│   │   ├── validate.ts        # ルール／カレンダーの検証（§10.2）
+│   │   └── storage.ts         # localStorage / import / export
+│   └── ui/                    # M2 以降
 │       ├── CalendarView.ts
 │       ├── ListView.ts
 │       ├── RuleEditor.ts
@@ -578,14 +589,17 @@ type Occurrence = {
 ├── public/
 │   └── data/
 │       ├── holidays.json      # 自動生成（コミットする）
-│       └── samples/
+│       └── samples/           # 同梱サンプル（§9.3）
 ├── scripts/
-│   └── build-holidays.ts      # holidays.yml → holidays.json
+│   ├── build-holidays.ts      # holidays.yml → holidays.json
+│   └── verify-cao.ts          # 内閣府 CSV との突合（§3.2）
 ├── tests/
+│   ├── fixtures/holidays.json # 2023-2027 の固定スナップショット
+│   └── *.test.ts
 └── .github/workflows/
-    ├── ci.yml                 # push / PR: typecheck + lint + test + build
+    ├── ci.yml                 # push / PR: typecheck + test + build
     ├── update-holidays.yml    # 週次: 祝日データ更新
-    └── deploy.yml             # main への push: build → GitHub Pages
+    └── deploy.yml             # main への push: build → GitHub Pages（M2 で追加）
 ```
 
 `src/core/` は DOM に一切依存させない。これによりロジックを完全にテスト可能に保つ。
@@ -600,13 +614,16 @@ type Occurrence = {
 
 ## 12. マイルストーン
 
-| 版 | 内容 |
-|---|---|
-| **M1** | `core/` のロジック一式＋テスト。祝日 JSON 生成スクリプトと更新ワークフロー。UI なし |
-| **M2** | 月カレンダー表示・ルール一覧（読み取り専用）。GitHub Pages 公開 |
-| **M3** | ルールの追加・編集・削除、プレビュー、営業日カレンダー設定 |
-| **M4** | 一覧表示・事前通知・JSON 入出力・印刷 CSS |
-| **M5** | 二次ソース検証、a11y 対応、サンプル定義 |
+| 版 | 内容 | 状態 |
+|---|---|---|
+| **M1** | `core/` のロジック一式＋テスト。祝日 JSON 生成スクリプトと更新ワークフロー。UI なし | ✅ 完了 |
+| **M2** | 月カレンダー表示・ルール一覧（読み取り専用）。GitHub Pages 公開 | 未着手 |
+| **M3** | ルールの追加・編集・削除、プレビュー、営業日カレンダー設定 | 未着手 |
+| **M4** | 一覧表示・事前通知の描画・JSON 入出力 UI・印刷 CSS | 未着手 |
+| **M5** | a11y 対応の仕上げ、オフライン対応の検討 | 未着手 |
+
+M1 で先行実装したもの（当初 M4／M5 に置いていたが、いずれもロジック層に属するため前倒しした）:
+事前通知の日付計算、JSON 入出力のロジック、内閣府 CSV による二次検証、サンプル定義。
 
 ---
 

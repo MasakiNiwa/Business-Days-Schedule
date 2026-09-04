@@ -1,0 +1,153 @@
+{
+  "schemaVersion": 1,
+  "exportedAt": "2026-09-04T00:00:00.000Z",
+  "calendars": [
+    {
+      "id": "company",
+      "name": "自社カレンダー",
+      "weekendDays": [0, 6],
+      "useNationalHolidays": true,
+      "closedRanges": [{ "from": "12-29", "to": "01-03", "label": "年末年始休業" }],
+      "closedDates": [],
+      "openDates": []
+    },
+    {
+      "id": "bank",
+      "name": "銀行休業日",
+      "weekendDays": [0, 6],
+      "useNationalHolidays": true,
+      "closedRanges": [{ "from": "12-31", "to": "01-03", "label": "銀行休業" }],
+      "closedDates": [],
+      "openDates": []
+    }
+  ],
+  "rules": [
+    {
+      "id": "sample-salary",
+      "title": "給与振込",
+      "color": "blue",
+      "note": "毎月25日。銀行休業日なら前営業日。",
+      "enabled": true,
+      "calendarId": "bank",
+      "recurrence": { "type": "monthlyByDay", "interval": 1, "days": [25], "overflow": "clamp" },
+      "adjust": { "mode": "prev", "keepInMonth": false },
+      "notices": [{ "offset": -3, "unit": "business", "label": "振込データ作成" }],
+      "period": { "start": null, "end": null },
+      "skipDates": [],
+      "createdAt": "2026-09-04T00:00:00.000Z",
+      "updatedAt": "2026-09-04T00:00:00.000Z"
+    },
+    {
+      "id": "sample-month-close",
+      "title": "月次締め",
+      "color": "green",
+      "note": "月末営業日。",
+      "enabled": true,
+      "calendarId": "company",
+      "recurrence": { "type": "monthlyByDay", "interval": 1, "days": ["last"], "overflow": "clamp" },
+      "adjust": { "mode": "prev", "keepInMonth": false },
+      "notices": [],
+      "period": { "start": null, "end": null },
+      "skipDates": [],
+      "createdAt": "2026-09-04T00:00:00.000Z",
+      "updatedAt": "2026-09-04T00:00:00.000Z"
+    },
+    {
+      "id": "sample-withholding-tax",
+      "title": "源泉所得税納付",
+      "color": "red",
+      "note": "毎月10日。休日なら翌営業日。",
+      "enabled": true,
+      "calendarId": "bank",
+      "recurrence": { "type": "monthlyByDay", "interval": 1, "days": [10], "overflow": "clamp" },
+      "adjust": { "mode": "next", "keepInMonth": false },
+      "notices": [],
+      "period": { "start": null, "end": null },
+      "skipDates": [],
+      "createdAt": "2026-09-04T00:00:00.000Z",
+      "updatedAt": "2026-09-04T00:00:00.000Z"
+    },
+    {
+      "id": "sample-social-insurance",
+      "title": "社会保険料引落",
+      "color": "orange",
+      "note": "毎月末日。休日なら翌営業日。",
+      "enabled": true,
+      "calendarId": "bank",
+      "recurrence": { "type": "monthlyByDay", "interval": 1, "days": ["last"], "overflow": "clamp" },
+      "adjust": { "mode": "next", "keepInMonth": false },
+      "notices": [],
+      "period": { "start": null, "end": null },
+      "skipDates": [],
+      "createdAt": "2026-09-04T00:00:00.000Z",
+      "updatedAt": "2026-09-04T00:00:00.000Z"
+    },
+    {
+      "id": "sample-invoice",
+      "title": "請求書発行",
+      "color": "purple",
+      "note": "毎月第5営業日。",
+      "enabled": true,
+      "calendarId": "company",
+      "recurrence": { "type": "monthlyByBusinessDay", "interval": 1, "nth": [5] },
+      "adjust": { "mode": "none", "keepInMonth": false },
+      "notices": [],
+      "period": { "start": null, "end": null },
+      "skipDates": [],
+      "createdAt": "2026-09-04T00:00:00.000Z",
+      "updatedAt": "2026-09-04T00:00:00.000Z"
+    },
+    {
+      "id": "sample-payment",
+      "title": "支払処理",
+      "color": "teal",
+      "note": "月末2営業日前。",
+      "enabled": true,
+      "calendarId": "company",
+      "recurrence": { "type": "monthlyByBusinessDay", "interval": 1, "nth": [-2] },
+      "adjust": { "mode": "none", "keepInMonth": false },
+      "notices": [],
+      "period": { "start": null, "end": null },
+      "skipDates": [],
+      "createdAt": "2026-09-04T00:00:00.000Z",
+      "updatedAt": "2026-09-04T00:00:00.000Z"
+    },
+    {
+      "id": "sample-regular-meeting",
+      "title": "定例会議",
+      "color": "gray",
+      "note": "第2・第4火曜。",
+      "enabled": true,
+      "calendarId": "company",
+      "recurrence": { "type": "monthlyByWeekday", "interval": 1, "nth": [2, 4], "weekday": 2 },
+      "adjust": { "mode": "none", "keepInMonth": false },
+      "notices": [],
+      "period": { "start": null, "end": null },
+      "skipDates": [],
+      "createdAt": "2026-09-04T00:00:00.000Z",
+      "updatedAt": "2026-09-04T00:00:00.000Z"
+    },
+    {
+      "id": "sample-quarterly-report",
+      "title": "四半期報告",
+      "color": "pink",
+      "note": "3・6・9・12月の月末営業日。",
+      "enabled": true,
+      "calendarId": "company",
+      "recurrence": {
+        "type": "monthlyByDay",
+        "interval": 1,
+        "months": [3, 6, 9, 12],
+        "days": ["last"],
+        "overflow": "clamp"
+      },
+      "adjust": { "mode": "prev", "keepInMonth": false },
+      "notices": [{ "offset": -3, "unit": "business", "label": "資料準備開始" }],
+      "period": { "start": null, "end": null },
+      "skipDates": [],
+      "createdAt": "2026-09-04T00:00:00.000Z",
+      "updatedAt": "2026-09-04T00:00:00.000Z"
+    }
+  ],
+  "prefs": { "defaultView": "calendar", "listDays": 90 }
+}

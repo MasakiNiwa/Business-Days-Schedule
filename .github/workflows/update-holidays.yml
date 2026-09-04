@@ -1,0 +1,127 @@
+# 祝日データの自動更新（docs/SPEC.md §3.4）。
+#
+#   一次ソース: holiday-jp/holiday_jp の holidays.yml
+#   二次検証  : 内閣府 CSV（取得できない場合もあるため continue-on-error）
+#
+# 差分があるときだけコミットする。取得に失敗した場合はワークフローを失敗させ、
+# 既存の public/data/holidays.json は保持する。
+name: Update holidays
+
+on:
+  schedule:
+    # 毎週月曜 03:00 JST（日曜 18:00 UTC）
+    - cron: '0 18 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: update-holidays
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: 祝日データを取得して生成
+        run: npm run holidays
+
+      - name: 内閣府 CSV と突合（二次検証）
+        id: verify
+        continue-on-error: true
+        run: npm run holidays:verify
+
+      - name: 検証結果を meta に反映
+        env:
+          VERIFIED: ${{ steps.verify.outcome == 'success' }}
+        run: |
+          node --input-type=module -e '
+            import { readFile, writeFile } from "node:fs/promises";
+            const path = "public/data/holidays.json";
+            const data = JSON.parse(await readFile(path, "utf-8"));
+            data.meta.verifiedAgainstCao = process.env.VERIFIED === "true";
+            await writeFile(path, JSON.stringify(data, null, 2) + "\n");
+          '
+
+      - name: テスト（生成物が既存ロジックを壊していないか）
+        run: npm test
+
+      - name: 差分があればコミット
+        id: commit
+        run: |
+          if git diff --quiet -- public/data/holidays.json; then
+            echo "変更はありません"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/data/holidays.json
+          git commit -m "chore(data): 祝日データを更新"
+          git push
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: 突合に失敗したら Issue を起票
+        if: steps.verify.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const label = 'holiday-data-mismatch';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: label,
+            });
+            if (existing.data.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.data[0].number,
+                body: `再度、内閣府 CSV との突合に失敗しました。\n\n実行ログ: ${runUrl}`,
+              });
+              return;
+            }
+
+            try {
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: label,
+                color: 'd93f0b',
+                description: '祝日データが内閣府 CSV と一致しない',
+              });
+            } catch (error) {
+              if (error.status !== 422) throw error; // 既に存在する場合は無視
+            }
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '祝日データが内閣府 CSV と一致しません',
+              labels: [label],
+              body: [
+                '一次ソース (holiday-jp/holiday_jp) と内閣府 CSV の突合に失敗しました。',
+                '',
+                '次のいずれかが考えられます。',
+                '',
+                '- 内閣府が祝日を追加・変更し、一次ソースがまだ追随していない',
+                '- 内閣府 CSV の形式・URL が変わった',
+                '- 内閣府サイトへのアクセスが一時的に失敗した',
+                '',
+                `差分の内容は実行ログを確認してください: ${runUrl}`,
+              ].join('\n'),
+            });
