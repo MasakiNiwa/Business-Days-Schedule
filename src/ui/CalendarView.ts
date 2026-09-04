@@ -103,6 +103,9 @@ function renderCell(
     })
     .filter((node): node is HTMLElement => node !== null);
 
+  // 日付の数字はキーボードとスクリーンリーダー向けの入口として button のままにする。
+  // クリック判定はセル全体に広げるが、button の click もセルへ伝播するので
+  // ハンドラは td 側に1つだけ置き、二重発火を避ける。
   const dayButton = h(
     'button',
     {
@@ -112,9 +115,8 @@ function renderCell(
     },
     String(cell.day),
   );
-  dayButton.addEventListener('click', () => handlers.onSelectDay(cell.date));
 
-  return h(
+  const element = h(
     'td',
     { class: cellClassName(cell, cell.date === selectedDate) },
     h(
@@ -125,6 +127,14 @@ function renderCell(
     ),
     chips.length === 0 ? null : h('ul', { class: 'chips' }, ...chips),
   );
+
+  element.addEventListener('click', () => {
+    // 予定名をドラッグで選択しただけのときは開かない。
+    if ((globalThis.getSelection?.()?.toString() ?? '') !== '') return;
+    handlers.onSelectDay(cell.date);
+  });
+
+  return element;
 }
 
 export function renderCalendar(

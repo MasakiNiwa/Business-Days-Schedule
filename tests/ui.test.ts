@@ -168,14 +168,53 @@ describe('renderCalendar', () => {
     );
   });
 
-  it('日付から当日の詳細を開ける', () => {
+  const cellOf = (table: HTMLElement, day: string): HTMLElement | undefined =>
+    [...table.querySelectorAll<HTMLElement>('tbody td')].find(
+      (node) => node.querySelector('.cell-day')?.textContent === day,
+    );
+
+  it('日付の数字から当日の詳細を開ける', () => {
     const onSelectDay = vi.fn();
     const table = gridFor(2026, 9, [], onSelectDay);
     const dayButton = [...table.querySelectorAll<HTMLButtonElement>('.cell-day')].find(
       (node) => node.textContent === '4',
     );
-    dayButton?.dispatchEvent(new MouseEvent('click'));
-    expect(onSelectDay).toHaveBeenCalledWith('2026-09-04');
+    dayButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(onSelectDay).toHaveBeenCalledExactlyOnceWith('2026-09-04');
+  });
+
+  it('数字以外の余白をクリックしても開く', () => {
+    const onSelectDay = vi.fn();
+    const table = gridFor(2026, 9, [], onSelectDay);
+    cellOf(table, '4')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(onSelectDay).toHaveBeenCalledExactlyOnceWith('2026-09-04');
+  });
+
+  it('予定チップをクリックしても開く', () => {
+    const onSelectDay = vi.fn();
+    const rule = makeRule({
+      id: 'x',
+      title: '予定',
+      recurrence: { type: 'monthlyByDay', interval: 1, days: [15], overflow: 'clamp' },
+      adjust: { mode: 'none', keepInMonth: false },
+    });
+    const table = gridFor(2026, 9, [rule], onSelectDay);
+    table.querySelector('.chip')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(onSelectDay).toHaveBeenCalledExactlyOnceWith('2026-09-15');
+  });
+
+  it('文字を選択しただけのときは開かない', () => {
+    const onSelectDay = vi.fn();
+    const table = gridFor(2026, 9, [], onSelectDay);
+    const original = globalThis.getSelection;
+    // ドラッグで選択した状態を模す。
+    globalThis.getSelection = (() => ({ toString: () => '給与振込' })) as typeof globalThis.getSelection;
+    try {
+      cellOf(table, '4')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      expect(onSelectDay).not.toHaveBeenCalled();
+    } finally {
+      globalThis.getSelection = original;
+    }
   });
 
   it('選択中の日にしるしを付ける', () => {

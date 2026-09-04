@@ -231,6 +231,8 @@ button {
 }
 
 .cell {
+  /* セル全体が当日の詳細を開くクリック判定。 */
+  cursor: pointer;
   vertical-align: top;
   /* 件数に応じて伸びる。予定が無い月でも高さが潰れないよう下限だけ決める。 */
   height: auto;
@@ -242,6 +244,14 @@ button {
 
 .cell.is-closed {
   background: var(--bg-closed);
+}
+
+.cell:hover {
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg));
+}
+
+.cell.is-closed:hover {
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-closed));
 }
 
 .cell.is-outside {
@@ -299,7 +309,7 @@ button {
   border: 1px solid transparent;
   background: color-mix(in srgb, var(--chip) 16%, transparent);
   color: color-mix(in srgb, var(--chip) 75%, var(--fg));
-  cursor: default;
+  cursor: inherit;
 }
 
 .chip.is-notice {
@@ -896,11 +906,6 @@ button {
   padding: 0 0.15rem;
   border-radius: 4px;
   line-height: 1.3;
-}
-
-.cell-day:hover {
-  background: var(--bg-sunken);
-  outline: 1px solid var(--border-strong);
 }
 
 .cell-day:focus-visible {
