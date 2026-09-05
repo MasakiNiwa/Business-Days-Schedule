@@ -5,14 +5,59 @@
 
 import { h } from './dom';
 
-/** ラベルと説明を付けたフィールドの枠。 */
+let fieldSequence = 0;
+/** label/for で名前を付けられる要素。 */
+const LABELABLE = new Set(['INPUT', 'SELECT', 'TEXTAREA']);
+/**
+ * 自前のロールを持つ要素。ここに role="group" をかぶせるとロールが消えるため触らない。
+ * （ボタンを field() に渡したとき、実際にボタンとして扱われなくなった。）
+ */
+const INTERACTIVE = new Set(['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA', 'LABEL']);
+
+/**
+ * ラベルと説明を付けたフィールドの枠。
+ *
+ * 見出しを span で置くだけでは支援技術に「この入力欄の名前」として伝わらず、
+ * プレースホルダーが名前として読まれてしまう。単一の入力欄なら label/for で
+ * 結び付け、トグル群のような複数要素なら group として aria-labelledby で結ぶ。
+ * 説明文は aria-describedby でぶら下げる。
+ */
 export function field(labelText: string, control: HTMLElement, hint?: string): HTMLElement {
+  fieldSequence += 1;
+  const labelId = `field-label-${fieldSequence}`;
+  const hintId = `field-hint-${fieldSequence}`;
+
+  // 枠自体が入力要素でなければ、中の最初の入力要素を探して結び付ける。
+  const target = LABELABLE.has(control.tagName)
+    ? control
+    : control.querySelector<HTMLElement>('input, select, textarea');
+
+  const describedBy = hint === undefined ? null : hintId;
+
+  let labelElement: HTMLElement;
+  if (target !== null && target.closest('.field') === null) {
+    // 入力欄が1つに定まる場合は label/for で結ぶ。
+    if (target.id === '') target.id = `field-control-${fieldSequence}`;
+    labelElement = h('label', { class: 'field-label', id: labelId, for: target.id }, labelText);
+    if (describedBy !== null) target.setAttribute('aria-describedby', describedBy);
+  } else if (!INTERACTIVE.has(control.tagName)) {
+    // トグル群のように入力要素が複数ある場合は、まとまりとして名前を付ける。
+    labelElement = h('span', { class: 'field-label', id: labelId }, labelText);
+    control.setAttribute('role', control.getAttribute('role') ?? 'group');
+    control.setAttribute('aria-labelledby', labelId);
+    if (describedBy !== null) control.setAttribute('aria-describedby', describedBy);
+  } else {
+    // ボタンなど、それ自身が名前とロールを持つ要素。見出しは飾りに留める。
+    labelElement = h('span', { class: 'field-label', id: labelId }, labelText);
+    if (describedBy !== null) control.setAttribute('aria-describedby', describedBy);
+  }
+
   return h(
     'div',
     { class: 'field' },
-    h('span', { class: 'field-label' }, labelText),
+    labelElement,
     control,
-    hint === undefined ? null : h('p', { class: 'field-hint' }, hint),
+    hint === undefined ? null : h('p', { class: 'field-hint', id: hintId }, hint),
   );
 }
 
@@ -101,6 +146,12 @@ export function textInput(
   const input = h('input', { type: 'text', class: 'input', value, placeholder });
   input.addEventListener('input', () => onChange(input.value));
   return input;
+}
+
+/** 検証結果を入力欄へ反映する。エラーの所在を支援技術にも伝えるため。 */
+export function markInvalid(element: HTMLElement, invalid: boolean): void {
+  if (invalid) element.setAttribute('aria-invalid', 'true');
+  else element.removeAttribute('aria-invalid');
 }
 
 export function dateInput(

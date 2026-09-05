@@ -21,7 +21,7 @@
 |---|---|
 | ロジック層 | `src/core/` — 営業日判定・反復ルール展開・営業日補正・検証・入出力 |
 | 表示層 | `src/ui/` — 月カレンダー、一覧、ルール一覧、編集フォーム、日付詳細、設定、ヘルプ |
-| テスト | 360 件（`npm test`）。§6 の実務ユースケース17件を回帰テスト化 |
+| テスト | 単体 398 件（`npm test`）＋ E2E 16 件（`npm run e2e`）。§6 の実務ユースケース17件を回帰テスト化 |
 | 祝日データ | `public/data/holidays.json`（毎週月曜 03:00 JST に自動更新） |
 
 サンプルは種類ごとに分かれており（基本セット／税務・届出／売上・入金／支払・振込／会議・報告）、
@@ -84,3 +84,17 @@ npm run build      # 本番ビルド
 npm run holidays         # holidays.yml → public/data/holidays.json
 npm run holidays:verify  # 内閣府 CSV と直近3年分を突合
 ```
+
+## 開発（続き）
+
+```bash
+npm run e2e:install  # E2E 用ブラウザの用意（初回のみ）
+npm run e2e          # 本番ビルドに対するブラウザテスト
+```
+
+E2E は `dist/` を素の静的配信で動かします（`scripts/serve-dist.ts`）。
+GitHub Pages と同じ条件に近づけ、公開後にだけ壊れる不具合を拾うためです。
+
+## ライセンス
+
+MIT License. 詳しくは [LICENSE](LICENSE) を参照してください。

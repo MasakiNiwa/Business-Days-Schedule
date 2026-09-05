@@ -28,6 +28,28 @@ import { expandRecurrence, skipsAdjustment } from './recurrence';
 /** 補正で月をまたぐ発生日を取りこぼさないためのマージン（月数）。 */
 const MARGIN_MONTHS = 1;
 
+/**
+ * 事前通知は本体より前に出るため、表示範囲より先の本体まで展開しないと取りこぼす。
+ * 営業日単位の指定を暦日へ換算するときの安全側の倍率と余白。
+ * 週末と連休を最大限見込んでも足りる幅にしてある。
+ */
+const BUSINESS_DAY_TO_CALENDAR_FACTOR = 3;
+const NOTICE_SPAN_SLACK_DAYS = 60;
+
+/** ルールの事前通知が本体から最大何日さかのぼるか（暦日での安全な上限）。 */
+export function noticeSpanDays(rule: Rule): number {
+  let max = 0;
+  for (const notice of rule.notices) {
+    const amount = Math.abs(notice.offset);
+    const days =
+      notice.unit === 'calendar'
+        ? amount
+        : amount * BUSINESS_DAY_TO_CALENDAR_FACTOR + NOTICE_SPAN_SLACK_DAYS;
+    if (days > max) max = days;
+  }
+  return max;
+}
+
 export type ScheduleContext = {
   /** calendarId → 営業日カレンダー。 */
   calendars: ReadonlyMap<string, BusinessDayCalendar>;
@@ -47,11 +69,23 @@ export type ExpandResult = {
   warnings: ExpandWarning[];
 };
 
-/** 表示範囲の前後に月単位のマージンを付けた展開用レンジ。 */
-export function withMargin(range: DateRange, months = MARGIN_MONTHS): DateRange {
+/**
+ * 表示範囲の前後に月単位のマージンを付けた展開用レンジ。
+ *
+ * 末尾には事前通知ぶんの余白も足す。通知は本体より前に出るので、
+ * 表示範囲より先の本体まで展開しないと通知が生成されない。
+ */
+export function withMargin(
+  range: DateRange,
+  months = MARGIN_MONTHS,
+  extraEndDays = 0,
+): DateRange {
   const start = addMonths(makeDate(yearOf(range.start), monthOf(range.start), 1), -months);
   const endMonth = addMonths(makeDate(yearOf(range.end), monthOf(range.end), 1), months);
-  return { start, end: lastDateOfMonth(yearOf(endMonth), monthOf(endMonth)) };
+  return {
+    start,
+    end: addDays(lastDateOfMonth(yearOf(endMonth), monthOf(endMonth)), extraEndDays),
+  };
 }
 
 function resolveCalendar(
@@ -146,6 +180,7 @@ function expandRule(
         ruleId: rule.id,
         kind: 'main',
         rawDate,
+        baseDate: rawDate,
         date: result.date,
         shifted: result.shifted,
         shiftDirection: result.direction,
@@ -155,19 +190,22 @@ function expandRule(
 
   for (const occurrence of byEffectiveDate.values()) {
     occurrences.push(occurrence);
-    for (const notice of rule.notices) {
+    rule.notices.forEach((notice, noticeIndex) => {
       const date = noticeDateOf(occurrence.date, notice, calendar);
-      if (date === null) continue;
+      if (date === null) return;
       occurrences.push({
         ruleId: rule.id,
         kind: 'notice',
         rawDate: occurrence.date,
+        // 本体の基準日を引き継ぐ。祝日データが変わっても動かない識別子にするため。
+        baseDate: occurrence.baseDate,
         date,
         shifted: false,
         shiftDirection: null,
         noticeLabel: notice.label,
+        noticeIndex,
       });
-    }
+    });
   }
 
   return { occurrences, warnings };
@@ -185,12 +223,13 @@ export function expandRules(
   viewRange: DateRange,
   ctx: ScheduleContext,
 ): ExpandResult {
-  const expandRange = withMargin(viewRange);
   const occurrences: Occurrence[] = [];
   const warnings: ExpandWarning[] = [];
 
   for (const rule of rules) {
     if (!rule.enabled) continue;
+    // 展開範囲はルールごとに決める。長い事前通知を持つルールだけ先まで広げる。
+    const expandRange = withMargin(viewRange, MARGIN_MONTHS, noticeSpanDays(rule));
     const result = expandRule(rule, expandRange, ctx);
     warnings.push(...result.warnings);
     for (const occurrence of result.occurrences) {

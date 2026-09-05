@@ -82,11 +82,15 @@ function collectEntries(
 // iCalendar
 // ---------------------------------------------------------------------------
 
-/** TEXT 値のエスケープ（RFC 5545 §3.3.11）。 */
+/**
+ * TEXT 値のエスケープ（RFC 5545 §3.3.11）。
+ * セミコロンの置換先は '\\;'（バックスラッシュ＋セミコロン）でなければならない。
+ * '\;' は JavaScript では単なる ';' になり、置換が無効になる。
+ */
 export function escapeIcsText(value: string): string {
   return value
     .replace(/\\/g, '\\\\')
-    .replace(/;/g, '\;')
+    .replace(/;/g, '\\;')
     .replace(/,/g, '\\,')
     .replace(/\r?\n/g, '\\n');
 }
@@ -145,8 +149,16 @@ export function buildIcs(
   const usedUids = new Map<string, number>();
 
   for (const { occurrence, rule } of collectEntries(occurrences, rules, options)) {
-    // 同じ予定を再取り込みしたときに重複しないよう、UID は内容から決まる形にする。
-    const base = `${rule.id}-${occurrence.kind}-${occurrence.date}`;
+    // UID は「補正前の基準日」から作る。確定日を使うと、祝日データの更新で
+    // 日付が動いたときに別の予定として二重に取り込まれてしまうため。
+    const parts = [
+      rule.id,
+      occurrence.kind,
+      occurrence.baseDate,
+      occurrence.shiftDirection ?? 'none',
+      occurrence.noticeIndex === undefined ? '' : `n${occurrence.noticeIndex}`,
+    ].filter((part) => part !== '');
+    const base = parts.join('-');
     const seen = usedUids.get(base) ?? 0;
     usedUids.set(base, seen + 1);
     const uid = `${base}${seen === 0 ? '' : `-${seen}`}@${UID_DOMAIN}`;

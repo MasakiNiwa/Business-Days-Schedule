@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_PREFERENCES,
   buildExportFile,
   clearState,
   createDefaultState,
@@ -26,13 +27,33 @@ describe('load / save', () => {
     const store = createMemoryStore();
     const state = { ...createDefaultState(), rules: [makeRule({ title: '給与振込' })] };
     saveState(store, state);
-    expect(loadState(store)).toEqual(state);
+    const loaded = loadState(store);
+    expect(loaded.rules).toEqual(state.rules);
+    expect(loaded.calendars).toEqual(state.calendars);
+    expect(loaded.prefs).toEqual(state.prefs);
+    expect(loaded.droppedRules).toBe(0);
   });
 
   it('壊れた値は既定値に倒す', () => {
     const store = createMemoryStore();
     store.setItem('bds.v1.rules', '{ this is not json');
     expect(loadState(store).rules).toEqual([]);
+  });
+
+  it('壊れたデータは1件だけ捨て、件数を返す（起動不能にしない）', () => {
+    const store = createMemoryStore();
+    // 型が全く合わない値でも例外にせず、健全な分だけ読み込む。
+    store.setItem('bds.v1.rules', JSON.stringify([{}, null, 42, makeRule({ title: '正常' })]));
+    const loaded = loadState(store);
+    expect(loaded.rules.map((rule) => rule.title)).toEqual(['正常']);
+    expect(loaded.droppedRules).toBe(3);
+  });
+
+  it('壊れた表示設定は既定へ戻す', () => {
+    const store = createMemoryStore();
+    store.setItem('bds.v1.prefs', JSON.stringify({ defaultView: 'evil', listDays: -5, theme: 'x' }));
+    const loaded = loadState(store);
+    expect(loaded.prefs).toEqual(DEFAULT_PREFERENCES);
   });
 
   it('検証に通らないルールは読み込まない', () => {
@@ -127,6 +148,23 @@ describe('エクスポート / インポート', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.state.calendars.map((c) => c.id)).toEqual(['company', 'bank']);
+  });
+
+  it('add は既存の ID を触らない（編集内容を守る）', () => {
+    const current = { ...createDefaultState(), rules: [makeRule({ id: 'a', title: '編集した名前' })] };
+    const file = {
+      ...buildExportFile(state),
+      rules: [makeRule({ id: 'a', title: '元の名前' }), makeRule({ id: 'c', title: '追加' })],
+    };
+    const result = importState(JSON.parse(JSON.stringify(file)), current, 'add');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.rules.map((r) => [r.id, r.title])).toEqual([
+      ['a', '編集した名前'],
+      ['c', '追加'],
+    ]);
+    expect(result.applied.rules).toBe(1);
+    expect(result.untouched.rules).toBe(1);
   });
 
   it('merge は ID 衝突時に取り込み側を採用する', () => {

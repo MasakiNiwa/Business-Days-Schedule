@@ -84,6 +84,8 @@ export class RuleEditor {
   private readonly recurrenceBody = h('div', { class: 'recurrence-body' });
   private readonly previewBody = h('div', { class: 'preview-body' });
   private readonly issuesBody = h('div', { class: 'issues' });
+  private adjustControls: HTMLElement | null = null;
+  private adjustInapplicable: HTMLElement | null = null;
   private readonly today: DateStr;
 
   constructor(
@@ -200,6 +202,7 @@ export class RuleEditor {
           other.setAttribute('aria-pressed', other === tab ? 'true' : 'false');
         }
         this.renderRecurrence();
+        this.syncAdjustVisibility();
         this.refresh();
       });
       tabs.append(tab);
@@ -584,6 +587,11 @@ export class RuleEditor {
     return field('対象月', container, '何も選ばなければ毎月。1つだけ選ぶと年次になります。');
   }
 
+  /** 第N営業日は定義上すでに営業日なので、補正の設定自体を持たせない。 */
+  private adjustApplies(): boolean {
+    return this.draft.recurrence.type !== 'monthlyByBusinessDay';
+  }
+
   private buildAdjust(): HTMLElement {
     const keepInMonth = checkbox(
       '補正で月をまたがない（またぐ場合は逆方向へ）',
@@ -611,10 +619,15 @@ export class RuleEditor {
     );
     keepInMonth.hidden = this.draft.adjust.mode === 'none';
 
-    const section = h(
-      'section',
-      { class: 'editor-section' },
-      h('h3', { class: 'editor-heading' }, '休業日にあたったとき'),
+    const inapplicable = h(
+      'p',
+      { class: 'field-hint' },
+      '「第N営業日」は常に営業日のため、補正の設定はありません。',
+    );
+
+    const controls = h(
+      'div',
+      { class: 'adjust-controls' },
       field(
         '補正',
         modeSelect,
@@ -623,13 +636,31 @@ export class RuleEditor {
       keepInMonth,
     );
 
-    // 第N営業日は定義上すでに営業日なので、補正の設定自体を隠す。
-    if (this.draft.recurrence.type === 'monthlyByBusinessDay') {
-      section.append(
-        h('p', { class: 'field-hint' }, '「第N営業日」は常に営業日のため、補正は行われません。'),
-      );
-    }
+    const section = h(
+      'section',
+      { class: 'editor-section' },
+      h('h3', { class: 'editor-heading' }, '休業日にあたったとき'),
+      controls,
+      inapplicable,
+    );
+
+    this.adjustControls = controls;
+    this.adjustInapplicable = inapplicable;
+    this.syncAdjustVisibility();
     return section;
+  }
+
+  /**
+   * 補正欄の出し分け。効かない設定を触れる状態で置くと、保存された値と
+   * 実際の計算が食い違う。隠すだけでなく値も none に正規化する。
+   */
+  private syncAdjustVisibility(): void {
+    const applies = this.adjustApplies();
+    if (this.adjustControls !== null) this.adjustControls.hidden = !applies;
+    if (this.adjustInapplicable !== null) this.adjustInapplicable.hidden = applies;
+    if (!applies && this.draft.adjust.mode !== 'none') {
+      this.draft.adjust = { mode: 'none', keepInMonth: false };
+    }
   }
 
   private buildNotices(): HTMLElement {
@@ -795,6 +826,9 @@ export class RuleEditor {
   private refresh(): void {
     const issues = validateRule(this.draft);
     clear(this.issuesBody);
+    // 検証結果はまとまりとして読み上げさせる。増減が伝わるよう live region にする。
+    this.issuesBody.setAttribute('role', 'status');
+    this.issuesBody.setAttribute('aria-live', 'polite');
     for (const issue of issues) {
       this.issuesBody.append(
         h('p', { class: `issue issue-${issue.severity}` }, issue.message),
@@ -857,6 +891,9 @@ export class RuleEditor {
     const issues = validateRule(this.draft);
     if (issues.some((issue) => issue.severity === 'error')) {
       this.refresh();
+      // 何を直せばよいか分かるよう、最初の不正項目へ移動する。
+      const target = this.element.querySelector<HTMLElement>('input, select, textarea');
+      target?.focus();
       return;
     }
     this.handlers.onSave({ ...structuredClone(this.draft), updatedAt: new Date().toISOString() });

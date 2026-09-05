@@ -9,7 +9,7 @@ import { createBusinessDayCalendar, COMPANY_CALENDAR_ID } from './core/businessD
 import type { BusinessDayCalendar } from './core/businessDay';
 import { addDays, lastDayOfMonth, monthOf, todayInTokyo, yearOf } from './core/dateUtil';
 import { select } from './ui/controls';
-import { createHolidayLookup, fetchHolidayData } from './core/holidays';
+import { createHolidayLookup, fetchHolidayData, outOfRangeMessage } from './core/holidays';
 import type { HolidayLookup } from './core/holidays';
 import { buildMonthGrid, gridRangeOf, shiftMonth } from './core/monthGrid';
 import { expandRules, groupByDate } from './core/schedule';
@@ -89,8 +89,6 @@ export class App {
   private dialogKey: string | null = null;
   private samplePacks: SamplePack[] | null = null;
   private sampleError: string | null = null;
-  /** この端末で追加済みのサンプル束。再追加かどうかの表示に使う。 */
-  private addedSampleIds = new Set<string>();
 
   private readonly today: DateStr;
   private readonly store: KeyValueStore;
@@ -103,7 +101,15 @@ export class App {
     const resolved = resolveStore();
     this.store = resolved.store;
     this.storeAvailable = resolved.available;
-    this.state = loadState(this.store);
+    const loaded = loadState(this.store);
+    this.state = { rules: loaded.rules, calendars: loaded.calendars, prefs: loaded.prefs };
+    if (loaded.droppedRules > 0 || loaded.droppedCalendars > 0) {
+      // 壊れたデータを黙って捨てると、無くなったことに気づけない。
+      this.flash = {
+        text: `保存データのうち ${loaded.droppedRules + loaded.droppedCalendars} 件が壊れていたため読み込みませんでした。`,
+        tone: 'error',
+      };
+    }
     this.today = todayInTokyo();
     this.view = { year: yearOf(this.today), month: monthOf(this.today) };
     applyTheme(this.state.prefs.theme);
@@ -252,21 +258,37 @@ export class App {
   }
 
   /**
-   * サンプル束を追加する。マージなので既存のルールは消えない。
-   * 同じ束を再度追加すると、その束のルールだけが元の内容へ戻る。
+   * サンプル束を取り込む。
+   *
+   * 既定の 'add' は既にある ID を触らない。黙って上書きすると、利用者が編集した
+   * 名前や日付が予告なく元へ戻ってしまうため。'merge'（元に戻す）は確認を取る。
    */
-  private async addSamplePack(pack: SamplePack): Promise<void> {
+  private async addSamplePack(pack: SamplePack, mode: 'add' | 'merge' = 'add'): Promise<void> {
+    if (mode === 'merge') {
+      const ok = globalThis.confirm(
+        `「${pack.name}」の ${pack.count} 件を、編集前の内容で上書きします。\nこの束のルールに加えた変更は失われます。よろしいですか？`,
+      );
+      if (!ok) return;
+    }
+
     try {
       const response = await fetch(`${SAMPLES_DIR}${pack.file}`);
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-      const result = importState(await response.json(), this.state, 'merge');
+      const result = importState(await response.json(), this.state, mode);
       if (!result.ok) throw new Error(result.errors.join(' / '));
       this.state = result.state;
+      this.state.prefs = {
+        ...this.state.prefs,
+        addedSamplePacks: [...new Set([...this.state.prefs.addedSamplePacks, pack.id])],
+      };
       this.persist();
-      this.addedSampleIds.add(pack.id);
-      this.notify(`「${pack.name}」を追加しました。`);
+
+      const { applied, untouched } = result;
+      const parts = [`${applied.rules} 件を${mode === 'merge' ? '上書き' : '追加'}`];
+      if (untouched.rules > 0) parts.push(`${untouched.rules} 件は既にあるため変更なし`);
+      this.notify(`「${pack.name}」: ${parts.join('、')}しました。`);
     } catch (error) {
-      this.notify(`「${pack.name}」の追加に失敗しました: ${messageOf(error)}`, 'error');
+      this.notify(`「${pack.name}」の取り込みに失敗しました: ${messageOf(error)}`, 'error');
     }
     this.render();
   }
@@ -311,6 +333,11 @@ export class App {
     format: 'ics' | 'csv';
     includeNotices: boolean;
   }): void {
+    // 収録範囲を外れた期間を黙って書き出すと、誤った日付が他所のカレンダーへ渡る。
+    const outOfRange = outOfRangeMessage(this.holidays, request.from, request.to);
+    if (outOfRange !== null && !globalThis.confirm(`${outOfRange}\n\nこのまま書き出しますか？`)) {
+      return;
+    }
     const { occurrences } = this.occurrencesBetween(request.from, request.to);
     const rules = new Map(this.state.rules.map((rule) => [rule.id, rule]));
     const options = { includeNotices: request.includeNotices, calendarName: '営業日スケジュール' };
@@ -521,9 +548,10 @@ export class App {
     if (mode.kind === 'samples') {
       return renderSamplePicker(
         this.samplePacks ?? [],
-        this.addedSampleIds,
+        new Set(this.state.prefs.addedSamplePacks),
         {
-          onAdd: (pack) => void this.addSamplePack(pack),
+          onAdd: (pack) => void this.addSamplePack(pack, 'add'),
+          onRestore: (pack) => void this.addSamplePack(pack, 'merge'),
           onClose: () => this.backToCalendar(),
         },
         this.sampleError,
@@ -736,7 +764,7 @@ export class App {
       h(
         'p',
         { class: 'field-hint' },
-        '給与振込・月次締め・第5営業日の請求書発行など、実務でよく使う8件から始められます。',
+        '給与振込・月次締め・第5営業日の請求書発行など、実務でよく使う型から始められます。',
       ),
     );
   }
@@ -779,9 +807,18 @@ export class App {
     if (!this.storeAvailable) {
       notices.push('この端末には保存されません（ブラウザの設定により localStorage が使えません）');
     }
-    if (this.holidays.isOutOfRange(range.start) || this.holidays.isOutOfRange(range.end)) {
-      notices.push('この月は祝日データの収録範囲外です。休業日の判定が不正確な可能性があります');
+    if (this.holidays.meta.verifiedAgainstCao === false) {
+      notices.push(
+        '祝日データが内閣府の公表内容と一致していません。休業日の判定が誤っている可能性があります。',
+      );
     }
+    // 収録範囲の警告は、いま実際に見ている期間に対して出す。
+    const shown =
+      this.state.prefs.defaultView === 'list'
+        ? { start: this.today, end: addDays(this.today, this.state.prefs.listDays - 1) }
+        : range;
+    const outOfRange = outOfRangeMessage(this.holidays, shown.start, shown.end);
+    if (outOfRange !== null) notices.push(outOfRange);
     for (const warning of warnings) notices.push(warning.message);
 
     const flash = this.flash;

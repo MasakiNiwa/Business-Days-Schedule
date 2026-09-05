@@ -1,9 +1,15 @@
 /**
  * 二次ソース検証（docs/SPEC.md §3.2）。
  *
- * 内閣府の祝日 CSV と public/data/holidays.json を突き合わせ、直近3年分に
- * 差異があれば非ゼロ終了する。CI ではこのステップを continue-on-error とし、
- * 失敗時に Issue を起票する。取得自体に失敗した場合も同様に扱う。
+ * 内閣府の祝日 CSV と public/data/holidays.json を突き合わせる。
+ *
+ * 終了コードで「一致」「不一致」「確認できず」を区別する。
+ * 実データの不一致（祝日が違う）と、単に内閣府サイトへ届かなかった場合とでは
+ * 取るべき行動が正反対で、まとめて失敗にすると誤ったデータを公開しかねないため。
+ *
+ *   0 … 一致した
+ *   1 … 不一致があった（公開してはいけない）
+ *   2 … 確認できなかった（取得・解釈に失敗。既存データは維持してよい）
  *
  * 使い方: npm run holidays:verify
  */
@@ -76,20 +82,36 @@ export function diffHolidays(
   return diffs;
 }
 
+/** 突合の結果。呼び出し側（CI）はこれを見て公開の可否を決める。 */
+export const EXIT_MATCH = 0;
+export const EXIT_MISMATCH = 1;
+export const EXIT_UNVERIFIABLE = 2;
+
 async function main(): Promise<void> {
   const data = JSON.parse(await readFile(HOLIDAYS_PATH, 'utf-8')) as HolidayData;
 
-  const response = await fetch(CAO_CSV_URL, {
-    headers: { 'user-agent': 'business-days-schedule-verify-script' },
-  });
-  if (!response.ok) {
-    throw new Error(`内閣府 CSV の取得に失敗しました: ${response.status} ${response.statusText}`);
+  let csv: string;
+  try {
+    const response = await fetch(CAO_CSV_URL, {
+      headers: { 'user-agent': 'business-days-schedule-verify-script' },
+    });
+    if (!response.ok) {
+      throw new Error(`${response.status} ${response.statusText}`);
+    }
+    // 内閣府 CSV は Shift_JIS。Node 22 は full-icu 同梱のためそのままデコードできる。
+    csv = new TextDecoder('shift_jis').decode(await response.arrayBuffer());
+  } catch (error) {
+    // 届かなかっただけ。既存データが誤っている証拠ではないので、公開は止めない。
+    console.error(`内閣府 CSV を取得できませんでした（確認できず）: ${String(error)}`);
+    process.exitCode = EXIT_UNVERIFIABLE;
+    return;
   }
-  // 内閣府 CSV は Shift_JIS。Node 22 は full-icu 同梱のためそのままデコードできる。
-  const csv = new TextDecoder('shift_jis').decode(await response.arrayBuffer());
+
   const cao = parseCaoCsv(csv);
   if (Object.keys(cao).length === 0) {
-    throw new Error('内閣府 CSV を解釈できませんでした（形式が変わった可能性があります）');
+    console.error('内閣府 CSV を解釈できませんでした（形式が変わった可能性があります）');
+    process.exitCode = EXIT_UNVERIFIABLE;
+    return;
   }
 
   const fromYear = new Date().getUTCFullYear() - (VERIFY_YEARS - 1);
@@ -104,7 +126,7 @@ async function main(): Promise<void> {
   for (const diff of diffs) {
     console.error(`  ${diff.date}  当データ: ${diff.ours ?? '(なし)'}  /  内閣府: ${diff.cao ?? '(なし)'}`);
   }
-  process.exitCode = 1;
+  process.exitCode = EXIT_MISMATCH;
 }
 
 const invokedPath = process.argv[1];

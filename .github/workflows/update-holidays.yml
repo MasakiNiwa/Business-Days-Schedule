@@ -37,28 +37,42 @@ jobs:
       - name: 祝日データを取得して生成
         run: npm run holidays
 
+      # 終了コードで結果を分ける。
+      #   0 = 一致 / 1 = 不一致（公開しない） / 2 = 確認できず（既存データは維持）
       - name: 内閣府 CSV と突合（二次検証）
         id: verify
-        continue-on-error: true
-        run: npm run holidays:verify
+        run: |
+          set +e
+          npm run holidays:verify
+          code=$?
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          case "$code" in
+            0) echo "result=match" >> "$GITHUB_OUTPUT" ;;
+            1) echo "result=mismatch" >> "$GITHUB_OUTPUT" ;;
+            *) echo "result=unverifiable" >> "$GITHUB_OUTPUT" ;;
+          esac
 
       - name: 検証結果を meta に反映
         env:
-          VERIFIED: ${{ steps.verify.outcome == 'success' }}
+          VERIFIED: ${{ steps.verify.outputs.result }}
         run: |
           node --input-type=module -e '
             import { readFile, writeFile } from "node:fs/promises";
             const path = "public/data/holidays.json";
             const data = JSON.parse(await readFile(path, "utf-8"));
-            data.meta.verifiedAgainstCao = process.env.VERIFIED === "true";
+            const result = process.env.VERIFIED;
+            data.meta.verifiedAgainstCao = result === "match" ? true : result === "mismatch" ? false : null;
             await writeFile(path, JSON.stringify(data, null, 2) + "\n");
           '
 
       - name: テスト（生成物が既存ロジックを壊していないか）
         run: npm test
 
+      # 実データが内閣府と食い違うときは公開しない。誤った営業日を配るほうが害が大きい。
       - name: 差分があればコミット
         id: commit
+        if: steps.verify.outputs.result != 'mismatch'
         run: |
           if git diff --quiet -- public/data/holidays.json; then
             echo "変更はありません"
@@ -72,9 +86,16 @@ jobs:
           git push
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
-      - name: 突合に失敗したら Issue を起票
-        if: steps.verify.outcome == 'failure'
+      - name: 不一致なら公開を止めたことを明示
+        if: steps.verify.outputs.result == 'mismatch'
+        run: |
+          echo "::error::内閣府 CSV と不一致のため、祝日データを公開しませんでした。"
+
+      - name: 突合できなかった／不一致なら Issue を起票
+        if: steps.verify.outputs.result != 'match'
         uses: actions/github-script@v7
+        env:
+          VERIFY_RESULT: ${{ steps.verify.outputs.result }}
         with:
           script: |
             const label = 'holiday-data-mismatch';
@@ -108,20 +129,31 @@ jobs:
               if (error.status !== 422) throw error; // 既に存在する場合は無視
             }
 
+            const mismatch = process.env.VERIFY_RESULT === 'mismatch';
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: '祝日データが内閣府 CSV と一致しません',
+              title: mismatch
+                ? '祝日データが内閣府 CSV と一致しません（公開を停止しました）'
+                : '祝日データを内閣府 CSV と突合できませんでした',
               labels: [label],
-              body: [
-                '一次ソース (holiday-jp/holiday_jp) と内閣府 CSV の突合に失敗しました。',
-                '',
-                '次のいずれかが考えられます。',
-                '',
-                '- 内閣府が祝日を追加・変更し、一次ソースがまだ追随していない',
-                '- 内閣府 CSV の形式・URL が変わった',
-                '- 内閣府サイトへのアクセスが一時的に失敗した',
-                '',
-                `差分の内容は実行ログを確認してください: ${runUrl}`,
-              ].join('\n'),
+              body: (mismatch
+                ? [
+                    '一次ソース (holiday-jp/holiday_jp) と内閣府 CSV に**実データの差異**がありました。',
+                    '**祝日データの公開は行っていません。**',
+                    '',
+                    '次のいずれかが考えられます。',
+                    '',
+                    '- 内閣府が祝日を追加・変更し、一次ソースがまだ追随していない',
+                    '- 内閣府 CSV の形式が変わり、解釈を誤っている',
+                  ]
+                : [
+                    '内閣府 CSV を取得・解釈できず、突合できませんでした。',
+                    '既存の祝日データはそのまま維持しています（未検証の扱い）。',
+                    '',
+                    '一時的な通信の失敗であれば、次回の実行で解消します。',
+                  ]
+              )
+                .concat(['', `実行ログ: ${runUrl}`])
+                .join('\n'),
             });

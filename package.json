@@ -11,9 +11,13 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "holidays": "tsx scripts/build-holidays.ts",
-    "holidays:verify": "tsx scripts/verify-cao.ts"
+    "holidays:verify": "tsx scripts/verify-cao.ts",
+    "serve:dist": "tsx scripts/serve-dist.ts",
+    "e2e": "playwright test",
+    "e2e:install": "playwright install --with-deps chromium"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/node": "^26.4.1",
     "jsdom": "^30.0.1",
     "tsx": "^4.19.2",

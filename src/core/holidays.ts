@@ -41,6 +41,20 @@ export function createEmptyHolidayLookup(): HolidayLookup {
   });
 }
 
+/**
+ * 期間が祝日データの収録範囲に収まっているかを調べる。
+ * 表示・一覧・書き出しのどこでも同じ判定を使うため、ここに一本化する。
+ */
+export function outOfRangeMessage(
+  lookup: HolidayLookup,
+  from: DateStr,
+  to: DateStr,
+): string | null {
+  const { range } = lookup.meta;
+  if (from >= range.from && to <= range.to) return null;
+  return `${from} 〜 ${to} は祝日データの収録範囲（${range.from} 〜 ${range.to}）を外れています。範囲外の休業日判定は信頼できません。`;
+}
+
 /** 生の JSON が期待する形かを検証する。壊れたデータで無言に動き続けるのを防ぐ。 */
 export function parseHolidayData(input: unknown): HolidayData {
   if (typeof input !== 'object' || input === null) {

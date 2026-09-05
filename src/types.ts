@@ -185,13 +185,21 @@ export type Rule = {
 export type Occurrence = {
   ruleId: string;
   kind: 'main' | 'notice';
-  /** 補正前の基準日。 */
+  /** 補正前の基準日。事前通知では、対応する本体の確定日。 */
   rawDate: DateStr;
+  /**
+   * ルールが生んだ元の日付（営業日補正の前）。事前通知でも本体の基準日を指す。
+   * 祝日データが変わっても動かないため、外部カレンダーの UID など
+   * 「同じ予定」を identify する用途に使う。
+   */
+  baseDate: DateStr;
   /** 補正後の確定日。表示に使うのはこちら。 */
   date: DateStr;
   shifted: boolean;
   shiftDirection: 'prev' | 'next' | null;
   noticeLabel?: string;
+  /** 事前通知が rule.notices の何番目か。UID の一意性に使う。 */
+  noticeIndex?: number;
 };
 
 export type DateRange = { start: DateStr; end: DateStr };

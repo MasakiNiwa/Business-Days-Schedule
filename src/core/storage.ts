@@ -23,12 +23,15 @@ export type Preferences = {
   listDays: number;
   /** 配色モード。'auto' は OS の設定に従う。 */
   theme: 'auto' | 'light' | 'dark';
+  /** 追加済みのサンプル束。再読込しても「追加済み」を保てるよう保存する。 */
+  addedSamplePacks: string[];
 };
 
 export const DEFAULT_PREFERENCES: Preferences = {
   defaultView: 'calendar',
   listDays: 90,
   theme: 'auto',
+  addedSamplePacks: [],
 };
 
 export type AppState = {
@@ -95,21 +98,69 @@ export function createDefaultState(): AppState {
   };
 }
 
-export function loadState(store: KeyValueStore): AppState {
+/**
+ * 検証を通ったものだけを残す。検証そのものが落ちた場合もその1件だけを捨てる。
+ * localStorage の中身は外から来る任意の値であり、1件の破損で起動不能にしてはいけない。
+ */
+function keepValid<T>(items: unknown, validate: (item: T) => { severity: string }[]): {
+  kept: T[];
+  dropped: number;
+} {
+  if (!Array.isArray(items)) return { kept: [], dropped: 0 };
+  const kept: T[] = [];
+  let dropped = 0;
+  for (const item of items) {
+    try {
+      if (hasError(validate(item as T) as never)) dropped += 1;
+      else kept.push(item as T);
+    } catch {
+      dropped += 1;
+    }
+  }
+  return { kept, dropped };
+}
+
+export type LoadResult = AppState & {
+  /** 壊れていて読み込まなかった件数。0 でなければ利用者に知らせる。 */
+  droppedRules: number;
+  droppedCalendars: number;
+};
+
+export function loadState(store: KeyValueStore): LoadResult {
   const defaults = createDefaultState();
-  const rules = readJson<Rule[]>(store, KEY_RULES);
-  const calendars = readJson<BusinessCalendar[]>(store, KEY_CALENDARS);
+  const rules = readJson<unknown>(store, KEY_RULES);
+  const calendars = readJson<unknown>(store, KEY_CALENDARS);
   const prefs = readJson<Partial<Preferences>>(store, KEY_PREFS);
 
-  const validCalendars = Array.isArray(calendars)
-    ? calendars.filter((calendar) => !hasError(validateCalendar(calendar)))
-    : [];
+  const ruleResult = keepValid<Rule>(rules, validateRule);
+  const calendarResult = keepValid<BusinessCalendar>(calendars, validateCalendar);
 
   return {
-    rules: Array.isArray(rules) ? rules.filter((rule) => !hasError(validateRule(rule))) : defaults.rules,
+    rules: Array.isArray(rules) ? ruleResult.kept : defaults.rules,
     // カレンダーが1件も残らないと営業日を計算できないため、必ず既定値へ戻す。
-    calendars: validCalendars.length > 0 ? validCalendars : defaults.calendars,
-    prefs: { ...defaults.prefs, ...(prefs ?? {}) },
+    calendars: calendarResult.kept.length > 0 ? calendarResult.kept : defaults.calendars,
+    prefs: normalizePreferences(prefs, defaults.prefs),
+    droppedRules: ruleResult.dropped,
+    droppedCalendars: calendarResult.dropped,
+  };
+}
+
+/** 表示設定も外から来るため、列挙値と範囲を確かめてから採用する。 */
+function normalizePreferences(input: unknown, defaults: Preferences): Preferences {
+  if (typeof input !== 'object' || input === null) return { ...defaults };
+  const value = input as Record<string, unknown>;
+  const listDays = Number(value['listDays']);
+  return {
+    defaultView: value['defaultView'] === 'list' ? 'list' : defaults.defaultView,
+    listDays:
+      Number.isInteger(listDays) && listDays >= 1 && listDays <= 1096 ? listDays : defaults.listDays,
+    theme:
+      value['theme'] === 'light' || value['theme'] === 'dark' || value['theme'] === 'auto'
+        ? value['theme']
+        : defaults.theme,
+    addedSamplePacks: Array.isArray(value['addedSamplePacks'])
+      ? value['addedSamplePacks'].filter((id): id is string => typeof id === 'string').slice(0, 50)
+      : [...defaults.addedSamplePacks],
   };
 }
 
@@ -145,10 +196,24 @@ export function exportFileName(now: Date = new Date()): string {
   return `business-days-schedule-${todayInTokyo(now).replaceAll('-', '')}.json`;
 }
 
-export type ImportMode = 'replace' | 'merge';
+/**
+ * replace … 置き換える
+ * merge   … 取り込み側で上書きする（明示的に元へ戻したいとき）
+ * add     … 既存の ID は触らず、無いものだけ足す（サンプル追加の既定）
+ */
+export type ImportMode = 'replace' | 'merge' | 'add';
 
 export type ImportResult =
-  | { ok: true; state: AppState; skipped: { rules: number; calendars: number } }
+  | {
+      ok: true;
+      state: AppState;
+      /** 形式が不正で取り込まなかった件数。 */
+      skipped: { rules: number; calendars: number };
+      /** 既に同じ ID があるため触らなかった件数（add のみ）。 */
+      untouched: { rules: number; calendars: number };
+      /** 実際に追加・更新した件数。 */
+      applied: { rules: number; calendars: number };
+    }
   | { ok: false; errors: string[] };
 
 /**
@@ -183,6 +248,8 @@ export function importState(raw: unknown, current: AppState, mode: ImportMode): 
     return {
       ok: true,
       skipped,
+      untouched: { rules: 0, calendars: 0 },
+      applied: { rules: validRules.length, calendars: validCalendars.length },
       state: {
         rules: validRules,
         // カレンダーが1件も無いと営業日計算ができないため既定値へ戻す。
@@ -192,19 +259,40 @@ export function importState(raw: unknown, current: AppState, mode: ImportMode): 
     };
   }
 
-  // merge: ID が衝突した場合は取り込み側を採用する。
-  const mergeById = <T extends { id: string }>(base: T[], incoming: T[]): T[] => {
+  /**
+   * merge は取り込み側で上書き、add は既存を残す。
+   * サンプルの追加で既定を add にしているのは、利用者が編集した内容を
+   * 無言で元へ戻してしまわないため。
+   */
+  const combine = <T extends { id: string }>(
+    base: T[],
+    incoming: T[],
+  ): { items: T[]; applied: number; untouched: number } => {
     const map = new Map(base.map((item) => [item.id, item]));
-    for (const item of incoming) map.set(item.id, item);
-    return [...map.values()];
+    let applied = 0;
+    let untouched = 0;
+    for (const item of incoming) {
+      if (mode === 'add' && map.has(item.id)) {
+        untouched += 1;
+        continue;
+      }
+      map.set(item.id, item);
+      applied += 1;
+    }
+    return { items: [...map.values()], applied, untouched };
   };
+
+  const rules = combine(current.rules, validRules);
+  const calendars = combine(current.calendars, validCalendars);
 
   return {
     ok: true,
     skipped,
+    untouched: { rules: rules.untouched, calendars: calendars.untouched },
+    applied: { rules: rules.applied, calendars: calendars.applied },
     state: {
-      rules: mergeById(current.rules, validRules),
-      calendars: mergeById(current.calendars, validCalendars),
+      rules: rules.items,
+      calendars: calendars.items,
       prefs: { ...current.prefs, ...(file.prefs ?? {}) },
     },
   };

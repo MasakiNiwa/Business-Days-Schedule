@@ -45,8 +45,26 @@ const unfold = (ics: string): string => ics.split('\r\n ').join('');
 
 describe('escapeIcsText', () => {
   it('RFC 5545 の特殊文字を退避する', () => {
-    expect(escapeIcsText('a,b;c\\d')).toBe('a\\,b\;c\\\\d');
+    // 入力 a,b;c\d → 出力 a\,b\;c\\d
+    expect(escapeIcsText('a,b;c\\d')).toBe('a\\,b\\;c\\\\d');
     expect(escapeIcsText('1行目\n2行目')).toBe('1行目\\n2行目');
+  });
+
+  it('セミコロンにバックスラッシュを付ける', () => {
+    // '\;' は JavaScript では ';' になるため、置換が効いていないことに気づきにくい。
+    // 出力の実バイトで確かめる。
+    const escaped = escapeIcsText('9:00;10:00');
+    expect(escaped).toBe('9:00\\;10:00');
+    expect(escaped.includes('\\')).toBe(true);
+    expect([...escaped].filter((c) => c === '\\')).toHaveLength(1);
+  });
+
+  it('エスケープした値が iCalendar の行として壊れない', () => {
+    // DESCRIPTION 内の生のセミコロンはパラメータ区切りと誤読される。
+    const line = `DESCRIPTION:${escapeIcsText('締切;厳守')}`;
+    expect(line).toBe('DESCRIPTION:締切\\;厳守');
+    // 生のセミコロン（直前がバックスラッシュでないもの）が残っていない。
+    expect(line.slice('DESCRIPTION:'.length)).not.toMatch(/(?<!\\);/);
   });
 });
 
@@ -119,6 +137,13 @@ describe('buildIcs', () => {
     const uids = (text: string): string[] => text.match(/^UID:.*$/gm) ?? [];
     expect(uids(ics)).toEqual(uids(again));
     expect(uids(ics)[0]).toContain('@business-days-schedule');
+  });
+
+  it('UID は補正前の基準日から作る（祝日データが変わっても同じ予定でいられる）', () => {
+    // 確定日 10-23 は補正の結果。UID には基準日 10-25 が入る。
+    const uids = ics.match(/^UID:.*$/gm) ?? [];
+    expect(uids.some((uid) => uid.includes('2026-10-25'))).toBe(true);
+    expect(uids.some((uid) => uid.includes('salary-main-2026-10-23'))).toBe(false);
   });
 
   it('UID が重複しない', () => {

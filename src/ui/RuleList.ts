@@ -96,7 +96,7 @@ export function renderRuleList(
         'div',
         { class: 'empty' },
         h('p', {}, 'まだルールがありません。'),
-        h('p', { class: 'empty-hint' }, '実務でよく使う8件のサンプルから始められます。'),
+        h('p', { class: 'empty-hint' }, '実務でよく使う型をまとめたサンプルから始められます。'),
         button('サンプルを読み込む', () => handlers.onLoadSamples()),
       ),
       h(
