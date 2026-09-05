@@ -45,6 +45,16 @@ const KIND_LABELS: { value: RecurrenceKind; label: string }[] = [
   { value: 'monthlyByBusinessDay', label: '第N営業日' },
   { value: 'monthlyByWeekday', label: '第N曜日' },
   { value: 'weekly', label: '毎週' },
+  { value: 'fiscalRelative', label: '決算月基準' },
+];
+
+/** 決算月基準でよく使う形。数えるより選ぶほうが早い。 */
+const FISCAL_PRESETS: { label: string; offsetMonths: number[]; day: number | 'last' }[] = [
+  { label: '決算日', offsetMonths: [0], day: 'last' },
+  { label: '申告期限（2か月後の末日）', offsetMonths: [2], day: 'last' },
+  { label: '期首（翌月1日）', offsetMonths: [1], day: 1 },
+  { label: '中間申告（8か月後の末日）', offsetMonths: [8], day: 'last' },
+  { label: '四半期末', offsetMonths: [-9, -6, -3, 0], day: 'last' },
 ];
 
 /** 種類を切り替えても入力を失わないよう、種類ごとの下書きを持つ。 */
@@ -54,6 +64,7 @@ function defaultDrafts(current: Recurrence): Record<RecurrenceKind, Recurrence> 
     monthlyByDay: { type: 'monthlyByDay', interval: 1, days: [25], overflow: 'clamp' },
     monthlyByWeekday: { type: 'monthlyByWeekday', interval: 1, nth: [1], weekday: 2 },
     monthlyByBusinessDay: { type: 'monthlyByBusinessDay', interval: 1, nth: [5] },
+    fiscalRelative: { type: 'fiscalRelative', offsetMonths: [2], day: 'last' },
   };
   drafts[current.type] = current;
   return drafts;
@@ -220,7 +231,109 @@ export class RuleEditor {
       case 'monthlyByBusinessDay':
         this.recurrenceBody.append(...this.monthlyByBusinessDayFields(recurrence));
         break;
+      case 'fiscalRelative':
+        this.recurrenceBody.append(...this.fiscalRelativeFields(recurrence));
+        break;
     }
+  }
+
+  /** 決算月基準（§5.2 (e)）。決算月そのものは営業日カレンダーの設定から取る。 */
+  private fiscalRelativeFields(
+    recurrence: Recurrence & { type: 'fiscalRelative' },
+  ): HTMLElement[] {
+    const container = h('div', {});
+
+    const render = (): void => {
+      clear(container);
+
+      const presets = h('div', { class: 'presets' });
+      for (const preset of FISCAL_PRESETS) {
+        presets.append(
+          button(
+            preset.label,
+            () => {
+              recurrence.offsetMonths = [...preset.offsetMonths];
+              recurrence.day = preset.day;
+              render();
+              this.refresh();
+            },
+            'button button-sm button-quiet',
+          ),
+        );
+      }
+
+      const rows = h('div', { class: 'rows' });
+      recurrence.offsetMonths.forEach((offset, index) => {
+        rows.append(
+          h(
+            'div',
+            { class: 'row' },
+            h('span', { class: 'unit' }, '決算月の'),
+            numberInput(
+              offset,
+              (value) => {
+                recurrence.offsetMonths[index] = Math.round(value);
+                this.refresh();
+              },
+              { min: -24, max: 24 },
+            ),
+            h('span', { class: 'unit' }, 'か月後'),
+            button(
+              '削除',
+              () => {
+                recurrence.offsetMonths.splice(index, 1);
+                render();
+                this.refresh();
+              },
+              'button button-sm button-quiet',
+            ),
+          ),
+        );
+      });
+      rows.append(
+        button(
+          '＋ 追加',
+          () => {
+            recurrence.offsetMonths.push(0);
+            render();
+            this.refresh();
+          },
+          'button button-sm',
+        ),
+      );
+
+      container.append(presets, rows);
+    };
+    render();
+
+    const dayOptions = [
+      { value: 'last', label: '末日' },
+      ...Array.from({ length: 31 }, (_, i) => ({ value: String(i + 1), label: `${i + 1}日` })),
+    ];
+
+    const fiscalMonth = this.calendars.find(
+      (calendar) => calendar.id === this.draft.calendarId,
+    )?.fiscalYearEndMonth;
+
+    return [
+      field(
+        'ずれ',
+        container,
+        'マイナスにすると決算月より前になります。四半期のように複数指定もできます。',
+      ),
+      field(
+        '日',
+        select(dayOptions, recurrence.day === 'last' ? 'last' : String(recurrence.day), (value) => {
+          recurrence.day = value === 'last' ? 'last' : Number(value);
+          this.refresh();
+        }),
+      ),
+      h(
+        'p',
+        { class: 'field-hint' },
+        `決算月は営業日カレンダーの設定を使います（現在: ${fiscalMonth ?? 3}月）。設定を変えると、このルールの日付もまとめて動きます。`,
+      ),
+    ];
   }
 
   private weeklyFields(recurrence: Recurrence & { type: 'weekly' }): HTMLElement[] {

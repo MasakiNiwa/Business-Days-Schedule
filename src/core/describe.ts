@@ -86,7 +86,20 @@ export function describeRecurrence(recurrence: Recurrence): string {
       const interval = monthlyIntervalPrefix(recurrence.interval, months !== '');
       return `${interval}${months}${nth}`;
     }
+
+    case 'fiscalRelative': {
+      if (recurrence.offsetMonths.length === 0) return '決算月からのずれ未設定';
+      const day = recurrence.day === 'last' ? '末日' : `${recurrence.day}日`;
+      const offsets = joinList(recurrence.offsetMonths.map(describeFiscalOffset));
+      return `${offsets}の${day}`;
+    }
   }
+}
+
+/** 決算月からのずれを「決算月の2か月後」のように読ませる。 */
+function describeFiscalOffset(offset: number): string {
+  if (offset === 0) return '決算月';
+  return offset > 0 ? `決算月の${offset}か月後` : `決算月の${-offset}か月前`;
 }
 
 export function describeAdjustment(adjust: Adjustment, recurrence?: Recurrence): string {

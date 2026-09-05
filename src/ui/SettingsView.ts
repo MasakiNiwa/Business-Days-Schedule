@@ -10,9 +10,9 @@ import { createBusinessDayCalendar } from '../core/businessDay';
 import { monthOf, todayInTokyo, yearOf } from '../core/dateUtil';
 import type { HolidayLookup } from '../core/holidays';
 import { exportFileName } from '../core/storage';
-import type { BusinessCalendar, DateStr, Weekday } from '../types';
+import type { BusinessCalendar, DateStr, Month, Weekday } from '../types';
 import { validateCalendar } from '../core/validate';
-import { button, checkbox, field } from './controls';
+import { button, checkbox, field, select } from './controls';
 import { clear, h } from './dom';
 
 const WEEKDAY_NAMES = ['日', '月', '火', '水', '木', '金', '土'] as const;
@@ -120,6 +120,18 @@ export class SettingsView {
         this.calendars[index] = { ...calendar, useNationalHolidays: value };
         this.commit();
       }),
+      field(
+        '決算月',
+        select(
+          Array.from({ length: 12 }, (_, i) => ({ value: String(i + 1), label: `${i + 1}月` })),
+          String(calendar.fiscalYearEndMonth ?? 3),
+          (value) => {
+            this.calendars[index] = { ...calendar, fiscalYearEndMonth: Number(value) as Month };
+            this.commit();
+          },
+        ),
+        '事業年度の終わる月。「決算月基準」のルール（申告期限・期首・中間申告・四半期など）は、ここを変えるとまとめて追従します。',
+      ),
       this.closedRangesField(calendar, index),
       this.dateListField(
         '臨時休業日',

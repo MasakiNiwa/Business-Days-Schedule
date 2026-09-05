@@ -62,6 +62,11 @@ export type AnnualRange = {
 export type BusinessCalendar = {
   id: string;
   name: string;
+  /**
+   * 決算月（事業年度の終わる月）。未設定なら3月とみなす。
+   * 「決算日から2か月後」のような、会計年度を基準にした予定の起点になる。
+   */
+  fiscalYearEndMonth?: Month;
   /** 週末として休業扱いにする曜日。既定は [0, 6]。 */
   weekendDays: Weekday[];
   useNationalHolidays: boolean;
@@ -112,11 +117,26 @@ export type MonthlyByBusinessDayRecurrence = {
   nth: number[];
 };
 
+/**
+ * 決算月を起点にした反復。
+ *
+ * 決算月の末日を基準日とし、そこから offsetMonths か月ずらした月の day 日に発生する。
+ * 決算月を変えるだけで、申告期限・期首・中間申告・四半期がまとめて追従する。
+ */
+export type FiscalRelativeRecurrence = {
+  type: 'fiscalRelative';
+  /** 決算月からのずれ（月数）。0 = 決算月、2 = 決算月の2か月後、-11 = 期首月。 */
+  offsetMonths: number[];
+  /** ずらした先の月の何日か。存在しない日は末日に丸める。 */
+  day: number | 'last';
+};
+
 export type Recurrence =
   | WeeklyRecurrence
   | MonthlyByDayRecurrence
   | MonthlyByWeekdayRecurrence
-  | MonthlyByBusinessDayRecurrence;
+  | MonthlyByBusinessDayRecurrence
+  | FiscalRelativeRecurrence;
 
 // ---------------------------------------------------------------------------
 // 営業日補正・事前通知・ルール (docs/SPEC.md §5.3 - §5.5)

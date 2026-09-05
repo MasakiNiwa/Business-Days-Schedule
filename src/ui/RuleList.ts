@@ -81,7 +81,10 @@ export function renderRuleList(
       h(
         'div',
         { class: 'panel-actions' },
-        button('＋ 追加', () => handlers.onAdd(), 'button button-sm button-primary'),
+        // ルールが増えたあとでもサンプルを足せるよう、常に置く。
+        // 空のときしか出していなかったため、使い始めると到達できなくなっていた。
+        button('＋ 新規ルール', () => handlers.onAdd(), 'button button-sm button-primary'),
+        button('サンプル', () => handlers.onLoadSamples(), 'button button-sm'),
         button('設定', () => handlers.onOpenSettings(), 'button button-sm button-quiet'),
       ),
     ),

@@ -17,7 +17,7 @@ const WEEKDAYS = new Set([0, 1, 2, 3, 4, 5, 6]);
 const NTH_WEEKDAYS = new Set([1, 2, 3, 4, 5, -1]);
 
 function validateRecurrence(recurrence: Recurrence, issues: ValidationIssue[]): void {
-  if (!Number.isInteger(recurrence.interval) || recurrence.interval < 1) {
+  if ('interval' in recurrence && (!Number.isInteger(recurrence.interval) || recurrence.interval < 1)) {
     issues.push({ path: 'recurrence.interval', message: '間隔は1以上の整数で指定してください', severity: 'error' });
   }
   if ('months' in recurrence && recurrence.months !== undefined) {
@@ -87,6 +87,29 @@ function validateRecurrence(recurrence: Recurrence, issues: ValidationIssue[]): 
       }
       break;
     }
+
+    case 'fiscalRelative': {
+      if (recurrence.offsetMonths.length === 0) {
+        issues.push({
+          path: 'recurrence.offsetMonths',
+          message: '決算月からのずれを1つ以上指定してください',
+          severity: 'error',
+        });
+      }
+      for (const offset of recurrence.offsetMonths) {
+        if (!Number.isInteger(offset) || Math.abs(offset) > 24) {
+          issues.push({
+            path: 'recurrence.offsetMonths',
+            message: `決算月からのずれは -24〜24 の整数で指定してください: ${offset}`,
+            severity: 'error',
+          });
+        }
+      }
+      if (recurrence.day !== 'last' && (!Number.isInteger(recurrence.day) || recurrence.day < 1 || recurrence.day > 31)) {
+        issues.push({ path: 'recurrence.day', message: `日が不正です: ${recurrence.day}`, severity: 'error' });
+      }
+      break;
+    }
   }
 }
 
@@ -133,6 +156,14 @@ export function validateRule(rule: Rule): ValidationIssue[] {
 
 export function validateCalendar(calendar: BusinessCalendar): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
+  if (
+    calendar.fiscalYearEndMonth !== undefined &&
+    (!Number.isInteger(calendar.fiscalYearEndMonth) ||
+      calendar.fiscalYearEndMonth < 1 ||
+      calendar.fiscalYearEndMonth > 12)
+  ) {
+    issues.push({ path: 'fiscalYearEndMonth', message: '決算月が不正です', severity: 'error' });
+  }
   if (calendar.name.trim() === '') {
     issues.push({ path: 'name', message: 'カレンダー名を入力してください', severity: 'error' });
   }

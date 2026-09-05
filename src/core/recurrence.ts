@@ -9,6 +9,7 @@
 import type {
   DateRange,
   DateStr,
+  FiscalRelativeRecurrence,
   Month,
   MonthlyByBusinessDayRecurrence,
   MonthlyByDayRecurrence,
@@ -218,6 +219,50 @@ function expandMonthlyByBusinessDay(
 }
 
 // ---------------------------------------------------------------------------
+// fiscalRelative
+// ---------------------------------------------------------------------------
+
+/**
+ * 決算月の末日を起点に、offsetMonths か月ずらした月の day 日を求める。
+ *
+ * 決算月を変えるだけで申告期限や期首がまとめて追従するのが狙いなので、
+ * 起点は「決算月」であって暦年ではない。
+ */
+export function fiscalRelativeDate(
+  fiscalYear: number,
+  fiscalYearEndMonth: Month,
+  offsetMonths: number,
+  day: number | 'last',
+): DateStr {
+  const total = fiscalYear * 12 + (fiscalYearEndMonth - 1) + offsetMonths;
+  const year = Math.floor(total / 12);
+  const month = (total % 12) + 1;
+  const last = lastDayOfMonth(year, month);
+  // 存在しない日は末日に丸める。申告期限などは「その月の末日まで」の意味になるため。
+  const resolved = day === 'last' ? last : Math.min(Math.max(1, Math.floor(day)), last);
+  return makeDate(year, month, resolved);
+}
+
+function expandFiscalRelative(
+  recurrence: FiscalRelativeRecurrence,
+  range: DateRange,
+  fiscalYearEndMonth: Month,
+): DateStr[] {
+  const result: DateStr[] = [];
+  // ずれが大きいと決算年と暦年が離れるため、前後2年ぶん多めに回してから範囲で切る。
+  const fromYear = parseDate(range.start).year - 2;
+  const toYear = parseDate(range.end).year + 2;
+
+  for (let fiscalYear = fromYear; fiscalYear <= toYear; fiscalYear += 1) {
+    for (const offset of recurrence.offsetMonths) {
+      if (!Number.isInteger(offset)) continue;
+      result.push(fiscalRelativeDate(fiscalYear, fiscalYearEndMonth, offset, recurrence.day));
+    }
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // エントリポイント
 // ---------------------------------------------------------------------------
 
@@ -246,6 +291,9 @@ export function expandRecurrence(
       break;
     case 'monthlyByBusinessDay':
       dates = expandMonthlyByBusinessDay(recurrence, range, anchorDate, ctx.calendar);
+      break;
+    case 'fiscalRelative':
+      dates = expandFiscalRelative(recurrence, range, ctx.calendar.fiscalYearEndMonth);
       break;
   }
   const unique = [...new Set(dates)].sort();

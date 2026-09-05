@@ -22,9 +22,14 @@ export type ClosedReason =
   | { kind: 'closedRange'; label: string }
   | { kind: 'closedDate' };
 
+/** 決算月が未設定のカレンダーで使う既定値。日本で最も多い3月決算に合わせる。 */
+export const DEFAULT_FISCAL_YEAR_END_MONTH: Month = 3;
+
 export type BusinessDayCalendar = {
   readonly id: string;
   readonly name: string;
+  /** 決算月（事業年度の終わる月）。未設定のカレンダーでは既定値に解決される。 */
+  readonly fiscalYearEndMonth: Month;
   isBusinessDay(date: DateStr): boolean;
   /** 休業日ならその理由。営業日なら null。 */
   closedReason(date: DateStr): ClosedReason | null;
@@ -127,6 +132,7 @@ export function createBusinessDayCalendar(
   return {
     id: calendar.id,
     name: calendar.name,
+    fiscalYearEndMonth: calendar.fiscalYearEndMonth ?? DEFAULT_FISCAL_YEAR_END_MONTH,
     isBusinessDay,
     closedReason,
     nextBusinessDay: (date) => seek(date, 1, false),
@@ -165,6 +171,7 @@ export function createDefaultCalendars(): BusinessCalendar[] {
     {
       id: COMPANY_CALENDAR_ID,
       name: '自社カレンダー',
+      fiscalYearEndMonth: DEFAULT_FISCAL_YEAR_END_MONTH,
       weekendDays: [0, 6],
       useNationalHolidays: true,
       closedRanges: [{ from: '12-29', to: '01-03', label: '年末年始休業' }],

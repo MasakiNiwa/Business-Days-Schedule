@@ -258,19 +258,15 @@
       "id": "tax-corporate-return",
       "title": "法人税・消費税の申告",
       "color": "red",
-      "note": "3月決算の場合、事業年度終了から2か月以内。決算月に合わせて調整する。",
+      "note": "事業年度終了から2か月以内。決算月は営業日カレンダーの設定に従う。",
       "enabled": true,
       "calendarId": "company",
       "recurrence": {
-        "type": "monthlyByDay",
-        "interval": 1,
-        "days": [
-          "last"
+        "type": "fiscalRelative",
+        "offsetMonths": [
+          2
         ],
-        "overflow": "clamp",
-        "months": [
-          5
-        ]
+        "day": "last"
       },
       "adjust": {
         "mode": "next",
@@ -281,6 +277,96 @@
           "offset": -20,
           "unit": "business",
           "label": "決算作業の開始"
+        }
+      ],
+      "period": {
+        "start": null,
+        "end": null
+      },
+      "skipDates": [],
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "updatedAt": "2026-09-05T00:00:00.000Z"
+    },
+    {
+      "id": "tax-fiscal-start",
+      "title": "期首（新年度の開始）",
+      "color": "green",
+      "note": "決算月の翌月1日。予算・目標の切り替え。",
+      "enabled": true,
+      "calendarId": "company",
+      "recurrence": {
+        "type": "fiscalRelative",
+        "offsetMonths": [
+          1
+        ],
+        "day": 1
+      },
+      "adjust": {
+        "mode": "next",
+        "keepInMonth": false
+      },
+      "notices": [],
+      "period": {
+        "start": null,
+        "end": null
+      },
+      "skipDates": [],
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "updatedAt": "2026-09-05T00:00:00.000Z"
+    },
+    {
+      "id": "tax-interim-return",
+      "title": "中間申告・納付",
+      "color": "orange",
+      "note": "事業年度開始から6か月経過後2か月以内。前年の税額によっては不要。",
+      "enabled": true,
+      "calendarId": "company",
+      "recurrence": {
+        "type": "fiscalRelative",
+        "offsetMonths": [
+          8
+        ],
+        "day": "last"
+      },
+      "adjust": {
+        "mode": "next",
+        "keepInMonth": false
+      },
+      "notices": [],
+      "period": {
+        "start": null,
+        "end": null
+      },
+      "skipDates": [],
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "updatedAt": "2026-09-05T00:00:00.000Z"
+    },
+    {
+      "id": "tax-quarter-end",
+      "title": "四半期末",
+      "color": "pink",
+      "note": "決算月を基準にした四半期。決算月を変えると四半期もずれる。",
+      "enabled": true,
+      "calendarId": "company",
+      "recurrence": {
+        "type": "fiscalRelative",
+        "offsetMonths": [
+          -9,
+          -6,
+          -3,
+          0
+        ],
+        "day": "last"
+      },
+      "adjust": {
+        "mode": "prev",
+        "keepInMonth": false
+      },
+      "notices": [
+        {
+          "offset": -3,
+          "unit": "business",
+          "label": "四半期資料の準備"
         }
       ],
       "period": {

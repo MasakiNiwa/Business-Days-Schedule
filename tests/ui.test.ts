@@ -284,15 +284,27 @@ describe('renderRuleList', () => {
     expect(h.onLoadSamples).toHaveBeenCalledOnce();
   });
 
-  it('追加・設定・閉じるを呼べる', () => {
+  it('新規ルール・サンプル・設定・閉じるを呼べる', () => {
     const h = handlers();
     const section = renderRuleList([], calendars, h);
-    clickByText(section, '＋ 追加');
+    clickByText(section, '＋ 新規ルール');
+    clickByText(section, 'サンプル');
     clickByText(section, '設定');
     clickByText(section, '閉じる');
     expect(h.onAdd).toHaveBeenCalledOnce();
+    expect(h.onLoadSamples).toHaveBeenCalledOnce();
     expect(h.onOpenSettings).toHaveBeenCalledOnce();
     expect(h.onClose).toHaveBeenCalledOnce();
+  });
+
+  it('ルールがある状態でもサンプルへ行ける', () => {
+    // 空のときしか導線が無く、使い始めると到達できなくなっていた。
+    const h = handlers();
+    const section = renderRuleList([salaryRule], calendars, h);
+    clickByText(section, 'サンプル');
+    expect(h.onLoadSamples).toHaveBeenCalledOnce();
+    clickByText(section, '＋ 新規ルール');
+    expect(h.onAdd).toHaveBeenCalledOnce();
   });
 
   it('編集と有効/無効の切り替えを呼べる', () => {
