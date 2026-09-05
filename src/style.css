@@ -1122,6 +1122,204 @@ button {
   flex-wrap: wrap;
 }
 
+
+/* --- 表示の切り替え ------------------------------------------------------ */
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.segment {
+  padding: 0.35rem 0.7rem;
+  font-size: 0.85rem;
+  border: none;
+  background: var(--bg);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.segment + .segment {
+  border-left: 1px solid var(--border-strong);
+}
+
+.segment[aria-pressed='true'] {
+  background: var(--fg);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+.segment:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.month-summary {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+}
+
+/* --- 一覧表示 ------------------------------------------------------------ */
+
+.list-pane {
+  width: 100%;
+}
+
+.list {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.list th {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border-strong);
+  white-space: nowrap;
+}
+
+.list td {
+  padding: 0.25rem 0.5rem;
+  vertical-align: top;
+  border-bottom: 1px solid transparent;
+}
+
+/* 日付が変わる行にだけ罫線を引き、同じ日の予定はひとかたまりに見せる。 */
+.list-row.is-group-start > td {
+  border-top: 1px solid var(--border);
+}
+
+.list-row.is-today > td {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.list-row.is-closed .list-date-button,
+.list-row.is-closed .list-weekday {
+  opacity: 0.75;
+}
+
+.list-date {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  width: 7.5rem;
+}
+
+.list-date-button {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  padding: 0.1rem 0.2rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.list-date-button:hover {
+  background: var(--bg-sunken);
+}
+
+.list-date-button:focus-visible,
+.list-title-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.list-weekday {
+  white-space: nowrap;
+  width: 6rem;
+}
+
+.list-weekday.is-red {
+  color: var(--red);
+}
+
+.list-weekday.is-blue {
+  color: var(--blue);
+}
+
+.list-holiday {
+  margin-left: 0.35rem;
+  font-size: 0.72rem;
+  color: var(--fg-muted);
+}
+
+.list-title-button {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  padding: 0.1rem 0.2rem;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.list-title-button:hover {
+  background: var(--bg-sunken);
+}
+
+.list-title-button .rule-dot {
+  margin-top: 0;
+  align-self: center;
+}
+
+.is-notice-title {
+  font-weight: 400;
+  color: var(--fg-muted);
+}
+
+.list-shift {
+  white-space: nowrap;
+  width: 5.5rem;
+}
+
+.list-notice-origin {
+  font-size: 0.72rem;
+  color: var(--fg-faint);
+}
+
+.list-note {
+  color: var(--fg-faint);
+  font-size: 0.78rem;
+}
+
+.list-summary {
+  margin: 0.7rem 0 0;
+  font-size: 0.78rem;
+  color: var(--fg-faint);
+}
+
+/* 印刷時だけ出す見出し。画面上はヘッダーに同じ情報がある。 */
+.print-title {
+  display: none;
+}
+
+@media (max-width: 48rem) {
+  .list-note,
+  .list th:nth-child(5) {
+    display: none;
+  }
+
+  .list-date {
+    width: auto;
+  }
+
+  .list-weekday {
+    width: auto;
+  }
+}
+
 /* --- レスポンシブ ------------------------------------------------------ */
 
 @media (max-width: 60rem) {
@@ -1204,13 +1402,53 @@ button {
 /* --- 印刷 -------------------------------------------------------------- */
 
 @media print {
-  .app-header button,
+  /*
+   * 用紙では常に白地・黒文字にする。
+   * ダークの定義は :root:not([data-theme='light']) と :root[data-theme='dark'] に
+   * 置いてあり、素の :root より詳細度が高い。ここで同じセレクタを並べて上書きしないと、
+   * ダークモードのまま印刷したときに文字色が薄いまま残ってしまう。
+   */
+  :root,
+  :root:not([data-theme='light']),
+  :root[data-theme='dark'] {
+    --fg: #000;
+    --fg-muted: #333;
+    --fg-faint: #444;
+    --bg: #fff;
+    --bg-sunken: #fff;
+    --bg-closed: #eee;
+    --border: #999;
+    --border-strong: #555;
+    --red: #b00;
+    --blue: #005;
+    font-size: 10pt;
+  }
+
+  body {
+    background: #fff;
+  }
+
+  .app-header,
   .modal,
   .empty-prompt,
-  .app-footer,
   .banner,
-  .legend {
+  .legend,
+  .footer-link {
     display: none;
+  }
+
+  /* 営業日数と祝日データの出典は、紙に残る情報として意味があるので印刷する。 */
+  .month-summary {
+    margin: 0 0 0.6em;
+    color: #333;
+  }
+
+  .app-footer {
+    margin-top: 0.8em;
+    padding-top: 0.4em;
+    border-top: 1px solid #999;
+    font-size: 0.75em;
+    color: #444;
   }
 
   #app {
@@ -1218,13 +1456,61 @@ button {
     padding: 0;
   }
 
+  /* 画面ではヘッダーが月やレンジを示しているが、紙には残らないので見出しを出す。 */
+  .print-title {
+    display: block;
+    margin: 0 0 0.6em;
+    font-size: 1.2em;
+    font-weight: 600;
+  }
+
   .cell {
     height: auto;
-    min-height: 4.5rem;
+    min-height: 3.2cm;
+    cursor: auto;
+  }
+
+  .cell.is-closed {
+    background: #eee;
+  }
+
+  /* 今日の枠は色に頼らず太線で示す。単色印刷でも分かるようにするため。 */
+  .cell.is-today {
+    outline: 2px solid #000;
+  }
+
+  .cell.is-selected {
+    outline: none;
+    background: inherit;
+  }
+
+  .cell-day {
+    cursor: auto;
   }
 
   .chip {
     border: 1px solid var(--chip);
     background: transparent;
+    color: #000;
+    cursor: auto;
+  }
+
+  .chip.is-notice {
+    border-style: dashed;
+  }
+
+  /* 行が用紙をまたいで割れないようにする。 */
+  .calendar tr,
+  .list-row {
+    break-inside: avoid;
+  }
+
+  .list thead {
+    display: table-header-group;
+  }
+
+  .list-date-button,
+  .list-title-button {
+    cursor: auto;
   }
 }

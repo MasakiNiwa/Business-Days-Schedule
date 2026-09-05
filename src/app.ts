@@ -7,7 +7,8 @@
 
 import { createBusinessDayCalendar, COMPANY_CALENDAR_ID } from './core/businessDay';
 import type { BusinessDayCalendar } from './core/businessDay';
-import { addDays, monthOf, todayInTokyo, yearOf } from './core/dateUtil';
+import { addDays, lastDayOfMonth, monthOf, todayInTokyo, yearOf } from './core/dateUtil';
+import { select } from './ui/controls';
 import { createHolidayLookup, fetchHolidayData } from './core/holidays';
 import type { HolidayLookup } from './core/holidays';
 import { buildMonthGrid, gridRangeOf, shiftMonth } from './core/monthGrid';
@@ -29,6 +30,7 @@ import type { BusinessCalendar, DateStr, Month, Rule } from './types';
 import { renderCalendar, renderLegend } from './ui/CalendarView';
 import { renderDayDetail } from './ui/DayDetail';
 import { renderHelp } from './ui/HelpView';
+import { LIST_RANGES, renderList } from './ui/ListView';
 import { applyTheme, nextTheme, themeIcon, themeLabel } from './ui/theme';
 import { button } from './ui/controls';
 import { createDialog } from './ui/dialog';
@@ -119,6 +121,18 @@ export class App {
   // -------------------------------------------------------------------------
   // 操作
   // -------------------------------------------------------------------------
+
+  private setView(view: 'calendar' | 'list'): void {
+    this.state.prefs = { ...this.state.prefs, defaultView: view };
+    this.persist();
+    this.render();
+  }
+
+  private setListDays(days: number): void {
+    this.state.prefs = { ...this.state.prefs, listDays: days };
+    this.persist();
+    this.render();
+  }
 
   private goToMonth(count: number): void {
     this.view = { ...this.view, ...shiftMonth(this.view.year, this.view.month, count) };
@@ -284,18 +298,56 @@ export class App {
     helpButton.setAttribute('title', 'ヘルプ');
     if (this.mode.kind === 'help') helpButton.setAttribute('aria-pressed', 'true');
 
+    const isList = this.state.prefs.defaultView === 'list';
+
+    const viewToggle = h('div', { class: 'segmented', role: 'group', 'aria-label': '表示の切り替え' });
+    for (const [value, label] of [['calendar', 'カレンダー'], ['list', '一覧']] as const) {
+      const item = h(
+        'button',
+        {
+          type: 'button',
+          class: 'segment',
+          'aria-pressed': this.state.prefs.defaultView === value ? 'true' : 'false',
+        },
+        label,
+      );
+      item.addEventListener('click', () => this.setView(value));
+      viewToggle.append(item);
+    }
+
+    const left = isList
+      ? h(
+          'div',
+          { class: 'month-nav' },
+          h('h1', { class: 'month-label' }, '今後の予定'),
+          select(
+            LIST_RANGES.map((days) => ({ value: String(days), label: `${days}日先まで` })),
+            String(this.state.prefs.listDays),
+            (value) => this.setListDays(Number(value)),
+          ),
+        )
+      : h(
+          'div',
+          { class: 'month-nav' },
+          prev,
+          h('h1', { class: 'month-label' }, `${this.view.year}年${this.view.month}月`),
+          next,
+          button('今日', () => this.goToToday(), 'button button-sm'),
+        );
+
     return h(
       'header',
       { class: 'app-header' },
+      left,
       h(
         'div',
-        { class: 'month-nav' },
-        prev,
-        h('h1', { class: 'month-label' }, `${this.view.year}年${this.view.month}月`),
-        next,
-        button('今日', () => this.goToToday(), 'button button-sm'),
+        { class: 'header-actions' },
+        viewToggle,
+        rulesButton,
+        themeButton,
+        settingsButton,
+        helpButton,
       ),
-      h('div', { class: 'header-actions' }, rulesButton, themeButton, settingsButton, helpButton),
     );
   }
 
@@ -317,12 +369,12 @@ export class App {
       { class: 'app-footer' },
       h(
         'p',
-        {},
+        { class: 'footer-source' },
         `祝日データ: ${meta.source}（${meta.range.from} 〜 ${meta.range.to} / ${meta.count} 件 / 取得 ${meta.fetchedAt.slice(0, 10)}）`,
       ),
       h(
         'p',
-        {},
+        { class: 'footer-link' },
         h('a', { href: 'https://github.com/MasakiNiwa/Business-Days-Schedule' }, 'GitHub リポジトリ'),
       ),
     );
@@ -513,9 +565,18 @@ export class App {
     const hasShift = all.some((occurrence) => occurrence.shifted);
     const selectedDate = this.mode.kind === 'day' ? this.mode.date : null;
 
+    const businessDays = baseCalendar.businessDaysOfMonth(this.view.year, this.view.month).length;
+    const totalDays = lastDayOfMonth(this.view.year, this.view.month);
+
     return h(
       'section',
       { class: 'calendar-pane', 'aria-label': '月カレンダー' },
+      h('p', { class: 'print-title' }, `${this.view.year}年${this.view.month}月`),
+      h(
+        'p',
+        { class: 'month-summary' },
+        `${baseCalendar.name}: 営業日 ${businessDays}日 / 休業日 ${totalDays - businessDays}日`,
+      ),
       renderCalendar(grid, rulesById, { onSelectDay: (date) => this.selectDay(date) }, selectedDate),
       renderLegend(hasNotice, hasShift),
     );
@@ -538,6 +599,36 @@ export class App {
         { class: 'field-hint' },
         '給与振込・月次締め・第5営業日の請求書発行など、実務でよく使う8件から始められます。',
       ),
+    );
+  }
+
+  /** 一覧表示（§8.3）。今日から prefs.listDays 日ぶんを時系列で並べる。 */
+  private buildListPane(): HTMLElement {
+    const days = this.state.prefs.listDays;
+    const calendars = this.businessCalendars();
+    const ctx = this.scheduleContext(calendars);
+    const businessCalendar = calendars.get(ctx.fallbackCalendarId);
+    if (businessCalendar === undefined) throw new Error('営業日カレンダーが1件もありません');
+
+    const { occurrences } = expandRules(
+      this.state.rules,
+      { start: this.today, end: addDays(this.today, days - 1) },
+      ctx,
+    );
+
+    return renderList(
+      occurrences,
+      new Map(this.state.rules.map((rule) => [rule.id, rule])),
+      new Map(this.state.calendars.map((item) => [item.id, item])),
+      businessCalendar,
+      this.holidays,
+      this.today,
+      days,
+      this.today,
+      {
+        onEditRule: (ruleId) => this.startEdit(ruleId),
+        onSelectDay: (date) => this.selectDay(date),
+      },
     );
   }
 
@@ -570,7 +661,9 @@ export class App {
             ),
           ]),
       ...[...new Set(notices)].map((message) => h('p', { class: 'banner' }, message)),
-      this.buildCalendarPane(occurrencesByDate),
+      this.state.prefs.defaultView === 'list'
+        ? this.buildListPane()
+        : this.buildCalendarPane(occurrencesByDate),
       ...(this.state.rules.length === 0 ? [this.renderEmptyPrompt()] : []),
       this.renderFooter(),
     );
