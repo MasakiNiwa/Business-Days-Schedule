@@ -148,6 +148,16 @@ export function textInput(
   return input;
 }
 
+/**
+ * 入力欄に名前を与える。
+ * 1つの field に複数の入力欄が並ぶ場合（期間の開始・終了など）、
+ * 見出しだけでは個々の欄の名前にならないため、欄ごとに付ける。
+ */
+export function named<T extends HTMLElement>(element: T, label: string): T {
+  element.setAttribute('aria-label', label);
+  return element;
+}
+
 /** 検証結果を入力欄へ反映する。エラーの所在を支援技術にも伝えるため。 */
 export function markInvalid(element: HTMLElement, invalid: boolean): void {
   if (invalid) element.setAttribute('aria-invalid', 'true');

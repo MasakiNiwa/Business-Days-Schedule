@@ -22,7 +22,9 @@ async function closeDialog(page: Page): Promise<void> {
 
 async function loadSamplePack(page: Page, name: string): Promise<void> {
   await openRulePanel(page);
+  await expect(page.locator('dialog .rule-panel')).toBeVisible();
   await page.getByRole('button', { name: 'サンプル', exact: true }).click();
+  await expect(page.locator('dialog .samples')).toBeVisible();
   await page
     .locator('.sample-item')
     .filter({ hasText: name })

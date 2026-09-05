@@ -12,8 +12,9 @@ import type { HolidayLookup } from '../core/holidays';
 import { exportFileName } from '../core/storage';
 import type { BusinessCalendar, DateStr, Month, Weekday } from '../types';
 import { validateCalendar } from '../core/validate';
-import { button, checkbox, field, select } from './controls';
+import { button, checkbox, field, named, select } from './controls';
 import { clear, h } from './dom';
+import { BUILD_INFO, longVersion } from '../core/buildInfo';
 
 const WEEKDAY_NAMES = ['日', '月', '火', '水', '木', '金', '土'] as const;
 const MONTH_DAY_PATTERN = /^\d{2}-\d{2}$/;
@@ -67,7 +68,7 @@ export class SettingsView {
     for (const [index, calendar] of this.calendars.entries()) {
       this.body.append(this.calendarSection(calendar, index));
     }
-    this.body.append(this.dataSection(), this.holidaySection());
+    this.body.append(this.dataSection(), this.holidaySection(), this.aboutSection());
   }
 
   private calendarSection(calendar: BusinessCalendar, index: number): HTMLElement {
@@ -163,9 +164,18 @@ export class SettingsView {
     };
 
     for (const [rangeIndex, range] of calendar.closedRanges.entries()) {
-      const from = h('input', { type: 'text', class: 'input input-md', value: range.from, placeholder: 'MM-DD' });
-      const to = h('input', { type: 'text', class: 'input input-md', value: range.to, placeholder: 'MM-DD' });
-      const label = h('input', { type: 'text', class: 'input', value: range.label, placeholder: '名称' });
+      const from = named(
+        h('input', { type: 'text', class: 'input input-md', value: range.from, placeholder: 'MM-DD' }),
+        `休業期間 ${rangeIndex + 1}: 開始（MM-DD）`,
+      );
+      const to = named(
+        h('input', { type: 'text', class: 'input input-md', value: range.to, placeholder: 'MM-DD' }),
+        `休業期間 ${rangeIndex + 1}: 終了（MM-DD）`,
+      );
+      const label = named(
+        h('input', { type: 'text', class: 'input', value: range.label, placeholder: '名称' }),
+        `休業期間 ${rangeIndex + 1}: 名称`,
+      );
 
       const apply = (): void => {
         if (!MONTH_DAY_PATTERN.test(from.value) || !MONTH_DAY_PATTERN.test(to.value)) return;
@@ -224,7 +234,7 @@ export class SettingsView {
     }
     if (dates.length === 0) list.append(h('li', { class: 'field-hint' }, 'なし'));
 
-    const picker = h('input', { type: 'date', class: 'input' });
+    const picker = named(h('input', { type: 'date', class: 'input' }), `${label}に追加する日付`);
     return field(
       label,
       h(
@@ -246,8 +256,11 @@ export class SettingsView {
   }
 
   private dataSection(): HTMLElement {
-    const fileInput = h('input', { type: 'file', accept: 'application/json,.json', class: 'input' });
-    const modeSelect = h('select', { class: 'select' });
+    const fileInput = named(
+      h('input', { type: 'file', accept: 'application/json,.json', class: 'input' }),
+      '取り込む JSON ファイル',
+    );
+    const modeSelect = named(h('select', { class: 'select' }), '取り込み方');
     modeSelect.append(
       h('option', { value: 'replace' }, '置き換える'),
       h('option', { value: 'merge' }, 'マージする（ID 重複は取り込み側を採用）'),
@@ -285,6 +298,26 @@ export class SettingsView {
         'すべて削除',
         button('この端末の設定をすべて削除', () => this.handlers.onClearAll(), 'button button-danger'),
         'ルール・カレンダー設定をこの端末から消します。取り消せません。',
+      ),
+    );
+  }
+
+  /** 版の情報。不具合の報告時に、どのビルドを見ているかを伝えられるようにする。 */
+  private aboutSection(): HTMLElement {
+    const rows: [string, string][] = [
+      ['アプリ', '営業日スケジュール'],
+      ['版', longVersion()],
+      ['ビルド日時', BUILD_INFO.builtAt === '' ? '不明' : BUILD_INFO.builtAt],
+      ['コミット', BUILD_INFO.commit],
+    ];
+    return h(
+      'section',
+      { class: 'editor-section' },
+      h('h3', { class: 'editor-heading' }, 'このアプリについて'),
+      h(
+        'dl',
+        { class: 'meta-list' },
+        ...rows.flatMap(([term, value]) => [h('dt', {}, term), h('dd', {}, value)]),
       ),
     );
   }

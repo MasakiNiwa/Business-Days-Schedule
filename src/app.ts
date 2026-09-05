@@ -8,7 +8,7 @@
 import { createBusinessDayCalendar, COMPANY_CALENDAR_ID } from './core/businessDay';
 import type { BusinessDayCalendar } from './core/businessDay';
 import { addDays, lastDayOfMonth, monthOf, todayInTokyo, yearOf } from './core/dateUtil';
-import { select } from './ui/controls';
+import { named, select } from './ui/controls';
 import { createHolidayLookup, fetchHolidayData, outOfRangeMessage } from './core/holidays';
 import type { HolidayLookup } from './core/holidays';
 import { buildMonthGrid, gridRangeOf, shiftMonth } from './core/monthGrid';
@@ -44,6 +44,7 @@ import {
 } from './core/exportCalendar';
 import { attachHorizontalSwipe } from './ui/swipe';
 import { applyTheme, nextTheme, themeIcon, themeLabel } from './ui/theme';
+import { longVersion, shortVersion } from './core/buildInfo';
 import { button } from './ui/controls';
 import { createDialog } from './ui/dialog';
 import type { DialogController } from './ui/dialog';
@@ -85,6 +86,8 @@ export class App {
   private view: { year: number; month: Month };
   private mode: Mode = { kind: 'calendar' };
   private flash: { text: string; tone: 'info' | 'error' } | null = null;
+  /** 矢印キーで月をまたいだあと、描き直しの後にフォーカスを戻す先。 */
+  private pendingFocusDate: DateStr | null = null;
   private dialog: DialogController | null = null;
   private dialogKey: string | null = null;
   private samplePacks: SamplePack[] | null = null;
@@ -188,6 +191,13 @@ export class App {
       this.mode.kind === 'day' && this.mode.date === date
         ? { kind: 'calendar' }
         : { kind: 'day', date };
+    this.render();
+  }
+
+  /** カレンダー内の矢印キー移動で、表示中の月の外へ出たとき。 */
+  private focusDate(date: DateStr): void {
+    this.view = { year: yearOf(date), month: monthOf(date) };
+    this.pendingFocusDate = date;
     this.render();
   }
 
@@ -378,6 +388,20 @@ export class App {
   // 描画
   // -------------------------------------------------------------------------
 
+  /** アプリ名と版。静的サイトは「いつのものを見ているか」が分かりにくいため常に出す。 */
+  private renderBrand(): HTMLElement {
+    return h(
+      'div',
+      { class: 'brand-bar' },
+      h('h1', { class: 'brand' }, '営業日スケジュール'),
+      h(
+        'span',
+        { class: 'brand-version', title: longVersion() },
+        shortVersion(),
+      ),
+    );
+  }
+
   private renderHeader(): HTMLElement {
     const prev = button('‹', () => this.goToMonth(-1), 'nav');
     prev.setAttribute('aria-label', '前の月');
@@ -435,11 +459,14 @@ export class App {
       ? h(
           'div',
           { class: 'header-center' },
-          h('h1', { class: 'month-label is-static' }, '今後の予定'),
-          select(
-            LIST_RANGES.map((days) => ({ value: String(days), label: `${days}日先まで` })),
-            String(this.state.prefs.listDays),
-            (value) => this.setListDays(Number(value)),
+          h('p', { class: 'month-label is-static' }, '今後の予定'),
+          named(
+            select(
+              LIST_RANGES.map((days) => ({ value: String(days), label: `${days}日先まで` })),
+              String(this.state.prefs.listDays),
+              (value) => this.setListDays(Number(value)),
+            ),
+            '先読みする日数',
           ),
         )
       : h('div', { class: 'header-center' }, prev, monthLabel, next);
@@ -486,6 +513,7 @@ export class App {
         { class: 'footer-source' },
         `祝日データ: ${meta.source}（${meta.range.from} 〜 ${meta.range.to} / ${meta.count} 件 / 取得 ${meta.fetchedAt.slice(0, 10)}）`,
       ),
+      h('p', { class: 'footer-version' }, `営業日スケジュール ${longVersion()}`),
       h(
         'p',
         { class: 'footer-link' },
@@ -737,7 +765,15 @@ export class App {
         { class: 'month-summary' },
         `${baseCalendar.name}: 営業日 ${businessDays}日 / 休業日 ${totalDays - businessDays}日`,
       ),
-      renderCalendar(grid, rulesById, { onSelectDay: (date) => this.selectDay(date) }, selectedDate),
+      renderCalendar(
+        grid,
+        rulesById,
+        {
+          onSelectDay: (date) => this.selectDay(date),
+          onFocusDate: (date) => this.focusDate(date),
+        },
+        selectedDate,
+      ),
       renderLegend(hasNotice, hasShift),
     );
 
@@ -824,27 +860,50 @@ export class App {
     const flash = this.flash;
     this.flash = null;
 
-    clear(this.root);
-    this.root.append(
-      this.renderHeader(),
-      ...(flash === null
-        ? []
-        : [
-            h(
-              'p',
-              { class: `banner${flash.tone === 'error' ? ' banner-error' : ' banner-ok'}` },
-              flash.text,
-            ),
-          ]),
-      ...[...new Set(notices)].map((message) => h('p', { class: 'banner' }, message)),
+    const skipLink = h('a', { class: 'skip-link', href: '#main' }, '本文へ移動');
+    // 断片への移動だけでは焦点が移らないブラウザがあるため、明示的に移す。
+    skipLink.addEventListener('click', (event) => {
+      event.preventDefault();
+      this.root.querySelector<HTMLElement>('#main')?.focus();
+    });
+
+    // 通知はまとめて live region に置く。読み上げ中の割り込みを避けて polite にする。
+    const banners = h('div', { class: 'banners', role: 'status', 'aria-live': 'polite' });
+    if (flash !== null) {
+      banners.append(
+        h(
+          'p',
+          { class: `banner${flash.tone === 'error' ? ' banner-error' : ' banner-ok'}` },
+          flash.text,
+        ),
+      );
+    }
+    for (const message of new Set(notices)) {
+      banners.append(h('p', { class: 'banner' }, message));
+    }
+
+    const main = h(
+      'main',
+      { id: 'main', tabindex: '-1' },
       this.state.prefs.defaultView === 'list'
         ? this.buildListPane()
         : this.buildCalendarPane(occurrencesByDate),
       ...(this.state.rules.length === 0 ? [this.renderEmptyPrompt()] : []),
-      this.renderFooter(),
     );
 
+    clear(this.root);
+    this.root.append(skipLink, this.renderBrand(), this.renderHeader(), banners, main, this.renderFooter());
+
     this.syncDialog();
+    this.restoreFocus();
+  }
+
+  /** 矢印キーで月をまたいだ直後、同じ日にフォーカスを戻す。 */
+  private restoreFocus(): void {
+    const date = this.pendingFocusDate;
+    this.pendingFocusDate = null;
+    if (date === null) return;
+    this.root.querySelector<HTMLElement>(`.cell-day[data-date="${date}"]`)?.focus();
   }
 }
 

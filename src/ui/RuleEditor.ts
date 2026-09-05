@@ -26,6 +26,7 @@ import {
   checkbox,
   dateInput,
   field,
+  named,
   numberInput,
   select,
   textInput,
@@ -272,13 +273,16 @@ export class RuleEditor {
             'div',
             { class: 'row' },
             h('span', { class: 'unit' }, '決算月の'),
-            numberInput(
-              offset,
-              (value) => {
-                recurrence.offsetMonths[index] = Math.round(value);
-                this.refresh();
-              },
-              { min: -24, max: 24 },
+            named(
+              numberInput(
+                offset,
+                (value) => {
+                  recurrence.offsetMonths[index] = Math.round(value);
+                  this.refresh();
+                },
+                { min: -24, max: 24 },
+              ),
+              `${index + 1} 件目の決算月からのずれ（か月）`,
             ),
             h('span', { class: 'unit' }, 'か月後'),
             button(
@@ -485,23 +489,29 @@ export class RuleEditor {
         const row = h(
           'div',
           { class: 'row' },
-          select(
-            [
-              { value: 'start', label: '月初から' },
-              { value: 'end', label: '月末から' },
-            ],
-            fromEnd ? 'end' : 'start',
-            (value) => {
-              const magnitude = Math.abs(recurrence.nth[index] ?? 1);
-              recurrence.nth[index] = value === 'end' ? -magnitude : magnitude;
-              this.refresh();
-            },
+          named(
+            select(
+              [
+                { value: 'start', label: '月初から' },
+                { value: 'end', label: '月末から' },
+              ],
+              fromEnd ? 'end' : 'start',
+              (value) => {
+                const magnitude = Math.abs(recurrence.nth[index] ?? 1);
+                recurrence.nth[index] = value === 'end' ? -magnitude : magnitude;
+                this.refresh();
+              },
+            ),
+            `${index + 1} 件目の起点`,
           ),
-          numberInput(Math.abs(nth), (value) => {
-            const magnitude = Math.max(1, Math.floor(value));
-            recurrence.nth[index] = fromEnd ? -magnitude : magnitude;
-            this.refresh();
-          }, { min: 1, max: 31 }),
+          named(
+            numberInput(Math.abs(nth), (value) => {
+              const magnitude = Math.max(1, Math.floor(value));
+              recurrence.nth[index] = fromEnd ? -magnitude : magnitude;
+              this.refresh();
+            }, { min: 1, max: 31 }),
+            `${index + 1} 件目の営業日数`,
+          ),
           h('span', { class: 'unit' }, fromEnd ? '営業日前' : '営業日目'),
           button(
             '削除',
@@ -673,24 +683,33 @@ export class RuleEditor {
           h(
             'div',
             { class: 'row' },
-            numberInput(Math.abs(notice.offset), (value) => {
-              notice.offset = -Math.max(1, Math.floor(value));
-              this.refresh();
-            }, { min: 1, max: 60 }),
-            select(
-              [
-                { value: 'business', label: '営業日前' },
-                { value: 'calendar', label: '日前' },
-              ],
-              notice.unit,
-              (value) => {
-                notice.unit = value;
+            named(
+              numberInput(Math.abs(notice.offset), (value) => {
+                notice.offset = -Math.max(1, Math.floor(value));
                 this.refresh();
-              },
+              }, { min: 1, max: 365 }),
+              `${index + 1} 件目の事前通知: 何日前か`,
             ),
-            textInput(notice.label, (value) => {
-              notice.label = value;
-            }, '例: 振込データ作成'),
+            named(
+              select(
+                [
+                  { value: 'business', label: '営業日前' },
+                  { value: 'calendar', label: '日前' },
+                ],
+                notice.unit,
+                (value) => {
+                  notice.unit = value;
+                  this.refresh();
+                },
+              ),
+              `${index + 1} 件目の事前通知: 単位`,
+            ),
+            named(
+              textInput(notice.label, (value) => {
+                notice.label = value;
+              }, '例: 振込データ作成'),
+              `${index + 1} 件目の事前通知: 表示名`,
+            ),
             button('削除', () => {
               this.draft.notices.splice(index, 1);
               render();
@@ -727,15 +746,21 @@ export class RuleEditor {
       h(
         'div',
         { class: 'row' },
-        dateInput(this.draft.period.start, (value) => {
-          this.draft.period.start = value;
-          this.refresh();
-        }),
+        named(
+          dateInput(this.draft.period.start, (value) => {
+            this.draft.period.start = value;
+            this.refresh();
+          }),
+          '有効期間の開始日',
+        ),
         h('span', { class: 'unit' }, '〜'),
-        dateInput(this.draft.period.end, (value) => {
-          this.draft.period.end = value;
-          this.refresh();
-        }),
+        named(
+          dateInput(this.draft.period.end, (value) => {
+            this.draft.period.end = value;
+            this.refresh();
+          }),
+          '有効期間の終了日',
+        ),
       ),
       h('p', { class: 'field-hint' }, '空欄なら無期限です。'),
     );
@@ -743,7 +768,10 @@ export class RuleEditor {
 
   private buildSkipDates(): HTMLElement {
     const list = h('ul', { class: 'chips-list' });
-    const picker = h('input', { type: 'date', class: 'input skip-date-picker' });
+    const picker = named(
+      h('input', { type: 'date', class: 'input skip-date-picker' }),
+      '除外する日付',
+    );
 
     const render = (): void => {
       clear(list);

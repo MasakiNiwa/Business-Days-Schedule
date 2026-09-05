@@ -6,14 +6,20 @@
  */
 
 import type { DayCell, MonthGrid } from '../core/monthGrid';
+import { addDays, weekdayOf } from '../core/dateUtil';
 import { describeRule, weekdayName } from '../core/describe';
-import type { Occurrence, Rule } from '../types';
+import type { DateStr, Occurrence, Rule } from '../types';
 import { h } from './dom';
 
 const WEEKDAY_HEADERS = [0, 1, 2, 3, 4, 5, 6] as const;
 
 export type CalendarHandlers = {
   onSelectDay: (date: string) => void;
+  /**
+   * 矢印キーで別の日へ移りたいとき。表示中の月の外なら、月を送ってから
+   * その日にフォーカスを移す必要があるため、アプリ側へ委ねる。
+   */
+  onFocusDate?: (date: DateStr) => void;
 };
 
 /** 補正の向きを示す記号。文字数を増やさずに前倒し・後ろ倒しを区別する。 */
@@ -82,6 +88,7 @@ function renderCell(
   rules: ReadonlyMap<string, Rule>,
   handlers: CalendarHandlers,
   selectedDate: string | null,
+  tabbableDate: DateStr,
 ): HTMLElement {
   // 祝日名は休業理由より具体的なので優先して出す。
   // 年末年始休業と元日が重なる日に「年末年始休業」とだけ出ると情報が落ちるため。
@@ -106,12 +113,16 @@ function renderCell(
   // 日付の数字はキーボードとスクリーンリーダー向けの入口として button のままにする。
   // クリック判定はセル全体に広げるが、button の click もセルへ伝播するので
   // ハンドラは td 側に1つだけ置き、二重発火を避ける。
+  // 42個のボタンをすべてタブ順に入れると、カレンダーを通り抜けるだけで大変になる。
+  // 代表の1つだけをタブ順に置き、中は矢印キーで移動する（roving tabindex）。
   const dayButton = h(
     'button',
     {
       type: 'button',
       class: 'cell-day',
       'aria-label': `${cell.date} の予定を見る`,
+      tabindex: cell.date === tabbableDate ? '0' : '-1',
+      'data-date': cell.date,
     },
     String(cell.day),
   );
@@ -135,6 +146,26 @@ function renderCell(
   });
 
   return element;
+}
+
+/** 矢印キーの移動量。 */
+function keyToOffset(key: string, date: DateStr): DateStr | null {
+  switch (key) {
+    case 'ArrowLeft':
+      return addDays(date, -1);
+    case 'ArrowRight':
+      return addDays(date, 1);
+    case 'ArrowUp':
+      return addDays(date, -7);
+    case 'ArrowDown':
+      return addDays(date, 7);
+    case 'Home':
+      return addDays(date, -weekdayOf(date));
+    case 'End':
+      return addDays(date, 6 - weekdayOf(date));
+    default:
+      return null;
+  }
 }
 
 export function renderCalendar(
@@ -162,20 +193,60 @@ export function renderCalendar(
     ),
   );
 
+  // タブ順に置く1つ。選択中 → 今日 → 月初、の順に決める。
+  const cells = grid.weeks.flat();
+  const tabbableDate =
+    cells.find((cell) => cell.date === selectedDate)?.date ??
+    cells.find((cell) => cell.isToday)?.date ??
+    cells.find((cell) => cell.inMonth)?.date ??
+    cells[0]?.date ??
+    '';
+
   const body = h(
     'tbody',
     {},
     ...grid.weeks.map((week) =>
-      h('tr', {}, ...week.map((cell) => renderCell(cell, rules, handlers, selectedDate))),
+      h('tr', {}, ...week.map((cell) => renderCell(cell, rules, handlers, selectedDate, tabbableDate))),
     ),
   );
 
-  return h(
+  const table = h(
     'table',
-    { class: 'calendar', 'aria-label': `${grid.year}年${grid.month}月のカレンダー` },
+    { class: 'calendar' },
+    h(
+      'caption',
+      { class: 'visually-hidden' },
+      `${grid.year}年${grid.month}月のカレンダー。矢印キーで日を移動、Page Up / Page Down で月を移動、Enter でその日の予定を開きます。`,
+    ),
     head,
     body,
   );
+
+  table.addEventListener('keydown', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const from = target.dataset['date'];
+    if (from === undefined) return;
+
+    const next =
+      event.key === 'PageUp'
+        ? addDays(from, -28)
+        : event.key === 'PageDown'
+          ? addDays(from, 28)
+          : keyToOffset(event.key, from);
+    if (next === null) return;
+
+    event.preventDefault();
+    const inGrid = table.querySelector<HTMLElement>(`[data-date="${next}"]`);
+    if (inGrid !== null) {
+      inGrid.focus();
+      return;
+    }
+    // 表示中の月の外。月送りはアプリ側が行い、描き直したあとで当該日へ移る。
+    handlers.onFocusDate?.(next);
+  });
+
+  return table;
 }
 
 /** 凡例。記号の意味を説明する。 */
