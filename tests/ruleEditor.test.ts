@@ -88,7 +88,7 @@ describe('プレビュー', () => {
   it('日のトグルを押すとプレビューに反映される', () => {
     const { form } = open(salary);
     const dayToggles = form.querySelectorAll('.toggles-days .toggle');
-    expect(dayToggles).toHaveLength(32); // 1〜31 と 末日
+    expect(dayToggles).toHaveLength(31); // 1〜30 と「31 / 末日」
 
     // 10日を追加する。
     const tenth = [...dayToggles].find((t) => t.textContent === '10');
@@ -113,6 +113,62 @@ describe('プレビュー', () => {
     const { form } = open(expired);
     expect(form.querySelector('.preview-list')).toBeNull();
     expect(form.querySelector('.issue-warning')?.textContent).toContain('発生する日がありません');
+  });
+});
+
+describe('31 と末日', () => {
+  const monthEnd = makeRule({
+    id: 'closing',
+    title: '月次締め',
+    recurrence: { type: 'monthlyByDay', interval: 1, days: ['last'], overflow: 'clamp' },
+    adjust: { mode: 'prev', keepInMonth: false },
+  });
+
+  it('31 と末日はひとつのトグルにまとめる', () => {
+    const { form } = open(monthEnd);
+    const labels = [...form.querySelectorAll('.toggles-days .toggle')].map((t) => t.textContent);
+    expect(labels.at(-1)).toBe('31 / 末日');
+    expect(labels).not.toContain('31');
+  });
+
+  it('末日のルールを開くとそのトグルが押された状態になる', () => {
+    const { form } = open(monthEnd);
+    const last = [...form.querySelectorAll('.toggles-days .toggle')].at(-1);
+    expect(last?.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('以前の版の 31 も同じトグルとして扱う', () => {
+    const legacy = makeRule({
+      ...monthEnd,
+      recurrence: { type: 'monthlyByDay', interval: 1, days: [31], overflow: 'clamp' },
+    });
+    const { form, handlers } = open(legacy);
+    const last = [...form.querySelectorAll('.toggles-days .toggle')].at(-1);
+    expect(last?.getAttribute('aria-pressed')).toBe('true');
+
+    // 触ると内部表現も 'last' に寄る。
+    const tenth = [...form.querySelectorAll('.toggles-days .toggle')].find(
+      (t) => t.textContent === '10',
+    );
+    tenth?.dispatchEvent(new MouseEvent('click'));
+    form.dispatchEvent(new Event('submit', { cancelable: true }));
+    expect(vi.mocked(handlers.onSave).mock.calls[0]?.[0]?.recurrence).toMatchObject({
+      days: [10, 'last'],
+    });
+  });
+
+  it('2月に無い日の扱いは 29・30 日を選んだときだけ出す', () => {
+    const { form } = open(monthEnd);
+    const overflowField = [...form.querySelectorAll<HTMLElement>('.field')].find((node) =>
+      node.textContent?.includes('2月に無い日の扱い'),
+    );
+    expect(overflowField?.hidden).toBe(true);
+
+    const thirtieth = [...form.querySelectorAll('.toggles-days .toggle')].find(
+      (t) => t.textContent === '30',
+    );
+    thirtieth?.dispatchEvent(new MouseEvent('click'));
+    expect(overflowField?.hidden).toBe(false);
   });
 });
 

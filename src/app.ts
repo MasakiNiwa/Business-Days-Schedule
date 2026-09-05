@@ -31,6 +31,8 @@ import { renderCalendar, renderLegend } from './ui/CalendarView';
 import { renderDayDetail } from './ui/DayDetail';
 import { renderHelp } from './ui/HelpView';
 import { LIST_RANGES, renderList } from './ui/ListView';
+import { renderMonthPicker } from './ui/MonthPicker';
+import { attachHorizontalSwipe } from './ui/swipe';
 import { applyTheme, nextTheme, themeIcon, themeLabel } from './ui/theme';
 import { button } from './ui/controls';
 import { createDialog } from './ui/dialog';
@@ -49,6 +51,7 @@ type Mode =
   | { kind: 'edit'; rule: Rule; isNew: boolean }
   | { kind: 'settings' }
   | { kind: 'help' }
+  | { kind: 'jump' }
   | { kind: 'day'; date: DateStr };
 
 /** 開いているダイアログの中身を作り直してよいかの判定に使う。 */
@@ -136,6 +139,12 @@ export class App {
 
   private goToMonth(count: number): void {
     this.view = { ...this.view, ...shiftMonth(this.view.year, this.view.month, count) };
+    this.render();
+  }
+
+  private goToMonthOf(year: number, month: Month): void {
+    this.view = { year, month };
+    this.mode = { kind: 'calendar' };
     this.render();
   }
 
@@ -315,30 +324,39 @@ export class App {
       viewToggle.append(item);
     }
 
-    const left = isList
+    // 年月はカレンダーの中央線に合わせたいので、ヘッダーを
+    // 「左（今日）／中央（‹ 年月 ›）／右（操作）」の3ゾーンに分ける。
+    // 左右を同じ幅にすることで、中央ゾーンがページ＝カレンダーの中央に来る。
+    const monthLabel = button(
+      `${this.view.year}年${this.view.month}月`,
+      () => this.openMode('jump'),
+      'month-label',
+    );
+    monthLabel.setAttribute('title', '月を移動');
+    if (this.mode.kind === 'jump') monthLabel.setAttribute('aria-pressed', 'true');
+
+    const center = isList
       ? h(
           'div',
-          { class: 'month-nav' },
-          h('h1', { class: 'month-label' }, '今後の予定'),
+          { class: 'header-center' },
+          h('h1', { class: 'month-label is-static' }, '今後の予定'),
           select(
             LIST_RANGES.map((days) => ({ value: String(days), label: `${days}日先まで` })),
             String(this.state.prefs.listDays),
             (value) => this.setListDays(Number(value)),
           ),
         )
-      : h(
-          'div',
-          { class: 'month-nav' },
-          prev,
-          h('h1', { class: 'month-label' }, `${this.view.year}年${this.view.month}月`),
-          next,
-          button('今日', () => this.goToToday(), 'button button-sm'),
-        );
+      : h('div', { class: 'header-center' }, prev, monthLabel, next);
 
     return h(
       'header',
       { class: 'app-header' },
-      left,
+      h(
+        'div',
+        { class: 'header-left' },
+        isList ? null : button('今日', () => this.goToToday(), 'button button-sm'),
+      ),
+      center,
       h(
         'div',
         { class: 'header-actions' },
@@ -352,7 +370,7 @@ export class App {
   }
 
   /** ヘッダーのボタンはトグル動作にする。同じボタンをもう一度押せば閉じる。 */
-  private openMode(kind: 'settings' | 'help' | 'rules'): void {
+  private openMode(kind: 'settings' | 'help' | 'rules' | 'jump'): void {
     this.mode = this.mode.kind === kind ? { kind: 'calendar' } : { kind };
     this.render();
   }
@@ -425,6 +443,21 @@ export class App {
 
     if (mode.kind === 'help') {
       return renderHelp(() => this.backToCalendar());
+    }
+
+    if (mode.kind === 'jump') {
+      return renderMonthPicker(
+        this.view,
+        { year: yearOf(this.today), month: monthOf(this.today) },
+        {
+          onSelect: (year, month) => this.goToMonthOf(year, month),
+          onToday: () => {
+            this.mode = { kind: 'calendar' };
+            this.goToToday();
+          },
+          onClose: () => this.backToCalendar(),
+        },
+      );
     }
 
     if (mode.kind === 'day') {
@@ -568,7 +601,7 @@ export class App {
     const businessDays = baseCalendar.businessDaysOfMonth(this.view.year, this.view.month).length;
     const totalDays = lastDayOfMonth(this.view.year, this.view.month);
 
-    return h(
+    const pane = h(
       'section',
       { class: 'calendar-pane', 'aria-label': '月カレンダー' },
       h('p', { class: 'print-title' }, `${this.view.year}年${this.view.month}月`),
@@ -580,6 +613,13 @@ export class App {
       renderCalendar(grid, rulesById, { onSelectDay: (date) => this.selectDay(date) }, selectedDate),
       renderLegend(hasNotice, hasShift),
     );
+
+    // 左へ払うと次の月、右へ払うと前の月。紙をめくる向きに合わせる。
+    attachHorizontalSwipe(pane, {
+      onSwipeLeft: () => this.goToMonth(1),
+      onSwipeRight: () => this.goToMonth(-1),
+    });
+    return pane;
   }
 
   /** ルールが1件も無いときの導線。カレンダーだけでは何もできないため。 */

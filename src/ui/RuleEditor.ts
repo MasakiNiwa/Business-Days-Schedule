@@ -266,11 +266,38 @@ export class RuleEditor {
   }
 
   private monthlyByDayFields(recurrence: Recurrence & { type: 'monthlyByDay' }): HTMLElement[] {
+    // 「31日」と「末日」は分けない。31日を指定した月はすべて末日なので、
+    // 2つ並べても選ぶ側が迷うだけになる。内部表現は 'last' に寄せる。
     const dayOptions = [
-      ...Array.from({ length: 31 }, (_, i) => ({ value: String(i + 1), label: String(i + 1) })),
-      { value: 'last', label: '末日', className: 'is-wide' },
+      ...Array.from({ length: 30 }, (_, i) => ({ value: String(i + 1), label: String(i + 1) })),
+      { value: 'last', label: '31 / 末日', className: 'is-wide' },
     ];
-    const selectedDays = recurrence.days.map((day) => (day === 'last' ? 'last' : String(day)));
+    // 以前の版で保存された 31 も「31 / 末日」として扱う。
+    const selectedDays = [
+      ...new Set(
+        recurrence.days.map((day) => (day === 'last' || day === 31 ? 'last' : String(day))),
+      ),
+    ];
+
+    const overflowField = field(
+      '2月に無い日の扱い',
+      select(
+        [
+          { value: 'clamp', label: 'その月の末日に丸める' },
+          { value: 'skip', label: 'その月は実行しない' },
+        ],
+        recurrence.overflow,
+        (value) => {
+          recurrence.overflow = value;
+          this.refresh();
+        },
+      ),
+      '29日・30日を指定したときの2月の扱いです。',
+    );
+    // 29日・30日を選んでいるときだけ問う。それ以外では起こり得ない選択なので出さない。
+    const needsOverflow = (days: readonly (number | 'last')[]): boolean =>
+      days.some((day) => day === 29 || day === 30);
+    overflowField.hidden = !needsOverflow(recurrence.days);
 
     return [
       field(
@@ -280,27 +307,14 @@ export class RuleEditor {
           selectedDays,
           (next) => {
             recurrence.days = next.map((value) => (value === 'last' ? 'last' : Number(value)));
+            overflowField.hidden = !needsOverflow(recurrence.days);
             this.refresh();
           },
           'toggles-days',
         ),
         '複数選べます（例: 10日と25日）。',
       ),
-      field(
-        '存在しない日の扱い',
-        select(
-          [
-            { value: 'clamp', label: 'その月の末日に丸める' },
-            { value: 'skip', label: 'その月は実行しない' },
-          ],
-          recurrence.overflow,
-          (value) => {
-            recurrence.overflow = value;
-            this.refresh();
-          },
-        ),
-        '31日を指定したときの2月などの扱いです。',
-      ),
+      overflowField,
       this.monthsField(recurrence),
     ];
   }
