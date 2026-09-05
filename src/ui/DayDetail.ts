@@ -45,7 +45,7 @@ function renderOccurrence(
 
   const origin =
     occurrence.kind === 'notice'
-      ? `${occurrence.rawDate} の予定に対する事前通知`
+      ? `${occurrence.rawDate} の予定に対する準備日`
       : occurrence.shifted
         ? `本来は ${occurrence.rawDate}（休業日）。${
             occurrence.shiftDirection === 'prev' ? '前営業日へ前倒し' : '翌営業日へ後ろ倒し'

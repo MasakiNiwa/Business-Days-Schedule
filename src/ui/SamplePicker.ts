@@ -9,13 +9,17 @@
  */
 
 import type { SamplePack } from '../core/samples';
-import { button } from './controls';
+import { button, checkbox } from './controls';
+import type { Rule } from '../types';
+import { describeRule } from '../core/describe';
 import { h } from './dom';
 
 export type SamplePickerHandlers = {
   onAdd: (pack: SamplePack) => void;
   onRestore: (pack: SamplePack) => void;
   onClose: () => void;
+  onLoadRules?: (pack: SamplePack) => Promise<readonly Rule[]>;
+  onAddSelected?: (pack: SamplePack, ids: string[]) => void;
 };
 
 export function renderSamplePicker(
@@ -60,6 +64,35 @@ export function renderSamplePicker(
         : null,
     );
 
+    const choices = h('div', { class: 'sample-choices', hidden: true });
+    if (handlers.onLoadRules && handlers.onAddSelected) {
+      const loadRules = handlers.onLoadRules;
+      const addSelected = handlers.onAddSelected;
+      const browse = button('内容を選ぶ', () => {
+        browse.disabled = true;
+        choices.hidden = false;
+        choices.textContent = '読み込み中…';
+        void loadRules(pack).then((rules) => {
+          choices.replaceChildren();
+          const selected = new Set<string>();
+          const add = button('選んだ予定を追加', () => addSelected(pack, [...selected]), 'button button-sm button-primary');
+          add.disabled = true;
+          for (const rule of rules) {
+            choices.append(checkbox(`${rule.title} — ${describeRule(rule)}`, false, (checked) => {
+              if (checked) selected.add(rule.id); else selected.delete(rule.id);
+              add.disabled = selected.size === 0;
+              add.textContent = `選んだ ${selected.size} 件を追加`;
+            }));
+          }
+          choices.append(add);
+        }).catch(() => {
+          choices.textContent = '内容を取得できませんでした。もう一度お試しください。';
+          browse.disabled = false;
+        });
+      }, 'button button-sm');
+      actions.prepend(browse);
+    }
+
     list.append(
       h(
         'li',
@@ -84,6 +117,7 @@ export function renderSamplePicker(
             : null,
         ),
         actions,
+        choices,
       ),
     );
   }

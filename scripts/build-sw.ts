@@ -44,9 +44,10 @@ export function buildServiceWorker(assets: string[], cacheName: string): string 
  *     内容が変わればURLも変わり、古いものを掴み続けることがない。
  *   - 画面遷移（navigate）はネットワーク優先。オフラインのときだけキャッシュへ。
  *     新しい版をすぐ受け取れるようにするため。
- *   - 祝日データとサンプルは stale-while-revalidate。すぐ表示しつつ裏で更新する。
+ *   - データはネットワーク優先。通信できない場合だけ保存済みのものを使う。
  */
 const CACHE = ${JSON.stringify(cacheName)};
+const CACHE_PREFIX = 'bds-';
 const BASE = ${JSON.stringify(BASE)};
 const PRECACHE = ${list};
 
@@ -60,7 +61,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
       const names = await caches.keys();
-      await Promise.all(names.filter((name) => name !== CACHE).map((name) => caches.delete(name)));
+      await Promise.all(names.filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE).map((name) => caches.delete(name)));
       await self.clients.claim();
     })(),
   );
@@ -91,19 +92,26 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (isData(url)) {
-    event.respondWith(
-      (async () => {
+    const task = (async () => {
         const cache = await caches.open(CACHE);
         const cached = await cache.match(request);
-        const network = fetch(request)
-          .then((response) => {
-            if (response.ok) void cache.put(request, response.clone());
-            return response;
-          })
-          .catch(() => cached ?? Response.error());
-        return cached ?? network;
-      })(),
-    );
+        try {
+          const response = await fetch(request, { cache: 'no-cache', signal: AbortSignal.timeout(5000) });
+          if (!response.ok) throw new Error('data unavailable');
+          const data = await response.clone().json();
+          if (url.pathname.endsWith('/holidays.json')) {
+            if (!data.meta || !data.meta.range || !data.holidays || Array.isArray(data.holidays)) throw new Error('invalid holidays');
+            const entries = Object.entries(data.holidays);
+            if (entries.length === 0 || data.meta.count !== entries.length || entries.some(([date, name]) => !/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || typeof name !== 'string' || !name.trim())) throw new Error('invalid holidays');
+          }
+          await cache.put(request, response.clone());
+          return response;
+        } catch {
+          return cached ?? Response.error();
+        }
+      })();
+    event.respondWith(task);
+    event.waitUntil(task.then(() => undefined));
     return;
   }
 
@@ -114,7 +122,7 @@ self.addEventListener('fetch', (event) => {
       const response = await fetch(request);
       if (response.ok) {
         const cache = await caches.open(CACHE);
-        void cache.put(request, response.clone());
+        await cache.put(request, response.clone());
       }
       return response;
     })(),

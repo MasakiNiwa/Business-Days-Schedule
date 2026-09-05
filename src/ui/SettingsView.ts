@@ -34,6 +34,7 @@ export class SettingsView {
   private calendars: BusinessCalendar[];
   private readonly body = h('div', { class: 'settings-body' });
   private readonly today: DateStr;
+  private activeSection = 'calendar-0';
 
   constructor(
     calendars: readonly BusinessCalendar[],
@@ -65,10 +66,23 @@ export class SettingsView {
 
   private render(): void {
     clear(this.body);
-    for (const [index, calendar] of this.calendars.entries()) {
-      this.body.append(this.calendarSection(calendar, index));
+    const sections = [
+      ...this.calendars.map((calendar, index) => ({ id: `calendar-${index}`, label: calendar.name, body: this.calendarSection(calendar, index) })),
+      { id: 'data', label: 'バックアップ・書き出し', body: this.dataSection() },
+      { id: 'about', label: '祝日・アプリ情報', body: h('div', {}, this.holidaySection(), this.aboutSection()) },
+    ];
+    const navigation = h('div', { class: 'settings-navigation', role: 'group', 'aria-label': '設定の分類' });
+    for (const section of sections) {
+      const tab = button(section.label, () => {
+        this.activeSection = section.id;
+        this.render();
+        this.body.querySelector<HTMLElement>('[aria-pressed="true"]')?.focus();
+      }, 'button button-sm');
+      tab.setAttribute('aria-pressed', String(this.activeSection === section.id));
+      navigation.append(tab);
+      section.body.hidden = this.activeSection !== section.id;
     }
-    this.body.append(this.dataSection(), this.holidaySection(), this.aboutSection());
+    this.body.append(navigation, ...sections.map((section) => section.body));
   }
 
   private calendarSection(calendar: BusinessCalendar, index: number): HTMLElement {
@@ -305,7 +319,7 @@ export class SettingsView {
   /** 版の情報。不具合の報告時に、どのビルドを見ているかを伝えられるようにする。 */
   private aboutSection(): HTMLElement {
     const rows: [string, string][] = [
-      ['アプリ', '営業日スケジュール'],
+      ['アプリ', 'Business Days Schedule'],
       ['版', longVersion()],
       ['ビルド日時', BUILD_INFO.builtAt === '' ? '不明' : BUILD_INFO.builtAt],
       ['コミット', BUILD_INFO.commit],
@@ -330,14 +344,6 @@ export class SettingsView {
       ['収録範囲', `${meta.range.from} 〜 ${meta.range.to}`],
       ['件数', `${meta.count} 件`],
       ['出典のバージョン', meta.sourceSha ?? '(記録なし)'],
-      [
-        '内閣府CSVとの突合',
-        meta.verifiedAgainstCao === true
-          ? '一致'
-          : meta.verifiedAgainstCao === false
-            ? '不一致または未取得'
-            : '未検証',
-      ],
     ];
 
     return h(

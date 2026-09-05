@@ -4,6 +4,7 @@
  */
 
 import type { DateStr, HolidayData, HolidayMeta } from '../types';
+import { isValidDateStr } from './dateUtil';
 
 export type HolidayLookup = {
   readonly meta: HolidayMeta;
@@ -35,7 +36,6 @@ export function createEmptyHolidayLookup(): HolidayLookup {
       fetchedAt: new Date(0).toISOString(),
       range: { from: '0000-01-01', to: '9999-12-31' },
       count: 0,
-      verifiedAgainstCao: null,
     },
     holidays: {},
   });
@@ -72,15 +72,22 @@ export function parseHolidayData(input: unknown): HolidayData {
     typeof range !== 'object' ||
     range === null ||
     typeof range.from !== 'string' ||
-    typeof range.to !== 'string'
+    typeof range.to !== 'string' || !isValidDateStr(range.from) || !isValidDateStr(range.to) || range.from > range.to
   ) {
     throw new TypeError('祝日データの meta.range が不正です');
+  }
+  const entries = Object.entries(candidate.holidays);
+  if (Array.isArray(candidate.holidays) || entries.length === 0 ||
+      candidate.meta.count !== entries.length ||
+      typeof candidate.meta.fetchedAt !== 'string' || !Number.isFinite(Date.parse(candidate.meta.fetchedAt)) ||
+      entries.some(([date, name]) => !isValidDateStr(date) || date < range.from || date > range.to || typeof name !== 'string' || name.trim() === '')) {
+    throw new TypeError('祝日データの件数・日付・名称が不正です');
   }
   return candidate as HolidayData;
 }
 
 export async function fetchHolidayData(url: string): Promise<HolidayData> {
-  const response = await fetch(url);
+  const response = await fetch(url, { cache: 'no-cache' });
   if (!response.ok) {
     throw new Error(`祝日データの取得に失敗しました: ${response.status} ${response.statusText}`);
   }

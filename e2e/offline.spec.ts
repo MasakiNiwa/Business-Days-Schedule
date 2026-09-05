@@ -38,14 +38,15 @@ test.describe('Service Worker', () => {
 
   test('版が画面に出る', async ({ page }) => {
     await page.goto('');
-    await expect(page.locator('.brand')).toHaveText('営業日スケジュール');
+    await expect(page.locator('.brand')).toHaveText('Business Days Schedule');
     await expect(page.locator('.brand-version')).toHaveText(/^v\d+\.\d+\.\d+$/);
-    await expect(page.locator('.footer-version')).toContainText('営業日スケジュール v');
+    await expect(page.locator('.footer-version')).toContainText('Business Days Schedule v');
   });
 
   test('設定に版の詳細が出る', async ({ page }) => {
     await page.goto('');
     await page.getByRole('button', { name: '設定' }).click();
+    await page.getByRole('button', { name: '祝日・アプリ情報', exact: true }).click();
     const about = page.locator('dialog .editor-section').filter({ hasText: 'このアプリについて' });
     await expect(about).toContainText('版');
     await expect(about).toContainText(/v\d+\.\d+\.\d+/);

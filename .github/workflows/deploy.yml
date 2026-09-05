@@ -1,14 +1,16 @@
 # GitHub Pages への公開（docs/SPEC.md §11.3）。
 #
-# main への push で dist/ をビルドして公開する。
-# 祝日データ更新ワークフローが holidays.json をコミットした場合も、
-# その push を契機に再デプロイされる。
+# main の公開と週次の祝日更新を同じ経路で検査・公開する。
+# データは公開成果物に含める。保護された main へのボット push は行わない。
 name: Deploy to GitHub Pages
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    # 毎週月曜 03:17 JST。混雑しやすい正時を避ける。
+    - cron: '17 18 * * 0'
 
 permissions:
   contents: read
@@ -22,6 +24,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +36,9 @@ jobs:
 
       - run: npm ci
 
+      - name: 最新の祝日データを取得（失敗時は前回の公開を維持）
+        run: npm run holidays
+
       # 壊れたものを公開しないよう、デプロイ前にも型チェックとテストを通す。
       - name: 型チェック
         run: npm run typecheck
@@ -42,6 +48,12 @@ jobs:
 
       - name: ビルド
         run: npm run build
+
+      - name: E2E 用ブラウザの用意
+        run: npm run e2e:install
+
+      - name: 公開成果物をブラウザで検査
+        run: npm run e2e
 
       - uses: actions/configure-pages@v5
 

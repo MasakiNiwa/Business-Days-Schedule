@@ -44,7 +44,7 @@ const dayOfDate = (date: string): string => String(Number(date.slice(8, 10)));
 export function occurrenceTitle(occurrence: Occurrence, rule: Rule): string {
   const lines = [rule.title, describeRule(rule)];
   if (occurrence.kind === 'notice') {
-    lines.push(`${occurrence.noticeLabel ?? '事前通知'}（${occurrence.rawDate} の予定に対して）`);
+    lines.push(`${occurrence.noticeLabel ?? '準備日'}（${occurrence.rawDate} の予定に対して）`);
   } else if (occurrence.shifted) {
     const direction = occurrence.shiftDirection === 'prev' ? '前営業日へ' : '翌営業日へ';
     lines.push(`本来は ${occurrence.rawDate}（休業日）。${direction}。`);
@@ -257,7 +257,7 @@ export function renderLegend(hasNotices: boolean, hasShifts: boolean): HTMLEleme
     hasShifts
       ? h('span', {}, '← → = 休業日のため移動（数字は元の日）')
       : h('span', {}, '← → = 休業日のため前後の営業日へ移動'),
-    hasNotices ? h('span', {}, '破線 = 事前通知') : null,
+    hasNotices ? h('span', {}, '破線 = 準備日') : null,
     h('span', {}, '日付をクリックすると当日の予定を一覧できます'),
   );
 }

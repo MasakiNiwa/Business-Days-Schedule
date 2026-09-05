@@ -128,7 +128,7 @@ export function renderCalendarExport(
     formatHint,
     field('期間', h('div', { class: 'row' }, fromInput, h('span', { class: 'unit' }, '〜'), toInput)),
     presets,
-    checkbox('事前通知（準備日）も書き出す', request.includeNotices, (value) => {
+    checkbox('準備日も書き出す', request.includeNotices, (value) => {
       request.includeNotices = value;
       refresh();
     }),

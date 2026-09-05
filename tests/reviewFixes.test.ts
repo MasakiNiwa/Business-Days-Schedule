@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildIcs, escapeIcsText } from '../src/core/exportCalendar';
 import { outOfRangeMessage } from '../src/core/holidays';
-import { expandRules, noticeSpanDays } from '../src/core/schedule';
+import { expandRules } from '../src/core/schedule';
 import { createMemoryStore, importState, loadState, createDefaultState } from '../src/core/storage';
 import { LIMITS, validateCalendar, validateRule } from '../src/core/validate';
 import type { Notice, Rule } from '../src/types';
@@ -67,16 +67,6 @@ describe('長い事前通知（展開範囲が固定だと欠落していた）'
     expect(december.map((o) => o.date)).toContain('2026-12-01');
   });
 
-  it('通知を持たないルールでは展開範囲を広げない', () => {
-    expect(noticeSpanDays(makeRule({ notices: [] }))).toBe(0);
-    expect(
-      noticeSpanDays(makeRule({ notices: [{ offset: -10, unit: 'calendar', label: '' }] })),
-    ).toBe(10);
-    // 営業日換算は安全側に広く取る。
-    expect(
-      noticeSpanDays(makeRule({ notices: [{ offset: -10, unit: 'business', label: '' }] })),
-    ).toBeGreaterThan(10);
-  });
 
   it('通知の範囲を広げても本体の件数は変わらない', () => {
     const plain = makeRule({

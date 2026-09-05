@@ -90,13 +90,13 @@ describe('renderDayDetail', () => {
     expect(element.querySelector('.day-item-desc')?.textContent).toContain('自社カレンダー');
   });
 
-  it('事前通知も由来を出す', () => {
+  it('準備日も由来を出す', () => {
     // 04-24 の3営業日前 = 04-21
     const { element } = open('2026-04-21', [salary]);
     const item = element.querySelector('.day-item.is-notice');
     expect(item?.querySelector('.day-item-title')?.textContent).toBe('給与振込: 振込データ作成');
     expect(item?.querySelector('.day-item-origin')?.textContent).toContain(
-      '2026-04-24 の予定に対する事前通知',
+      '2026-04-24 の予定に対する準備日',
     );
   });
 

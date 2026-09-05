@@ -24,30 +24,32 @@ import {
   yearOf,
 } from './dateUtil';
 import { expandRecurrence, skipsAdjustment } from './recurrence';
+import { MAX_SHIFT_DAYS } from './businessDay';
 
 /** 補正で月をまたぐ発生日を取りこぼさないためのマージン（月数）。 */
 const MARGIN_MONTHS = 1;
 
-/**
- * 事前通知は本体より前に出るため、表示範囲より先の本体まで展開しないと取りこぼす。
- * 営業日単位の指定を暦日へ換算するときの安全側の倍率と余白。
- * 週末と連休を最大限見込んでも足りる幅にしてある。
- */
-const BUSINESS_DAY_TO_CALENDAR_FACTOR = 3;
-const NOTICE_SPAN_SLACK_DAYS = 60;
-
-/** ルールの事前通知が本体から最大何日さかのぼるか（暦日での安全な上限）。 */
-export function noticeSpanDays(rule: Rule): number {
-  let max = 0;
+/** 通知日から実際の営業日を先へ数え、本体の探索末尾を決める。 */
+export function noticeRangeEnd(rule: Rule, end: DateStr, calendar: BusinessDayCalendar): DateStr {
+  let latest = end;
   for (const notice of rule.notices) {
     const amount = Math.abs(notice.offset);
-    const days =
-      notice.unit === 'calendar'
-        ? amount
-        : amount * BUSINESS_DAY_TO_CALENDAR_FACTOR + NOTICE_SPAN_SLACK_DAYS;
-    if (days > max) max = days;
+    let date = end;
+    if (notice.unit === 'calendar') {
+      date = addDays(end, amount);
+    } else {
+      for (let remaining = amount; remaining > 0; remaining -= 1) {
+        const next = calendar.nextBusinessDay(date);
+        // 長期休業で探索が途切れても、そこまでにある本体は探索対象に残す。
+        if (next === null) break;
+        date = next;
+      }
+    }
+    // 休業日にある本体と営業日補正の移動幅も含める。
+    const bound = addDays(date, MAX_SHIFT_DAYS * 2);
+    if (bound > latest) latest = bound;
   }
-  return max;
+  return latest;
 }
 
 export type ScheduleContext = {
@@ -229,7 +231,12 @@ export function expandRules(
   for (const rule of rules) {
     if (!rule.enabled) continue;
     // 展開範囲はルールごとに決める。長い事前通知を持つルールだけ先まで広げる。
-    const expandRange = withMargin(viewRange, MARGIN_MONTHS, noticeSpanDays(rule));
+    const expandRange = withMargin(viewRange);
+    const resolved = resolveCalendar(rule, ctx);
+    if (resolved !== null) {
+      const end = noticeRangeEnd(rule, viewRange.end, resolved.calendar);
+      if (end > expandRange.end) expandRange.end = end;
+    }
     const result = expandRule(rule, expandRange, ctx);
     warnings.push(...result.warnings);
     for (const occurrence of result.occurrences) {

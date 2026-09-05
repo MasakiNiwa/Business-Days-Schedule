@@ -254,7 +254,7 @@ export function importState(raw: unknown, current: AppState, mode: ImportMode): 
         rules: validRules,
         // カレンダーが1件も無いと営業日計算ができないため既定値へ戻す。
         calendars: validCalendars.length > 0 ? validCalendars : createDefaultCalendars(),
-        prefs: { ...DEFAULT_PREFERENCES, ...(file.prefs ?? {}) },
+        prefs: normalizePreferences(file.prefs, DEFAULT_PREFERENCES),
       },
     };
   }
@@ -293,7 +293,7 @@ export function importState(raw: unknown, current: AppState, mode: ImportMode): 
     state: {
       rules: rules.items,
       calendars: calendars.items,
-      prefs: { ...current.prefs, ...(file.prefs ?? {}) },
+      prefs: normalizePreferences({ ...current.prefs, ...(file.prefs ?? {}) }, current.prefs),
     },
   };
 }

@@ -5,7 +5,8 @@
  * 頭の中で追いにくいため、入力するそばから実際の日付を見せることで誤設定を防ぐ。
  */
 
-import { describeNotice } from '../core/describe';
+import { describeNotice, describeRule } from '../core/describe';
+import { createRule } from '../core/storage';
 import { todayInTokyo, weekdayOf } from '../core/dateUtil';
 import { previewOccurrences } from '../core/schedule';
 import type { ScheduleContext } from '../core/schedule';
@@ -85,6 +86,9 @@ export class RuleEditor {
   private readonly recurrenceBody = h('div', { class: 'recurrence-body' });
   private readonly previewBody = h('div', { class: 'preview-body' });
   private readonly issuesBody = h('div', { class: 'issues' });
+  private readonly summaryBody = h('p', { class: 'rule-summary' });
+  private readonly nextDates = h('p', { class: 'next-dates' });
+  private showPresets = true;
   private adjustControls: HTMLElement | null = null;
   private adjustInapplicable: HTMLElement | null = null;
   private readonly today: DateStr;
@@ -114,15 +118,15 @@ export class RuleEditor {
 
     form.append(
       h('h2', { class: 'editor-title' }, this.isNew ? 'ルールを追加' : 'ルールを編集'),
+      ...(this.isNew && this.showPresets ? [this.buildPresets()] : []),
       this.buildBasics(),
       this.buildRecurrence(),
       this.buildAdjust(),
       this.buildNotices(),
-      this.buildPeriod(),
-      this.buildSkipDates(),
-      this.buildPreview(),
-      this.issuesBody,
-      this.buildActions(),
+      h('details', { class: 'advanced-options', open: !this.isNew || this.draft.period.start !== null || this.draft.skipDates.length > 0 },
+        h('summary', {}, '詳細設定（期間・除外日）'), this.buildPeriod(), this.buildSkipDates()),
+      h('details', { class: 'advanced-options' }, h('summary', {}, '次の10回をすべて見る'), this.buildPreview()),
+      h('div', { class: 'editor-review' }, this.summaryBody, this.nextDates, this.issuesBody, this.buildActions()),
     );
 
     form.addEventListener('submit', (event) => {
@@ -130,6 +134,31 @@ export class RuleEditor {
       this.save();
     });
     return form;
+  }
+
+  private buildPresets(): HTMLElement {
+    const presets: { label: string; title: string; bank?: boolean; recurrence: Recurrence }[] = [
+      { label: '給与', title: '給与振込', bank: true, recurrence: { type: 'monthlyByDay', interval: 1, days: [25], overflow: 'clamp' } },
+      { label: '支払', title: '支払', bank: true, recurrence: { type: 'monthlyByDay', interval: 1, days: ['last'], overflow: 'clamp' } },
+      { label: '締め日', title: '月次締め', recurrence: { type: 'monthlyByDay', interval: 1, days: ['last'], overflow: 'clamp' } },
+      { label: '会議', title: '定例会議', recurrence: { type: 'weekly', interval: 1, weekdays: [1] } },
+      { label: '自由入力', title: '', recurrence: { type: 'monthlyByDay', interval: 1, days: [1], overflow: 'clamp' } },
+    ];
+    return h('section', { class: 'editor-section' },
+      h('h3', { class: 'editor-heading' }, '何の予定を作りますか？'),
+      h('p', { class: 'field-hint' }, 'ひな型を選び、日付を自社の運用に合わせて直してください。'),
+      h('div', { class: 'presets' }, ...presets.map((preset) => button(preset.label, () => {
+        const calendarId = this.calendars.find((calendar) => calendar.id === (preset.bank ? 'bank' : 'company'))?.id ?? this.calendars[0]?.id ?? this.draft.calendarId;
+        this.draft = createRule({ title: preset.title, recurrence: structuredClone(preset.recurrence), calendarId,
+          adjust: { mode: preset.label === '会議' || preset.label === '自由入力' ? 'none' : 'prev', keepInMonth: false } });
+        Object.assign(this.drafts, defaultDrafts(this.draft.recurrence));
+        this.showPresets = false;
+        const form = this.build();
+        this.element.replaceChildren(...form.childNodes);
+        this.renderRecurrence();
+        this.refresh();
+        this.element.querySelector<HTMLInputElement>('input[type="text"]')?.focus();
+      }, 'button'))));
   }
 
   private buildBasics(): HTMLElement {
@@ -159,7 +188,6 @@ export class RuleEditor {
       'section',
       { class: 'editor-section' },
       field('タイトル', title),
-      field('色', colorRow),
       field(
         '営業日カレンダー',
         select(
@@ -172,7 +200,8 @@ export class RuleEditor {
         ),
         '社内の締めは自社、振込は銀行、のように使い分けます。',
       ),
-      field(
+      h('details', { class: 'advanced-options', open: !this.isNew },
+      h('summary', {}, '色・メモ・有効／無効'), field('色', colorRow), field(
         'メモ',
         textInput(this.draft.note ?? '', (value) => {
           this.draft.note = value;
@@ -180,7 +209,7 @@ export class RuleEditor {
       ),
       checkbox('このルールを有効にする', this.draft.enabled, (value) => {
         this.draft.enabled = value;
-      }),
+      })),
     );
   }
 
@@ -499,6 +528,7 @@ export class RuleEditor {
               (value) => {
                 const magnitude = Math.abs(recurrence.nth[index] ?? 1);
                 recurrence.nth[index] = value === 'end' ? -magnitude : magnitude;
+                renderRows();
                 this.refresh();
               },
             ),
@@ -594,7 +624,9 @@ export class RuleEditor {
     };
     render();
 
-    return field('対象月', container, '何も選ばなければ毎月。1つだけ選ぶと年次になります。');
+    return h('details', { class: 'advanced-options', open: Boolean(recurrence.months?.length) },
+      h('summary', {}, '対象月を限定する（通常は毎月）'),
+      field('対象月', container, '何も選ばなければ毎月。1つだけ選ぶと年次になります。'));
   }
 
   /** 第N営業日は定義上すでに営業日なので、補正の設定自体を持たせない。 */
@@ -670,6 +702,12 @@ export class RuleEditor {
     if (this.adjustInapplicable !== null) this.adjustInapplicable.hidden = applies;
     if (!applies && this.draft.adjust.mode !== 'none') {
       this.draft.adjust = { mode: 'none', keepInMonth: false };
+      const modeSelect = this.adjustControls?.querySelector('select');
+      if (modeSelect) modeSelect.value = 'none';
+      const keepInMonth = this.adjustControls?.querySelector<HTMLElement>('.checkbox');
+      if (keepInMonth) keepInMonth.hidden = true;
+      const checkbox = keepInMonth?.querySelector('input');
+      if (checkbox) checkbox.checked = false;
     }
   }
 
@@ -688,7 +726,7 @@ export class RuleEditor {
                 notice.offset = -Math.max(1, Math.floor(value));
                 this.refresh();
               }, { min: 1, max: 365 }),
-              `${index + 1} 件目の事前通知: 何日前か`,
+              `${index + 1} 件目の準備日: 何日前か`,
             ),
             named(
               select(
@@ -702,13 +740,13 @@ export class RuleEditor {
                   this.refresh();
                 },
               ),
-              `${index + 1} 件目の事前通知: 単位`,
+              `${index + 1} 件目の準備日: 単位`,
             ),
             named(
               textInput(notice.label, (value) => {
                 notice.label = value;
               }, '例: 振込データ作成'),
-              `${index + 1} 件目の事前通知: 表示名`,
+              `${index + 1} 件目の準備日: 表示名`,
             ),
             button('削除', () => {
               this.draft.notices.splice(index, 1);
@@ -719,7 +757,7 @@ export class RuleEditor {
         );
       });
       list.append(
-        button('＋ 事前通知を追加', () => {
+        button('＋ 準備日を追加', () => {
           const notice: Notice = { offset: -3, unit: 'business', label: '準備' };
           this.draft.notices.push(notice);
           render();
@@ -732,8 +770,8 @@ export class RuleEditor {
     return h(
       'section',
       { class: 'editor-section' },
-      h('h3', { class: 'editor-heading' }, '事前通知'),
-      h('p', { class: 'field-hint' }, '確定日から遡って、準備日をカレンダーに表示します。'),
+      h('h3', { class: 'editor-heading' }, '準備日'),
+      h('p', { class: 'field-hint' }, '確定日より前の準備日を表示します。メールやプッシュ通知は送信しません。'),
       list,
     );
   }
@@ -852,6 +890,8 @@ export class RuleEditor {
 
   /** 入力が変わるたびにプレビューと検証結果を更新する。 */
   private refresh(): void {
+    this.summaryBody.textContent = `${describeRule(this.draft)}（${this.calendars.find((calendar) => calendar.id === this.draft.calendarId)?.name ?? 'カレンダー未設定'}）`;
+    this.nextDates.textContent = '';
     const issues = validateRule(this.draft);
     clear(this.issuesBody);
     // 検証結果はまとまりとして読み上げさせる。増減が伝わるよう live region にする。
@@ -872,6 +912,7 @@ export class RuleEditor {
     }
 
     const occurrences = previewOccurrences(this.draft, this.today, PREVIEW_COUNT, this.ctx);
+    this.nextDates.textContent = occurrences.length === 0 ? '' : `次回から: ${occurrences.slice(0, 3).map((item) => item.date).join(' / ')}`;
     if (occurrences.length === 0) {
       this.previewBody.append(
         h('p', { class: 'issue issue-warning' }, 'この設定では発生する日がありません。'),
@@ -909,7 +950,7 @@ export class RuleEditor {
         h(
           'p',
           { class: 'field-hint' },
-          `事前通知「${notice.label}」は各回の${describeNotice(notice.offset, notice.unit)}に表示されます。`,
+          `準備日「${notice.label}」は各回の${describeNotice(notice.offset, notice.unit)}に表示されます。`,
         ),
       );
     }

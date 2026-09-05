@@ -155,7 +155,8 @@ export function buildIcs(
       rule.id,
       occurrence.kind,
       occurrence.baseDate,
-      occurrence.shiftDirection ?? 'none',
+      // 単一予定の識別子は、休日変更による補正の有無・方向に依存させない。
+      rule.adjust.mode === 'both' ? (occurrence.shiftDirection ?? 'prev') : 'single',
       occurrence.noticeIndex === undefined ? '' : `n${occurrence.noticeIndex}`,
     ].filter((part) => part !== '');
     const base = parts.join('-');
