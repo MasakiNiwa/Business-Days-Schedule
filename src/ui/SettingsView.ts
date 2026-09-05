@@ -21,6 +21,7 @@ const MONTH_DAY_PATTERN = /^\d{2}-\d{2}$/;
 export type SettingsHandlers = {
   onChange: (calendars: BusinessCalendar[]) => void;
   onExport: () => void;
+  onExportCalendar: () => void;
   onImport: (file: File, mode: 'replace' | 'merge') => void;
   onClearAll: () => void;
   onClose: () => void;
@@ -248,6 +249,11 @@ export class SettingsView {
         'エクスポート',
         button(`${exportFileName()} を保存`, () => this.handlers.onExport(), 'button'),
         'ルールとカレンダーを JSON で書き出します。端末の移行やバックアップに使ってください。',
+      ),
+      field(
+        '外部カレンダーへ書き出す',
+        button('Google カレンダー / Outlook 用に書き出す', () => this.handlers.onExportCalendar(), 'button'),
+        '期間を指定して iCalendar (.ics) または CSV で書き出します。会社指定のカレンダーへ取り込みたいときに使ってください。',
       ),
       field(
         'インポート',

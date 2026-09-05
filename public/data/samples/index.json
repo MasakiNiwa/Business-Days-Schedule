@@ -1,0 +1,39 @@
+{
+  "packs": [
+    {
+      "id": "business-basics",
+      "name": "基本セット",
+      "description": "給与振込・月次締め・請求書発行・支払処理・定例会議。まずはこれから。",
+      "file": "business-basics.json",
+      "count": 5
+    },
+    {
+      "id": "tax",
+      "name": "税務・届出",
+      "description": "源泉所得税、住民税、社会保険、年度更新、算定基礎届、法定調書、償却資産申告など。",
+      "file": "tax.json",
+      "count": 9
+    },
+    {
+      "id": "receivables",
+      "name": "売上・入金",
+      "description": "締め日、請求書発行、入金予定（前後両方に振る）、入金消込、督促。",
+      "file": "receivables.json",
+      "count": 6
+    },
+    {
+      "id": "payables",
+      "name": "支払・振込",
+      "description": "仕入請求書の受領、支払データ作成、買掛金振込、給与、賞与、経費精算。",
+      "file": "payables.json",
+      "count": 6
+    },
+    {
+      "id": "meetings",
+      "name": "会議・報告",
+      "description": "週次報告、月次定例、経営会議、四半期報告、隔週1on1。",
+      "file": "meetings.json",
+      "count": 5
+    }
+  ]
+}

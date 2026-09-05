@@ -32,6 +32,16 @@ import { renderDayDetail } from './ui/DayDetail';
 import { renderHelp } from './ui/HelpView';
 import { LIST_RANGES, renderList } from './ui/ListView';
 import { renderMonthPicker } from './ui/MonthPicker';
+import { renderCalendarExport } from './ui/CalendarExportView';
+import { renderSamplePicker } from './ui/SamplePicker';
+import { parseSampleIndex } from './core/samples';
+import type { SamplePack } from './core/samples';
+import {
+  buildCsv,
+  buildIcs,
+  exportCalendarFileName,
+  MIME_TYPES,
+} from './core/exportCalendar';
 import { attachHorizontalSwipe } from './ui/swipe';
 import { applyTheme, nextTheme, themeIcon, themeLabel } from './ui/theme';
 import { button } from './ui/controls';
@@ -43,7 +53,7 @@ import { renderRuleList } from './ui/RuleList';
 import { SettingsView } from './ui/SettingsView';
 
 const HOLIDAYS_URL = `${import.meta.env.BASE_URL}data/holidays.json`;
-const SAMPLES_URL = `${import.meta.env.BASE_URL}data/samples/business-basics.json`;
+const SAMPLES_DIR = `${import.meta.env.BASE_URL}data/samples/`;
 
 type Mode =
   | { kind: 'calendar' }
@@ -52,6 +62,8 @@ type Mode =
   | { kind: 'settings' }
   | { kind: 'help' }
   | { kind: 'jump' }
+  | { kind: 'samples' }
+  | { kind: 'calendarExport' }
   | { kind: 'day'; date: DateStr };
 
 /** 開いているダイアログの中身を作り直してよいかの判定に使う。 */
@@ -75,6 +87,10 @@ export class App {
   private flash: { text: string; tone: 'info' | 'error' } | null = null;
   private dialog: DialogController | null = null;
   private dialogKey: string | null = null;
+  private samplePacks: SamplePack[] | null = null;
+  private sampleError: string | null = null;
+  /** この端末で追加済みのサンプル束。再追加かどうかの表示に使う。 */
+  private addedSampleIds = new Set<string>();
 
   private readonly today: DateStr;
   private readonly store: KeyValueStore;
@@ -220,30 +236,47 @@ export class App {
     this.render();
   }
 
-  private async loadSamples(): Promise<void> {
+  /** サンプル一覧を取り込み、選択画面を開く。 */
+  private async openSamples(): Promise<void> {
+    this.mode = { kind: 'samples' };
+    if (this.samplePacks === null && this.sampleError === null) {
+      try {
+        const response = await fetch(`${SAMPLES_DIR}index.json`);
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+        this.samplePacks = parseSampleIndex(await response.json());
+      } catch (error) {
+        this.sampleError = `サンプル一覧を読み込めませんでした: ${messageOf(error)}`;
+      }
+    }
+    this.render();
+  }
+
+  /**
+   * サンプル束を追加する。マージなので既存のルールは消えない。
+   * 同じ束を再度追加すると、その束のルールだけが元の内容へ戻る。
+   */
+  private async addSamplePack(pack: SamplePack): Promise<void> {
     try {
-      const response = await fetch(SAMPLES_URL);
+      const response = await fetch(`${SAMPLES_DIR}${pack.file}`);
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-      const result = importState(await response.json(), this.state, 'replace');
+      const result = importState(await response.json(), this.state, 'merge');
       if (!result.ok) throw new Error(result.errors.join(' / '));
       this.state = result.state;
       this.persist();
-      this.notify('サンプルを読み込みました。');
+      this.addedSampleIds.add(pack.id);
+      this.notify(`「${pack.name}」を追加しました。`);
     } catch (error) {
-      this.notify(`サンプルの読み込みに失敗しました: ${messageOf(error)}`, 'error');
+      this.notify(`「${pack.name}」の追加に失敗しました: ${messageOf(error)}`, 'error');
     }
     this.render();
   }
 
   private exportJson(): void {
-    const blob = new Blob([JSON.stringify(buildExportFile(this.state), null, 2)], {
-      type: 'application/json',
-    });
-    const url = URL.createObjectURL(blob);
-    const link = h('a', { href: url, download: exportFileName() });
-    link.click();
-    // Blob URL は明示的に解放しないとページを離れるまで残る。
-    URL.revokeObjectURL(url);
+    this.download(
+      JSON.stringify(buildExportFile(this.state), null, 2),
+      'application/json',
+      exportFileName(),
+    );
     this.notify('エクスポートしました。');
     this.render();
   }
@@ -265,6 +298,42 @@ export class App {
       this.notify(`インポートに失敗しました: ${messageOf(error)}`, 'error');
     }
     this.render();
+  }
+
+  /** 書き出し対象の発生日を数える／集める。 */
+  private occurrencesBetween(from: DateStr, to: DateStr): ReturnType<typeof expandRules> {
+    return expandRules(this.state.rules, { start: from, end: to }, this.scheduleContext(this.businessCalendars()));
+  }
+
+  private exportCalendarFile(request: {
+    from: DateStr;
+    to: DateStr;
+    format: 'ics' | 'csv';
+    includeNotices: boolean;
+  }): void {
+    const { occurrences } = this.occurrencesBetween(request.from, request.to);
+    const rules = new Map(this.state.rules.map((rule) => [rule.id, rule]));
+    const options = { includeNotices: request.includeNotices, calendarName: '営業日スケジュール' };
+    const text =
+      request.format === 'ics'
+        ? buildIcs(occurrences, rules, options)
+        : buildCsv(occurrences, rules, options);
+
+    this.download(
+      text,
+      MIME_TYPES[request.format],
+      exportCalendarFileName(request.from, request.to, request.format),
+    );
+    this.mode = { kind: 'calendar' };
+    this.notify(`${request.format.toUpperCase()} を書き出しました。`);
+    this.render();
+  }
+
+  private download(text: string, mime: string, fileName: string): void {
+    const url = URL.createObjectURL(new Blob([text], { type: mime }));
+    const link = h('a', { href: url, download: fileName });
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   private clearAll(): void {
@@ -432,6 +501,10 @@ export class App {
             this.renderCalendarPaneOnly();
           },
           onExport: () => this.exportJson(),
+          onExportCalendar: () => {
+            this.mode = { kind: 'calendarExport' };
+            this.render();
+          },
           onImport: (file, mode2) => void this.importJson(file, mode2),
           onClearAll: () => this.clearAll(),
           onClose: () => this.backToCalendar(),
@@ -443,6 +516,32 @@ export class App {
 
     if (mode.kind === 'help') {
       return renderHelp(() => this.backToCalendar());
+    }
+
+    if (mode.kind === 'samples') {
+      return renderSamplePicker(
+        this.samplePacks ?? [],
+        this.addedSampleIds,
+        {
+          onAdd: (pack) => void this.addSamplePack(pack),
+          onClose: () => this.backToCalendar(),
+        },
+        this.sampleError,
+      );
+    }
+
+    if (mode.kind === 'calendarExport') {
+      return renderCalendarExport(
+        {
+          onExport: (request) => this.exportCalendarFile(request),
+          countOccurrences: (from, to, includeNotices) =>
+            this.occurrencesBetween(from, to).occurrences.filter(
+              (occurrence) => includeNotices || occurrence.kind !== 'notice',
+            ).length,
+          onClose: () => this.backToCalendar(),
+        },
+        this.today,
+      );
     }
 
     if (mode.kind === 'jump') {
@@ -483,7 +582,7 @@ export class App {
 
     if (mode.kind === 'rules') {
       return renderRuleList(this.state.rules, calendarDefs, {
-        onLoadSamples: () => void this.loadSamples(),
+        onLoadSamples: () => void this.openSamples(),
         onAdd: () => this.startAdd(),
         onEdit: (ruleId) => this.startEdit(ruleId),
         onToggle: (ruleId, enabled) => this.toggleRule(ruleId, enabled),
@@ -631,7 +730,7 @@ export class App {
       h(
         'div',
         { class: 'empty-prompt-actions' },
-        button('サンプルを読み込む', () => void this.loadSamples(), 'button button-primary'),
+        button('サンプルを読み込む', () => void this.openSamples(), 'button button-primary'),
         button('ルールを追加', () => this.startAdd(), 'button'),
       ),
       h(

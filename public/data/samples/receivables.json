@@ -4,17 +4,17 @@
   "calendars": [],
   "rules": [
     {
-      "id": "sample-salary",
-      "title": "給与振込",
-      "color": "blue",
-      "note": "支給日。前営業日補正のため月初の営業日数で前後する。",
+      "id": "ar-closing-20",
+      "title": "売上締め（20日締め先）",
+      "color": "green",
+      "note": "20日締めの得意先向け。",
       "enabled": true,
-      "calendarId": "bank",
+      "calendarId": "company",
       "recurrence": {
         "type": "monthlyByDay",
         "interval": 1,
         "days": [
-          25
+          20
         ],
         "overflow": "clamp"
       },
@@ -22,13 +22,7 @@
         "mode": "prev",
         "keepInMonth": false
       },
-      "notices": [
-        {
-          "offset": -3,
-          "unit": "business",
-          "label": "振込データ作成"
-        }
-      ],
+      "notices": [],
       "period": {
         "start": null,
         "end": null
@@ -38,10 +32,10 @@
       "updatedAt": "2026-09-05T00:00:00.000Z"
     },
     {
-      "id": "sample-month-close",
-      "title": "月次締め",
+      "id": "ar-closing-eom",
+      "title": "売上締め（月末締め先）",
       "color": "green",
-      "note": "売上・仕入の締め。翌月第1営業日までに確定させる。",
+      "note": "月末締めの得意先向け。",
       "enabled": true,
       "calendarId": "company",
       "recurrence": {
@@ -66,10 +60,10 @@
       "updatedAt": "2026-09-05T00:00:00.000Z"
     },
     {
-      "id": "sample-invoice",
-      "title": "請求書発行",
+      "id": "ar-invoice",
+      "title": "請求書の発行・送付",
       "color": "purple",
-      "note": "前月締め分。得意先ごとの締め日は別途確認。",
+      "note": "前月締め分をまとめて発行する。",
       "enabled": true,
       "calendarId": "company",
       "recurrence": {
@@ -83,6 +77,45 @@
         "mode": "none",
         "keepInMonth": false
       },
+      "notices": [
+        {
+          "offset": -2,
+          "unit": "business",
+          "label": "請求データの確認"
+        }
+      ],
+      "period": {
+        "start": null,
+        "end": null
+      },
+      "skipDates": [],
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "updatedAt": "2026-09-05T00:00:00.000Z"
+    },
+    {
+      "id": "ar-incoming",
+      "title": "入金予定日",
+      "color": "blue",
+      "note": "5の倍数と月末に集中する。休業日のとき前倒しか後ろ倒しかは取引先による。",
+      "enabled": true,
+      "calendarId": "bank",
+      "recurrence": {
+        "type": "monthlyByDay",
+        "interval": 1,
+        "days": [
+          5,
+          10,
+          15,
+          20,
+          25,
+          "last"
+        ],
+        "overflow": "clamp"
+      },
+      "adjust": {
+        "mode": "both",
+        "keepInMonth": false
+      },
       "notices": [],
       "period": {
         "start": null,
@@ -93,17 +126,17 @@
       "updatedAt": "2026-09-05T00:00:00.000Z"
     },
     {
-      "id": "sample-payment",
-      "title": "支払処理",
+      "id": "ar-reconcile",
+      "title": "入金消込",
       "color": "teal",
-      "note": "振込データの作成と承認。月末が休業日でも営業日基準で数える。",
+      "note": "前月末までの入金を突合する。",
       "enabled": true,
       "calendarId": "company",
       "recurrence": {
         "type": "monthlyByBusinessDay",
         "interval": 1,
         "nth": [
-          -2
+          1
         ]
       },
       "adjust": {
@@ -120,20 +153,18 @@
       "updatedAt": "2026-09-05T00:00:00.000Z"
     },
     {
-      "id": "sample-regular-meeting",
-      "title": "定例会議",
-      "color": "gray",
-      "note": "祝日と重なっても実施する（補正なし）。",
+      "id": "ar-dunning",
+      "title": "未入金の督促",
+      "color": "red",
+      "note": "消込後に残った未入金へ連絡する。",
       "enabled": true,
       "calendarId": "company",
       "recurrence": {
-        "type": "monthlyByWeekday",
+        "type": "monthlyByBusinessDay",
         "interval": 1,
         "nth": [
-          2,
-          4
-        ],
-        "weekday": 2
+          10
+        ]
       },
       "adjust": {
         "mode": "none",

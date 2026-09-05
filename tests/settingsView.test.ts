@@ -19,6 +19,7 @@ function open(
   const handlers: SettingsHandlers = {
     onChange: vi.fn(),
     onExport: vi.fn(),
+    onExportCalendar: vi.fn(),
     onImport: vi.fn(),
     onClearAll: vi.fn(),
     onClose: vi.fn(),
@@ -114,6 +115,12 @@ describe('データ操作', () => {
     expect(handlers.onExport).toHaveBeenCalledOnce();
     expect(handlers.onClearAll).toHaveBeenCalledOnce();
     expect(handlers.onClose).toHaveBeenCalledOnce();
+  });
+
+  it('外部カレンダーへの書き出しを呼べる', () => {
+    const { element, handlers } = open();
+    clickText(element, 'Google カレンダー / Outlook 用に書き出す');
+    expect(handlers.onExportCalendar).toHaveBeenCalledOnce();
   });
 
   it('ファイル未選択ならインポートしない', () => {

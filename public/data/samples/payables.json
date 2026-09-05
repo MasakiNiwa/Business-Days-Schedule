@@ -1,0 +1,189 @@
+{
+  "schemaVersion": 1,
+  "exportedAt": "2026-09-05T00:00:00.000Z",
+  "calendars": [],
+  "rules": [
+    {
+      "id": "ap-invoice-receipt",
+      "title": "仕入請求書の受領期限",
+      "color": "gray",
+      "note": "前月分。遅れた分は翌月払いにまわす。",
+      "enabled": true,
+      "calendarId": "company",
+      "recurrence": {
+        "type": "monthlyByBusinessDay",
+        "interval": 1,
+        "nth": [
+          3
+        ]
+      },
+      "adjust": {
+        "mode": "none",
+        "keepInMonth": false
+      },
+      "notices": [],
+      "period": {
+        "start": null,
+        "end": null
+      },
+      "skipDates": [],
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "updatedAt": "2026-09-05T00:00:00.000Z"
+    },
+    {
+      "id": "ap-approval",
+      "title": "支払データの作成・承認",
+      "color": "teal",
+      "note": "月末支払に間に合わせるための締切。",
+      "enabled": true,
+      "calendarId": "company",
+      "recurrence": {
+        "type": "monthlyByBusinessDay",
+        "interval": 1,
+        "nth": [
+          -3
+        ]
+      },
+      "adjust": {
+        "mode": "none",
+        "keepInMonth": false
+      },
+      "notices": [],
+      "period": {
+        "start": null,
+        "end": null
+      },
+      "skipDates": [],
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "updatedAt": "2026-09-05T00:00:00.000Z"
+    },
+    {
+      "id": "ap-transfer",
+      "title": "買掛金の振込",
+      "color": "blue",
+      "note": "月末締め翌月末払い。銀行休業日なら前営業日。",
+      "enabled": true,
+      "calendarId": "bank",
+      "recurrence": {
+        "type": "monthlyByDay",
+        "interval": 1,
+        "days": [
+          "last"
+        ],
+        "overflow": "clamp"
+      },
+      "adjust": {
+        "mode": "prev",
+        "keepInMonth": false
+      },
+      "notices": [],
+      "period": {
+        "start": null,
+        "end": null
+      },
+      "skipDates": [],
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "updatedAt": "2026-09-05T00:00:00.000Z"
+    },
+    {
+      "id": "ap-salary",
+      "title": "給与振込",
+      "color": "blue",
+      "note": "支給日。",
+      "enabled": true,
+      "calendarId": "bank",
+      "recurrence": {
+        "type": "monthlyByDay",
+        "interval": 1,
+        "days": [
+          25
+        ],
+        "overflow": "clamp"
+      },
+      "adjust": {
+        "mode": "prev",
+        "keepInMonth": false
+      },
+      "notices": [
+        {
+          "offset": -3,
+          "unit": "business",
+          "label": "振込データ作成"
+        }
+      ],
+      "period": {
+        "start": null,
+        "end": null
+      },
+      "skipDates": [],
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "updatedAt": "2026-09-05T00:00:00.000Z"
+    },
+    {
+      "id": "ap-bonus",
+      "title": "賞与振込",
+      "color": "pink",
+      "note": "支給月・支給日は会社ごとに調整する。",
+      "enabled": true,
+      "calendarId": "bank",
+      "recurrence": {
+        "type": "monthlyByDay",
+        "interval": 1,
+        "days": [
+          10
+        ],
+        "overflow": "clamp",
+        "months": [
+          6,
+          12
+        ]
+      },
+      "adjust": {
+        "mode": "prev",
+        "keepInMonth": false
+      },
+      "notices": [
+        {
+          "offset": -5,
+          "unit": "business",
+          "label": "賞与計算"
+        }
+      ],
+      "period": {
+        "start": null,
+        "end": null
+      },
+      "skipDates": [],
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "updatedAt": "2026-09-05T00:00:00.000Z"
+    },
+    {
+      "id": "ap-expense",
+      "title": "経費精算の締切",
+      "color": "orange",
+      "note": "当月分の立替経費。締切後は翌月精算。",
+      "enabled": true,
+      "calendarId": "company",
+      "recurrence": {
+        "type": "monthlyByDay",
+        "interval": 1,
+        "days": [
+          "last"
+        ],
+        "overflow": "clamp"
+      },
+      "adjust": {
+        "mode": "prev",
+        "keepInMonth": false
+      },
+      "notices": [],
+      "period": {
+        "start": null,
+        "end": null
+      },
+      "skipDates": [],
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "updatedAt": "2026-09-05T00:00:00.000Z"
+    }
+  ]
+}

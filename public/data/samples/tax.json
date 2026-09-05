@@ -1,0 +1,295 @@
+{
+  "schemaVersion": 1,
+  "exportedAt": "2026-09-05T00:00:00.000Z",
+  "calendars": [],
+  "rules": [
+    {
+      "id": "tax-withholding",
+      "title": "源泉所得税の納付",
+      "color": "red",
+      "note": "前月分。納期の特例を受けている場合は年2回（7/10・1/20）。",
+      "enabled": true,
+      "calendarId": "bank",
+      "recurrence": {
+        "type": "monthlyByDay",
+        "interval": 1,
+        "days": [
+          10
+        ],
+        "overflow": "clamp"
+      },
+      "adjust": {
+        "mode": "next",
+        "keepInMonth": false
+      },
+      "notices": [],
+      "period": {
+        "start": null,
+        "end": null
+      },
+      "skipDates": [],
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "updatedAt": "2026-09-05T00:00:00.000Z"
+    },
+    {
+      "id": "tax-resident",
+      "title": "住民税（特別徴収）の納付",
+      "color": "red",
+      "note": "前月分の給与から天引きした住民税。",
+      "enabled": true,
+      "calendarId": "bank",
+      "recurrence": {
+        "type": "monthlyByDay",
+        "interval": 1,
+        "days": [
+          10
+        ],
+        "overflow": "clamp"
+      },
+      "adjust": {
+        "mode": "next",
+        "keepInMonth": false
+      },
+      "notices": [],
+      "period": {
+        "start": null,
+        "end": null
+      },
+      "skipDates": [],
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "updatedAt": "2026-09-05T00:00:00.000Z"
+    },
+    {
+      "id": "tax-social-insurance",
+      "title": "社会保険料の引落",
+      "color": "orange",
+      "note": "前月分の健康保険・厚生年金。残高不足に注意。",
+      "enabled": true,
+      "calendarId": "bank",
+      "recurrence": {
+        "type": "monthlyByDay",
+        "interval": 1,
+        "days": [
+          "last"
+        ],
+        "overflow": "clamp"
+      },
+      "adjust": {
+        "mode": "next",
+        "keepInMonth": false
+      },
+      "notices": [],
+      "period": {
+        "start": null,
+        "end": null
+      },
+      "skipDates": [],
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "updatedAt": "2026-09-05T00:00:00.000Z"
+    },
+    {
+      "id": "tax-year-end-adjust",
+      "title": "年末調整の書類回収",
+      "color": "orange",
+      "note": "扶養控除等申告書・保険料控除申告書の回収期限。",
+      "enabled": true,
+      "calendarId": "company",
+      "recurrence": {
+        "type": "monthlyByDay",
+        "interval": 1,
+        "days": [
+          30
+        ],
+        "overflow": "clamp",
+        "months": [
+          11
+        ]
+      },
+      "adjust": {
+        "mode": "prev",
+        "keepInMonth": false
+      },
+      "notices": [
+        {
+          "offset": -10,
+          "unit": "business",
+          "label": "書類の配付"
+        }
+      ],
+      "period": {
+        "start": null,
+        "end": null
+      },
+      "skipDates": [],
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "updatedAt": "2026-09-05T00:00:00.000Z"
+    },
+    {
+      "id": "tax-legal-report",
+      "title": "法定調書合計表・給与支払報告書の提出",
+      "color": "red",
+      "note": "前年分。給与支払報告書は各市区町村へ。",
+      "enabled": true,
+      "calendarId": "company",
+      "recurrence": {
+        "type": "monthlyByDay",
+        "interval": 1,
+        "days": [
+          31
+        ],
+        "overflow": "clamp",
+        "months": [
+          1
+        ]
+      },
+      "adjust": {
+        "mode": "prev",
+        "keepInMonth": false
+      },
+      "notices": [],
+      "period": {
+        "start": null,
+        "end": null
+      },
+      "skipDates": [],
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "updatedAt": "2026-09-05T00:00:00.000Z"
+    },
+    {
+      "id": "tax-depreciable-assets",
+      "title": "償却資産申告",
+      "color": "purple",
+      "note": "1月1日時点の償却資産を市区町村へ申告。",
+      "enabled": true,
+      "calendarId": "company",
+      "recurrence": {
+        "type": "monthlyByDay",
+        "interval": 1,
+        "days": [
+          31
+        ],
+        "overflow": "clamp",
+        "months": [
+          1
+        ]
+      },
+      "adjust": {
+        "mode": "prev",
+        "keepInMonth": false
+      },
+      "notices": [],
+      "period": {
+        "start": null,
+        "end": null
+      },
+      "skipDates": [],
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "updatedAt": "2026-09-05T00:00:00.000Z"
+    },
+    {
+      "id": "tax-labor-insurance",
+      "title": "労働保険の年度更新",
+      "color": "orange",
+      "note": "6/1〜7/10。概算・確定保険料の申告と納付。",
+      "enabled": true,
+      "calendarId": "company",
+      "recurrence": {
+        "type": "monthlyByDay",
+        "interval": 1,
+        "days": [
+          10
+        ],
+        "overflow": "clamp",
+        "months": [
+          7
+        ]
+      },
+      "adjust": {
+        "mode": "next",
+        "keepInMonth": false
+      },
+      "notices": [
+        {
+          "offset": -10,
+          "unit": "business",
+          "label": "賃金集計の準備"
+        }
+      ],
+      "period": {
+        "start": null,
+        "end": null
+      },
+      "skipDates": [],
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "updatedAt": "2026-09-05T00:00:00.000Z"
+    },
+    {
+      "id": "tax-social-insurance-base",
+      "title": "算定基礎届の提出",
+      "color": "orange",
+      "note": "7/1〜7/10。4〜6月の報酬をもとに標準報酬月額を決める。",
+      "enabled": true,
+      "calendarId": "company",
+      "recurrence": {
+        "type": "monthlyByDay",
+        "interval": 1,
+        "days": [
+          10
+        ],
+        "overflow": "clamp",
+        "months": [
+          7
+        ]
+      },
+      "adjust": {
+        "mode": "next",
+        "keepInMonth": false
+      },
+      "notices": [],
+      "period": {
+        "start": null,
+        "end": null
+      },
+      "skipDates": [],
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "updatedAt": "2026-09-05T00:00:00.000Z"
+    },
+    {
+      "id": "tax-corporate-return",
+      "title": "法人税・消費税の申告",
+      "color": "red",
+      "note": "3月決算の場合、事業年度終了から2か月以内。決算月に合わせて調整する。",
+      "enabled": true,
+      "calendarId": "company",
+      "recurrence": {
+        "type": "monthlyByDay",
+        "interval": 1,
+        "days": [
+          "last"
+        ],
+        "overflow": "clamp",
+        "months": [
+          5
+        ]
+      },
+      "adjust": {
+        "mode": "next",
+        "keepInMonth": false
+      },
+      "notices": [
+        {
+          "offset": -20,
+          "unit": "business",
+          "label": "決算作業の開始"
+        }
+      ],
+      "period": {
+        "start": null,
+        "end": null
+      },
+      "skipDates": [],
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "updatedAt": "2026-09-05T00:00:00.000Z"
+    }
+  ]
+}
