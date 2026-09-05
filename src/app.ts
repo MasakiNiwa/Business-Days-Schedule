@@ -273,7 +273,7 @@ export class App {
    * 既定の 'add' は既にある ID を触らない。黙って上書きすると、利用者が編集した
    * 名前や日付が予告なく元へ戻ってしまうため。'merge'（元に戻す）は確認を取る。
    */
-  private async addSamplePack(pack: SamplePack, mode: 'add' | 'merge' = 'add'): Promise<void> {
+  private async addSamplePack(pack: SamplePack, mode: 'add' | 'merge' = 'add', ids?: readonly string[]): Promise<void> {
     if (mode === 'merge') {
       const ok = globalThis.confirm(
         `「${pack.name}」の ${pack.count} 件を、編集前の内容で上書きします。\nこの束のルールに加えた変更は失われます。よろしいですか？`,
@@ -284,7 +284,12 @@ export class App {
     try {
       const response = await fetch(`${SAMPLES_DIR}${pack.file}`);
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-      const result = importState(await response.json(), this.state, mode);
+      const raw = await response.json();
+      if (ids !== undefined) {
+        if (!Array.isArray(raw?.rules)) throw new Error('サンプルの形式が不正です');
+        raw.rules = raw.rules.filter((rule: Rule) => ids.includes(rule.id));
+      }
+      const result = importState(raw, this.state, mode);
       if (!result.ok) throw new Error(result.errors.join(' / '));
       this.state = result.state;
       this.state.prefs = {
@@ -350,7 +355,7 @@ export class App {
     }
     const { occurrences } = this.occurrencesBetween(request.from, request.to);
     const rules = new Map(this.state.rules.map((rule) => [rule.id, rule]));
-    const options = { includeNotices: request.includeNotices, calendarName: '営業日スケジュール' };
+    const options = { includeNotices: request.includeNotices, calendarName: 'Business Days Schedule' };
     const text =
       request.format === 'ics'
         ? buildIcs(occurrences, rules, options)
@@ -393,7 +398,7 @@ export class App {
     return h(
       'div',
       { class: 'brand-bar' },
-      h('h1', { class: 'brand' }, '営業日スケジュール'),
+      h('h1', { class: 'brand' }, 'Business Days Schedule'),
       h(
         'span',
         { class: 'brand-version', title: longVersion() },
@@ -513,7 +518,7 @@ export class App {
         { class: 'footer-source' },
         `祝日データ: ${meta.source}（${meta.range.from} 〜 ${meta.range.to} / ${meta.count} 件 / 取得 ${meta.fetchedAt.slice(0, 10)}）`,
       ),
-      h('p', { class: 'footer-version' }, `営業日スケジュール ${longVersion()}`),
+      h('p', { class: 'footer-version' }, `Business Days Schedule ${longVersion()}`),
       h(
         'p',
         { class: 'footer-link' },
@@ -580,6 +585,14 @@ export class App {
         {
           onAdd: (pack) => void this.addSamplePack(pack, 'add'),
           onRestore: (pack) => void this.addSamplePack(pack, 'merge'),
+          onLoadRules: async (pack) => {
+            const response = await fetch(`${SAMPLES_DIR}${pack.file}`);
+            if (!response.ok) throw new Error('取得できませんでした');
+            const result = importState(await response.json(), createDefaultState(), 'add');
+            if (!result.ok) throw new Error('形式が不正です');
+            return result.state.rules;
+          },
+          onAddSelected: (pack, ids) => void this.addSamplePack(pack, 'add', ids),
           onClose: () => this.backToCalendar(),
         },
         this.sampleError,
@@ -843,10 +856,8 @@ export class App {
     if (!this.storeAvailable) {
       notices.push('この端末には保存されません（ブラウザの設定により localStorage が使えません）');
     }
-    if (this.holidays.meta.verifiedAgainstCao === false) {
-      notices.push(
-        '祝日データが内閣府の公表内容と一致していません。休業日の判定が誤っている可能性があります。',
-      );
+    if (Date.now() - Date.parse(this.holidays.meta.fetchedAt) > 14 * 24 * 60 * 60 * 1000) {
+      notices.push('祝日データの取得から2週間以上経過しています。通信できる状態で再読み込みし、取得日を確認してください。');
     }
     // 収録範囲の警告は、いま実際に見ている期間に対して出す。
     const shown =

@@ -8,8 +8,7 @@
       "from": "2023-01-01",
       "to": "2027-12-31"
     },
-    "count": 92,
-    "verifiedAgainstCao": null
+    "count": 92
   },
   "holidays": {
     "2023-01-01": "元日",

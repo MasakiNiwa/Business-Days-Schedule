@@ -1698,6 +1698,19 @@ main:focus {
 
 /* --- 印刷 -------------------------------------------------------------- */
 
+.advanced-options { margin: 0.65rem 0; }
+.advanced-options > summary { cursor: pointer; color: var(--fg-muted); padding: 0.45rem 0; font-weight: 600; }
+.editor-review { position: sticky; bottom: -1.5rem; background: var(--bg); border-top: 1px solid var(--border); padding: 0.65rem 0; z-index: 2; }
+.editor-review .editor-actions { margin-top: 0.5rem; }
+.rule-summary, .next-dates { margin: 0.2rem 0; font-size: 0.85rem; overflow-wrap: anywhere; }
+.next-dates { color: var(--fg-muted); }
+.editor-review .issues:empty { display: none; }
+.settings-navigation { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.7rem 0 1rem; }
+.settings-navigation [aria-pressed='true'] { background: var(--fg); color: var(--bg); }
+.sample-choices { flex-basis: 100%; margin-top: 0.5rem; }
+.sample-choices .checkbox { margin: 0.5rem 0; }
+.sample-item:has(.sample-choices) { flex-wrap: wrap; }
+
 @media print {
   /*
    * 用紙では常に白地・黒文字にする。
@@ -1733,17 +1746,10 @@ main:focus {
   .legend,
   .skip-link,
   .update-banner,
+  .brand-bar,
+  .footer-version,
   .footer-link {
     display: none;
-  }
-
-  /* 紙に何のカレンダーか残るよう、アプリ名と版は印刷する。 */
-  .brand-bar {
-    padding-bottom: 0.3em;
-  }
-
-  .brand {
-    font-size: 1em;
   }
 
   /* 営業日数と祝日データの出典は、紙に残る情報として意味があるので印刷する。 */

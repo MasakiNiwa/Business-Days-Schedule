@@ -4,13 +4,13 @@
  *   holiday-jp/holiday_jp の holidays.yml
  *     → public/data/holidays.json
  *
- * 内閣府 CSV は Shift_JIS・掲載範囲が翌年までと扱いにくいため一次ソースにはせず、
- * scripts/verify-cao.ts で二次検証にのみ用いる。
+ * 出典の SHA を先に固定し、同じ版のデータを取得・検査して公開に使う。
  *
  * 使い方: npm run holidays
  */
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { isValidDateStr } from '../src/core/dateUtil';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { HolidayData } from '../src/types';
@@ -35,6 +35,7 @@ export function parseHolidaysYml(text: string): Record<string, string> {
     if (matched === null) continue;
     const [, date, name] = matched;
     if (date === undefined || name === undefined) continue;
+    if (!isValidDateStr(date) || date in holidays) throw new Error(`祝日の日付が不正または重複: ${date}`);
     // 引用符付きで書かれている場合に備えて剥がす。
     holidays[date] = name.replace(/^["'](.*)["']$/, '$1');
   }
@@ -44,6 +45,7 @@ export function parseHolidaysYml(text: string): Record<string, string> {
 async function fetchText(url: string): Promise<string> {
   const response = await fetch(url, {
     headers: { 'user-agent': 'business-days-schedule-build-script' },
+    signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) {
     throw new Error(`取得に失敗しました (${response.status} ${response.statusText}): ${url}`);
@@ -51,37 +53,17 @@ async function fetchText(url: string): Promise<string> {
   return response.text();
 }
 
-/** 出典の版を記録するためのコミット SHA。取得できなくても致命的ではない。 */
-async function fetchSourceSha(): Promise<string | null> {
-  try {
-    const response = await fetch(COMMITS_API, {
-      headers: {
-        'user-agent': 'business-days-schedule-build-script',
-        accept: 'application/vnd.github+json',
-      },
-    });
-    if (!response.ok) return null;
-    const commits = (await response.json()) as { sha?: string }[];
-    return commits[0]?.sha ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/** 既存 JSON の verifiedAgainstCao を引き継ぐ（本スクリプトは検証を行わないため）。 */
-async function readExistingVerification(): Promise<boolean | null> {
-  try {
-    const existing = JSON.parse(await readFile(OUTPUT_PATH, 'utf-8')) as HolidayData;
-    return existing.meta.verifiedAgainstCao ?? null;
-  } catch {
-    return null;
-  }
+/** データを取得する版と記録する版の食い違いを防ぐ。 */
+async function fetchSourceSha(): Promise<string> {
+  const commits = JSON.parse(await fetchText(COMMITS_API)) as { sha?: string }[];
+  const sha = commits[0]?.sha;
+  if (typeof sha !== 'string' || !/^[a-f0-9]{40}$/.test(sha)) throw new Error('出典の版を特定できません');
+  return sha;
 }
 
 export function buildHolidayData(
   holidays: Record<string, string>,
   sourceSha: string | null,
-  verifiedAgainstCao: boolean | null,
   now: Date,
 ): HolidayData {
   const dates = Object.keys(holidays).sort();
@@ -101,25 +83,36 @@ export function buildHolidayData(
   return {
     meta: {
       source: 'holiday-jp/holiday_jp',
-      sourceUrl: SOURCE_URL,
+      sourceUrl: sourceSha === null ? SOURCE_URL : `https://raw.githubusercontent.com/holiday-jp/holiday_jp/${sourceSha}/holidays.yml`,
       sourceSha,
       fetchedAt: now.toISOString(),
       range,
       count: dates.length,
-      verifiedAgainstCao,
     },
     holidays: sorted,
   };
 }
 
+export function validatePublishedHolidays(data: HolidayData, year: number): void {
+  for (const [date, name] of Object.entries(data.holidays)) {
+    if (!isValidDateStr(date) || name.trim() === '') throw new Error(`祝日レコードが不正: ${date}`);
+  }
+  for (const target of [year, year + 1]) {
+    const dates = Object.keys(data.holidays).filter((date) => date.startsWith(`${target}-`));
+    if (dates.length < 16 || dates.length > 30) throw new Error(`${target}年の祝日件数が不正: ${dates.length}`);
+    for (const suffix of ['01-01', '02-11', '11-03']) {
+      if (!data.holidays[`${target}-${suffix}`]) throw new Error(`${target}-${suffix} がありません`);
+    }
+  }
+}
+
 async function main(): Promise<void> {
-  const yml = await fetchText(SOURCE_URL);
+  const sourceSha = await fetchSourceSha();
+  const yml = await fetchText(`https://raw.githubusercontent.com/holiday-jp/holiday_jp/${sourceSha}/holidays.yml`);
   const holidays = parseHolidaysYml(yml);
-  const [sourceSha, verified] = await Promise.all([
-    fetchSourceSha(),
-    readExistingVerification(),
-  ]);
-  const data = buildHolidayData(holidays, sourceSha, verified, new Date());
+  const now = new Date();
+  const data = buildHolidayData(holidays, sourceSha, now);
+  validatePublishedHolidays(data, now.getUTCFullYear());
 
   await mkdir(dirname(OUTPUT_PATH), { recursive: true });
   await writeFile(OUTPUT_PATH, `${JSON.stringify(data, null, 2)}\n`, 'utf-8');

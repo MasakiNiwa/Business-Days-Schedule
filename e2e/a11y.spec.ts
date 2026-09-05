@@ -62,6 +62,10 @@ test.describe('axe-core', () => {
     await seedSamples(page);
     await page.getByRole('button', { name: '設定' }).click();
     await analyze(page, 'dialog');
+    for (const name of ['銀行休業日', 'バックアップ・書き出し', '祝日・アプリ情報']) {
+      await page.getByRole('button', { name, exact: true }).click();
+      await analyze(page, 'dialog');
+    }
   });
 
   test('ヘルプ', async ({ page }) => {

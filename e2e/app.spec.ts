@@ -146,6 +146,7 @@ test.describe('書き出し', () => {
     );
     await page.goto('');
     await page.getByRole('button', { name: '設定' }).click();
+    await page.getByRole('button', { name: 'バックアップ・書き出し', exact: true }).click();
     await page.getByRole('button', { name: 'Google カレンダー / Outlook 用に書き出す' }).click();
     await page.getByRole('button', { name: '今日から3か月' }).click();
 
@@ -172,6 +173,7 @@ test.describe('入力欄の名前', () => {
     // プレースホルダーではなくラベルで引けること。
     await expect(page.getByLabel('タイトル')).toBeVisible();
     await expect(page.getByLabel('営業日カレンダー')).toBeVisible();
+    await page.getByText('色・メモ・有効／無効', { exact: true }).click();
     await expect(page.getByLabel('メモ')).toBeVisible();
   });
 
@@ -210,5 +212,34 @@ test.describe('表示', () => {
     }));
     expect(colors.background).toBe('rgb(255, 255, 255)');
     expect(colors.foreground).toBe('#000');
+    await expect(page.locator('.brand-bar')).toBeHidden();
+    await expect(page.locator('.footer-version')).toBeHidden();
   });
+});
+
+test('給与のひな型から1件保存できる', async ({ page }) => {
+  await page.goto('');
+  await page.getByRole('button', { name: 'ルールを追加', exact: true }).click();
+  await page.getByRole('button', { name: '給与', exact: true }).click();
+  await expect(page.getByLabel('タイトル')).toHaveValue('給与振込');
+  await expect(page.getByLabel('営業日カレンダー')).toHaveValue('bank');
+  await expect(page.locator('.rule-summary')).toContainText('25日');
+  await expect(page.locator('.next-dates')).toContainText('次回から');
+  await page.getByRole('button', { name: '保存', exact: true }).click();
+  await page.reload();
+  await openRulePanel(page);
+  await expect(page.locator('.rule-title')).toHaveText('給与振込');
+});
+
+test('サンプルから1件だけ選んで追加できる', async ({ page }) => {
+  await page.goto('');
+  await page.getByRole('button', { name: 'サンプルを読み込む' }).click();
+  const pack = page.locator('.sample-item').filter({ hasText: '基本セット' });
+  await pack.getByRole('button', { name: '内容を選ぶ' }).click();
+  await pack.getByRole('checkbox', { name: /給与振込/ }).check();
+  await pack.getByRole('button', { name: '選んだ 1 件を追加' }).click();
+  await closeDialog(page);
+  await openRulePanel(page);
+  await expect(page.locator('.rule-title')).toHaveCount(1);
+  await expect(page.locator('.rule-title')).toHaveText('給与振込');
 });

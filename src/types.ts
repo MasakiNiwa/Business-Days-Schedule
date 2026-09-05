@@ -39,7 +39,6 @@ export type HolidayMeta = {
   fetchedAt: string;
   range: { from: DateStr; to: DateStr };
   count: number;
-  verifiedAgainstCao: boolean | null;
 };
 
 export type HolidayData = {
