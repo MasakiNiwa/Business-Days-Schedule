@@ -164,6 +164,14 @@ export type Rule = {
   id: string;
   title: string;
   color: ColorToken;
+  /**
+   * 所属するグループ。空文字と未設定は「未分類」とみなす。
+   *
+   * 実務では「税務」「入金」「社内」のように束で見たい・束で渡したいことが多い。
+   * 独立した実体にせず文字列にしているのは、名前を変えるだけで束ね直せるほうが
+   * 使い始めやすく、消えたグループを別途片付ける必要も無いため。
+   */
+  group?: string;
   note?: string;
   enabled: boolean;
   calendarId: string;

@@ -19,6 +19,7 @@ import {
   yearOf,
 } from '../core/dateUtil';
 import type { CalendarExportFormat } from '../core/exportCalendar';
+import { UNGROUPED, groupLabel } from '../core/group';
 import type { DateStr } from '../types';
 import { button, checkbox, dateInput, field, select } from './controls';
 import { clear, h } from './dom';
@@ -28,13 +29,27 @@ export type CalendarExportRequest = {
   to: DateStr;
   format: CalendarExportFormat;
   includeNotices: boolean;
+  /** 書き出す対象のグループ。null は「すべて」。 */
+  group: string | null;
 };
 
 export type CalendarExportHandlers = {
   onExport: (request: CalendarExportRequest) => void;
-  /** 期間が変わるたびに件数を数え直すために呼ぶ。 */
-  countOccurrences: (from: DateStr, to: DateStr, includeNotices: boolean) => number;
+  /** 期間・対象が変わるたびに件数を数え直すために呼ぶ。 */
+  countOccurrences: (request: CalendarExportRequest) => number;
   onClose: () => void;
+};
+
+/** 選択肢の値として使う「すべて」。グループ名と衝突しない値を使う。 */
+const ALL_GROUPS = '\u0000all';
+
+export type CalendarExportOptionsInput = {
+  /** 選べるグループ名。空なら対象の選択欄そのものを出さない。 */
+  groups: readonly string[];
+  /** 未分類のルールがあるか。 */
+  hasUngrouped: boolean;
+  /** 画面で絞り込み中のグループ。初期値にする。 */
+  activeGroup: string | null;
 };
 
 /** これを超えたら「多い」と伝える。取り込みは戻しにくいので、押す前に気づかせる。 */
@@ -65,6 +80,7 @@ const PRESETS: Preset[] = [
 export function renderCalendarExport(
   handlers: CalendarExportHandlers,
   today: DateStr = todayInTokyo(),
+  options: CalendarExportOptionsInput = { groups: [], hasUngrouped: true, activeGroup: null },
 ): HTMLElement {
   const initial = monthRange(today, 0);
   const request: CalendarExportRequest = {
@@ -72,6 +88,9 @@ export function renderCalendarExport(
     to: initial.to,
     format: 'ics',
     includeNotices: true,
+    // 絞り込んで見ていたなら、その束を渡したいはず。見ているものと渡すものが
+    // 食い違うと、画面に無い予定が取り込み先へ紛れ込む。
+    group: options.activeGroup,
   };
 
   const summary = h('p', { class: 'export-summary' });
@@ -125,7 +144,7 @@ export function renderCalendarExport(
       summary.textContent = '';
       return;
     }
-    const count = handlers.countOccurrences(request.from, request.to, request.includeNotices);
+    const count = handlers.countOccurrences({ ...request });
     summary.textContent = `${request.from} 〜 ${request.to} の ${count} 件を書き出します。`;
     if (count === 0) {
       issues.append(
@@ -171,6 +190,26 @@ export function renderCalendarExport(
         'いつもの予定表に直接入れると、あとで取り消したくなったときに一件ずつ消すことになります。Outlook なら「カレンダーの追加 → 空のカレンダーを作成」、Google カレンダーなら「他のカレンダー ＋ → 新しいカレンダーを作成」で入れ物を用意し、そこへ取り込むと丸ごと消せます。',
       ),
     ),
+    options.groups.length === 0
+      ? null
+      : field(
+          '対象',
+          select(
+            [
+              { value: ALL_GROUPS, label: 'すべてのグループ' },
+              ...options.groups.map((group) => ({ value: group, label: group })),
+              ...(options.hasUngrouped
+                ? [{ value: UNGROUPED, label: groupLabel(UNGROUPED) }]
+                : []),
+            ],
+            request.group === null ? ALL_GROUPS : request.group,
+            (value) => {
+              request.group = value === ALL_GROUPS ? null : value;
+              refresh();
+            },
+          ),
+          'グループごとに別々のカレンダーへ取り込めます。取り込み先で分けておくと、あとで束ごと消せます。',
+        ),
     field('期間', h('div', { class: 'row' }, fromInput, h('span', { class: 'unit' }, '〜'), toInput)),
     presets,
     field('形式', select(

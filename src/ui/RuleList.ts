@@ -4,6 +4,7 @@
  */
 
 import { describeNotice, describePeriod, describeRule } from '../core/describe';
+import { UNGROUPED, groupLabel, groupOf } from '../core/group';
 import type { BusinessCalendar, Rule } from '../types';
 import { button } from './controls';
 import { h } from './dom';
@@ -115,8 +116,47 @@ export function renderRuleList(
     return section;
   }
 
+  // グループを使い始めたら見出しで束ねる。1つも無いうちは、見出しだけの
+  // 「未分類」が出ても意味が無いので、素の一覧のままにする。
+  const buckets = new Map<string, Rule[]>();
+  for (const rule of rules) {
+    const group = groupOf(rule);
+    const bucket = buckets.get(group);
+    if (bucket === undefined) buckets.set(group, [rule]);
+    else bucket.push(rule);
+  }
+  const grouped = [...buckets.keys()].some((group) => group !== UNGROUPED);
+
+  if (!grouped) {
+    section.append(
+      h('ul', { class: 'rules' }, ...rules.map((rule) => renderRule(rule, calendars, handlers))),
+    );
+  } else {
+    // 未分類は最後に置く。名前の付いた束のほうが探す対象になりやすい。
+    const names = [...buckets.keys()]
+      .filter((group) => group !== UNGROUPED)
+      .sort((a, b) => a.localeCompare(b, 'ja'));
+    if (buckets.has(UNGROUPED)) names.push(UNGROUPED);
+
+    for (const name of names) {
+      const items = buckets.get(name) ?? [];
+      section.append(
+        h(
+          'div',
+          { class: 'rule-group' },
+          h(
+            'h3',
+            { class: 'rule-group-title' },
+            groupLabel(name),
+            h('span', { class: 'rule-group-count' }, `${items.length}件`),
+          ),
+          h('ul', { class: 'rules' }, ...items.map((rule) => renderRule(rule, calendars, handlers))),
+        ),
+      );
+    }
+  }
+
   section.append(
-    h('ul', { class: 'rules' }, ...rules.map((rule) => renderRule(rule, calendars, handlers))),
     h(
       'div',
       { class: 'editor-actions' },

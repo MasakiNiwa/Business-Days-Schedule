@@ -25,6 +25,11 @@ async function loadSamplePack(page: Page, name: string): Promise<void> {
   await expect(page.locator('dialog .rule-panel')).toBeVisible();
   await page.getByRole('button', { name: 'サンプル', exact: true }).click();
   await expect(page.locator('dialog .samples')).toBeVisible();
+  await addSamplePack(page, name);
+}
+
+/** サンプル画面が開いている前提で、束をもう1つ足す。 */
+async function addSamplePack(page: Page, name: string): Promise<void> {
   await page
     .locator('.sample-item')
     .filter({ hasText: name })
@@ -243,35 +248,75 @@ test('サンプルから1件だけ選んで追加できる', async ({ page }) =>
   await expect(page.locator('.rule-title')).toHaveText('給与振込');
 });
 
-test.describe('狭い画面の読みやすさ', () => {
-  test('スマートフォン幅では予定を点で示し、1か月が縦に伸びない', async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== 'mobile', 'スマートフォン幅のときだけ確かめる');
+test.describe('予定の出し方の切り替え', () => {
+  test('既定は内容が見える形', async ({ page }) => {
+    // 初期状態では予定名まで出す。点にするかは利用者が選ぶ（画面幅では決めない）。
     await page.goto('');
     await loadSamplePack(page, '基本セット');
     await closeDialog(page);
 
-    // 幅50pxほどのセルに予定名を入れると1〜2文字ずつ縦に割れて読めなくなる。
-    // 狭い画面では名前を隠し、点の数で件数を示す。
-    const label = page.locator('.chips .chip-label').first();
-    await expect(label).toBeHidden();
+    await expect(page.locator('.chips .chip-label').first()).toBeVisible();
+    await expect(page.locator('.legend-wide').first()).toBeVisible();
+    await expect(page.locator('.legend-narrow').first()).toBeHidden();
+  });
 
+  test('点に切り替えると名前を隠して1か月を見渡せる', async ({ page }) => {
+    await page.goto('');
+    await loadSamplePack(page, '基本セット');
+    await closeDialog(page);
+    const tall = await page.locator('.calendar').evaluate((el) => el.scrollHeight);
+
+    await page.getByRole('button', { name: '点', exact: true }).click();
+
+    await expect(page.locator('.chips .chip-label').first()).toBeHidden();
     const chip = page.locator('.chips .chip').first();
     const box = await chip.boundingBox();
     expect(box?.width).toBeLessThan(16);
     expect(box?.height).toBeLessThan(16);
+    // 点にした意味があること（縦に詰まる）。
+    const short = await page.locator('.calendar').evaluate((el) => el.scrollHeight);
+    expect(short).toBeLessThan(tall);
 
-    // 1か月がおおむね1〜2画面に収まること（以前は画面3枚分に伸びていた）。
-    const height = await page.locator('.calendar').evaluate((el) => el.scrollHeight);
-    expect(height).toBeLessThan(900);
+    // 凡例も点向けの説明に入れ替わる。
+    await expect(page.locator('.legend-narrow').first()).toBeVisible();
+    await expect(page.locator('.legend-wide').first()).toBeHidden();
   });
 
-  test('点の意味を凡例で説明する', async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== 'mobile', 'スマートフォン幅のときだけ確かめる');
+  test('選んだ出し方は再読込しても残る', async ({ page }) => {
     await page.goto('');
     await loadSamplePack(page, '基本セット');
     await closeDialog(page);
-    await expect(page.locator('.legend-narrow').first()).toBeVisible();
-    await expect(page.locator('.legend-wide').first()).toBeHidden();
+    await page.getByRole('button', { name: '点', exact: true }).click();
+    await expect(page.locator('.chips .chip-label').first()).toBeHidden();
+
+    await page.reload();
+    await expect(page.locator('.chips .chip-label').first()).toBeHidden();
+  });
+});
+
+test.describe('グループ', () => {
+  test('選んだグループだけを表示し、書き出しにも引き継ぐ', async ({ page }) => {
+    await page.goto('');
+    await loadSamplePack(page, '税務');
+    await addSamplePack(page, '会議・報告');
+    await closeDialog(page);
+
+    const all = await page.locator('.chips .chip').count();
+
+    await page.locator('.toolbar-left select').selectOption('税務');
+    const narrowed = await page.locator('.chips .chip').count();
+    expect(narrowed).toBeGreaterThan(0);
+    expect(narrowed).toBeLessThan(all);
+
+    // 見ているものと渡すものが食い違うと、画面に無い予定が取り込み先へ紛れ込む。
+    await page.getByRole('button', { name: '書き出し' }).click();
+    const target = page.locator('.export select').first();
+    await expect(target).toHaveValue('税務');
+  });
+
+  test('グループが1つも無ければ絞り込み欄を出さない', async ({ page }) => {
+    await page.goto('');
+    await expect(page.locator('.toolbar-left select')).toHaveCount(0);
   });
 });
 

@@ -224,6 +224,32 @@ describe('describeOccurrence', () => {
   });
 });
 
+describe('exportCalendarFileName（グループ）', () => {
+  it('グループ名をファイル名に混ぜる', () => {
+    // 同じ期間を束ごとに書き出すとファイルが並ぶ。名前で見分けられるようにする。
+    expect(exportCalendarFileName('2026-09-01', '2026-09-30', 'ics', '税務')).toBe(
+      'business-days-20260901-20260930-税務.ics',
+    );
+  });
+
+  it('ファイル名に使えない文字は落とす', () => {
+    // グループ名は自由入力なので、そのまま入れると保存できない名前になりうる。
+    expect(exportCalendarFileName('2026-09-01', '2026-09-30', 'ics', 'A/B: C')).toBe(
+      'business-days-20260901-20260930-A-B-C.ics',
+    );
+    // 記号しか残らないなら、名前に足さない。
+    expect(exportCalendarFileName('2026-09-01', '2026-09-30', 'ics', '///')).toBe(
+      'business-days-20260901-20260930.ics',
+    );
+  });
+
+  it('すべてのときは何も足さない', () => {
+    expect(exportCalendarFileName('2026-09-01', '2026-09-30', 'ics', null)).toBe(
+      'business-days-20260901-20260930.ics',
+    );
+  });
+});
+
 describe('exportCalendarFileName', () => {
   it('期間と形式が分かる名前にする', () => {
     expect(exportCalendarFileName('2026-09-05', '2027-09-04', 'ics')).toBe(

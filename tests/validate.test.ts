@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { hasError, validateCalendar, validateRule } from '../src/core/validate';
+import { LIMITS, hasError, validateCalendar, validateRule } from '../src/core/validate';
 import { companyCalendarDef, makeRule } from './helpers';
+import type { Rule } from '../src/types';
 
 describe('validateRule', () => {
   it('妥当なルールは問題なし', () => {
@@ -78,5 +79,25 @@ describe('validateCalendar', () => {
       closedRanges: [{ from: '12/29', to: '01-03', label: 'x' }],
     });
     expect(hasError(issues)).toBe(true);
+  });
+});
+
+describe('グループ', () => {
+  it('長すぎるグループ名を弾く', () => {
+    // 選ぶための札なので、長い文章を入れる場所ではない。
+    const rule = makeRule({ title: '納付', group: 'あ'.repeat(LIMITS.groupLength + 1) });
+    expect(validateRule(rule).map((issue) => issue.path)).toContain('group');
+    expect(hasError(validateRule(rule))).toBe(true);
+  });
+
+  it('未設定でも通る（未分類として扱う）', () => {
+    expect(hasError(validateRule(makeRule({ title: '納付' })))).toBe(false);
+    expect(hasError(validateRule(makeRule({ title: '納付', group: '税務' })))).toBe(false);
+  });
+
+  it('文字列でないグループを弾く', () => {
+    // validateRule は任意の値を受ける前提なので、型を外して渡す。
+    const rule = { ...makeRule({ title: '納付' }), group: 42 } as unknown as Rule;
+    expect(hasError(validateRule(rule))).toBe(true);
   });
 });

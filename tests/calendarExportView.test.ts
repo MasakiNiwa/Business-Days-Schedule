@@ -8,14 +8,23 @@ import type { CalendarExportHandlers } from '../src/ui/CalendarExportView';
 
 const TODAY = '2026-09-05';
 
-function open(count = 42): { element: HTMLElement; handlers: CalendarExportHandlers } {
+function open(
+  count = 42,
+  options?: Parameters<typeof renderCalendarExport>[2],
+): { element: HTMLElement; handlers: CalendarExportHandlers } {
   const handlers: CalendarExportHandlers = {
     onExport: vi.fn(),
     countOccurrences: vi.fn(() => count),
     onClose: vi.fn(),
   };
-  return { element: renderCalendarExport(handlers, TODAY), handlers };
+  return { element: renderCalendarExport(handlers, TODAY, options), handlers };
 }
+
+/** 「対象」の選択欄。グループが1つも無いときは出さない。 */
+const targetSelect = (root: ParentNode): HTMLSelectElement | null =>
+  [...root.querySelectorAll<HTMLSelectElement>('select')].find(
+    (node) => node.querySelector('option')?.textContent === 'すべてのグループ',
+  ) ?? null;
 
 const clickText = (root: ParentNode, text: string): void => {
   [...root.querySelectorAll('button')]
@@ -101,6 +110,7 @@ describe('renderCalendarExport', () => {
       to: '2026-09-30',
       format: 'csv',
       includeNotices: true,
+      group: null,
     });
   });
 
@@ -125,5 +135,53 @@ describe('renderCalendarExport', () => {
     const { element, handlers } = open();
     clickText(element, '閉じる');
     expect(handlers.onClose).toHaveBeenCalledOnce();
+  });
+
+  describe('グループ', () => {
+    it('グループが無ければ対象の選択欄を出さない', () => {
+      const { element } = open();
+      expect(targetSelect(element)).toBeNull();
+    });
+
+    it('グループと未分類を選べる', () => {
+      const { element } = open(42, {
+        groups: ['税務', '入金'],
+        hasUngrouped: true,
+        activeGroup: null,
+      });
+      const labels = [...(targetSelect(element)?.options ?? [])].map((o) => o.textContent);
+      expect(labels).toEqual(['すべてのグループ', '税務', '入金', '未分類']);
+    });
+
+    it('未分類のルールが無ければ未分類は出さない', () => {
+      const { element } = open(42, { groups: ['税務'], hasUngrouped: false, activeGroup: null });
+      const labels = [...(targetSelect(element)?.options ?? [])].map((o) => o.textContent);
+      expect(labels).toEqual(['すべてのグループ', '税務']);
+    });
+
+    it('画面で絞り込み中のグループを初期値にする', () => {
+      // 見ているものと渡すものが食い違うと、画面に無い予定が取り込み先へ紛れ込む。
+      const { element, handlers } = open(42, {
+        groups: ['税務', '入金'],
+        hasUngrouped: false,
+        activeGroup: '税務',
+      });
+      expect(targetSelect(element)?.value).toBe('税務');
+      clickText(element, '書き出す');
+      expect(vi.mocked(handlers.onExport).mock.calls[0]?.[0]?.group).toBe('税務');
+    });
+
+    it('対象を変えると件数を数え直す', () => {
+      const { element, handlers } = open(42, {
+        groups: ['税務'],
+        hasUngrouped: false,
+        activeGroup: null,
+      });
+      const select = targetSelect(element);
+      select!.value = '税務';
+      select?.dispatchEvent(new Event('change'));
+      const last = vi.mocked(handlers.countOccurrences).mock.calls.at(-1)?.[0];
+      expect(last?.group).toBe('税務');
+    });
   });
 });

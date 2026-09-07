@@ -8,7 +8,7 @@
 import type { BusinessCalendar, Rule } from '../types';
 import { createDefaultCalendars, COMPANY_CALENDAR_ID } from './businessDay';
 import { todayInTokyo } from './dateUtil';
-import { hasError, validateCalendar, validateRule } from './validate';
+import { LIMITS, hasError, validateCalendar, validateRule } from './validate';
 
 export const SCHEMA_VERSION = 1;
 
@@ -23,6 +23,14 @@ export type Preferences = {
   listDays: number;
   /** 配色モード。'auto' は OS の設定に従う。 */
   theme: 'auto' | 'light' | 'dark';
+  /**
+   * カレンダーのセルに予定をどう出すか。
+   * 'text' は予定名まで出す（既定）。'dot' は点だけにして1か月を見渡しやすくする。
+   * 画面幅から勝手に決めず、利用者が選んだものを覚える。
+   */
+  chipDisplay: 'text' | 'dot';
+  /** 表示するグループ。null は「すべて」。 */
+  activeGroup: string | null;
   /** 追加済みのサンプル束。再読込しても「追加済み」を保てるよう保存する。 */
   addedSamplePacks: string[];
 };
@@ -31,6 +39,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   defaultView: 'calendar',
   listDays: 30,
   theme: 'auto',
+  chipDisplay: 'text',
+  activeGroup: null,
   addedSamplePacks: [],
 };
 
@@ -158,6 +168,11 @@ function normalizePreferences(input: unknown, defaults: Preferences): Preference
       value['theme'] === 'light' || value['theme'] === 'dark' || value['theme'] === 'auto'
         ? value['theme']
         : defaults.theme,
+    chipDisplay: value['chipDisplay'] === 'dot' ? 'dot' : defaults.chipDisplay,
+    activeGroup:
+      typeof value['activeGroup'] === 'string' && value['activeGroup'] !== ''
+        ? value['activeGroup'].slice(0, LIMITS.groupLength)
+        : defaults.activeGroup,
     addedSamplePacks: Array.isArray(value['addedSamplePacks'])
       ? value['addedSamplePacks'].filter((id): id is string => typeof id === 'string').slice(0, 50)
       : [...defaults.addedSamplePacks],

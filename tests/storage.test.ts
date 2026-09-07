@@ -20,6 +20,9 @@ describe('load / save', () => {
     expect(state.rules).toEqual([]);
     expect(state.calendars.map((c) => c.id)).toEqual(['company', 'bank']);
     expect(state.prefs.listDays).toBe(30);
+    // 予定は既定で内容を出す。点にするかは利用者が選ぶ（画面幅では決めない）。
+    expect(state.prefs.chipDisplay).toBe('text');
+    expect(state.prefs.activeGroup).toBeNull();
     expect(state.prefs.theme).toBe('auto');
   });
 
@@ -51,7 +54,10 @@ describe('load / save', () => {
 
   it('壊れた表示設定は既定へ戻す', () => {
     const store = createMemoryStore();
-    store.setItem('bds.v1.prefs', JSON.stringify({ defaultView: 'evil', listDays: -5, theme: 'x' }));
+    store.setItem(
+      'bds.v1.prefs',
+      JSON.stringify({ defaultView: 'evil', listDays: -5, theme: 'x', chipDisplay: 'evil', activeGroup: 42 }),
+    );
     const loaded = loadState(store);
     expect(loaded.prefs).toEqual(DEFAULT_PREFERENCES);
   });

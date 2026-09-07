@@ -394,8 +394,48 @@ button {
   white-space: normal;
 }
 
-/* 凡例は画面幅で出し分ける。狭い画面ではセルの表し方そのものが変わるため。 */
+/*
+ * 凡例は表示モードで出し分ける。点表示ではセルの表し方そのものが変わるため。
+ * 画面幅では決めない。どちらで見るかは利用者が選ぶ（docs/SPEC.md §8.2）。
+ */
 .legend-narrow { display: none; }
+
+.is-dots .legend-wide { display: none; }
+.is-dots .legend-narrow { display: inline; }
+
+/*
+ * 点表示。予定名を出さず、色の点だけで「どの日に何件あるか」を示す。
+ * 予定が多いときや、幅の足りない画面で1か月を見渡すためのもの。
+ */
+.is-dots .chips {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding-top: 2px;
+}
+
+.is-dots .chip {
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  border-radius: 50%;
+  border: none;
+  background: var(--chip);
+}
+
+.is-dots .chip.is-notice {
+  background: transparent;
+  border: 1.5px solid var(--chip);
+}
+
+.is-dots .chip-label,
+.is-dots .chip-mark {
+  display: none;
+}
+
+.is-dots .cell {
+  min-height: 3.6rem;
+}
 
 .color-blue { --chip: var(--color-blue); }
 .color-green { --chip: var(--color-green); }
@@ -481,6 +521,40 @@ button {
   display: flex;
   align-items: center;
   gap: 0.35rem;
+}
+
+/* --- ルールのグループ ---------------------------------------------------- */
+
+.rule-group + .rule-group {
+  margin-top: 1rem;
+}
+
+/*
+ * 束の見出し。ルール名より弱く、区切りとして読める重さにする。
+ * 上に線を引くのは、どこからが次の束なのかを名前より先に目に入れるため。
+ */
+.rule-group-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.35rem 0 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--fg-muted);
+  border-top: 1px solid var(--border);
+}
+
+.rule-group:first-child .rule-group-title {
+  border-top: none;
+  padding-top: 0;
+}
+
+.rule-group-count {
+  font-weight: 400;
+  font-size: 0.75rem;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
 }
 
 .switch {
@@ -1280,6 +1354,40 @@ button {
   outline-offset: -2px;
 }
 
+/* --- 表示の絞り込み ------------------------------------------------------ */
+
+/*
+ * カレンダー・一覧のすぐ上に置く操作の帯。「いま見ているものの見え方」を決める
+ * ものだけを入れる。ヘッダーへ混ぜると、どれが対象への操作なのか読めなくなる。
+ */
+.view-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.6rem;
+}
+
+.toolbar-left,
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.toolbar-left .field {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+}
+
+.toolbar-label {
+  font-size: 0.78rem;
+  color: var(--fg-muted);
+}
+
 .month-summary {
   margin: 0 0 0.5rem;
   font-size: 0.8rem;
@@ -1756,46 +1864,22 @@ main:focus {
     margin-bottom: 0.6rem;
   }
 
-  /*
-   * 幅がおよそ50pxしかない7列のセルに予定名を入れると、日本語は1〜2文字ずつ
-   * 縦に割れて読めたものにならず、1か月が画面3枚分に伸びる。
-   * 狭い画面では月表示の役目を「どの日に何件あるか」に絞り、点で表す。
-   * 中身は日付を押して詳細で読むか、一覧表示へ切り替えて読む。
-   */
+  /* 幅が狭くツールチップも使えないため、省略せず折り返してセルを伸ばす。 */
   .cell {
     height: auto;
-    min-height: 3.6rem;
+    min-height: 4.2rem;
     padding: 0.2rem;
   }
 
-  .chips {
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 3px;
-    padding-top: 2px;
-  }
-
   .chip {
-    width: 9px;
-    height: 9px;
-    padding: 0;
-    border-radius: 50%;
-    border: none;
-    background: var(--chip);
+    font-size: 0.68rem;
   }
 
-  .chip.is-notice {
-    background: transparent;
-    border: 1.5px solid var(--chip);
+  .chip-label {
+    white-space: normal;
+    overflow: visible;
+    word-break: break-word;
   }
-
-  .chip-label,
-  .chip-mark {
-    display: none;
-  }
-
-  .legend-wide { display: none; }
-  .legend-narrow { display: inline; }
 
   /* 幅が足りないので祝日名は日付の下へ折り返す（名前自体は残す）。 */
   .cell-head {
@@ -1913,7 +1997,41 @@ main:focus {
   }
 
   /* 営業日数と祝日データの出典は、紙に残る情報として意味があるので印刷する。 */
-  .month-summary {
+  /* --- 表示の絞り込み ------------------------------------------------------ */
+
+/*
+ * カレンダー・一覧のすぐ上に置く操作の帯。「いま見ているものの見え方」を決める
+ * ものだけを入れる。ヘッダーへ混ぜると、どれが対象への操作なのか読めなくなる。
+ */
+.view-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.6rem;
+}
+
+.toolbar-left,
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.toolbar-left .field {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+}
+
+.toolbar-label {
+  font-size: 0.78rem;
+  color: var(--fg-muted);
+}
+
+.month-summary {
     margin: 0 0 0.6em;
     color: #333;
   }
