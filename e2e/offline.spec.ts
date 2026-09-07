@@ -39,6 +39,7 @@ test.describe('Service Worker', () => {
   test('版が画面に出る', async ({ page }) => {
     await page.goto('');
     await expect(page.locator('.brand')).toHaveText('Business Days Schedule');
+    await expect(page.locator('.brand-tagline')).toContainText('Outlook');
     await expect(page.locator('.brand-version')).toHaveText(/^v\d+\.\d+\.\d+$/);
     await expect(page.locator('.footer-version')).toContainText('Business Days Schedule v');
   });

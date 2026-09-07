@@ -256,7 +256,9 @@ describe('renderLegend', () => {
     expect(renderLegend(true, false).textContent).toContain('破線');
     expect(renderLegend(false, true).textContent).toContain('数字は元の日');
     expect(renderLegend(false, false).textContent).toContain('前後の営業日へ移動');
-    expect(renderLegend(false, false).textContent).toContain('日付をクリック');
+    expect(renderLegend(false, false).textContent).toContain('日付を押すと当日の予定');
+    // 狭い画面では予定を点で表すので、そのときの説明も用意しておく。
+    expect(renderLegend(false, false).querySelector('.legend-narrow')?.textContent).toBe('● = 予定');
   });
 });
 

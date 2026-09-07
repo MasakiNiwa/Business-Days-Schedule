@@ -145,10 +145,9 @@ test.describe('書き出し', () => {
       ],
     );
     await page.goto('');
-    await page.getByRole('button', { name: '設定' }).click();
-    await page.getByRole('button', { name: 'バックアップ・書き出し', exact: true }).click();
-    await page.getByRole('button', { name: 'Google カレンダー / Outlook 用に書き出す' }).click();
-    await page.getByRole('button', { name: '今日から3か月' }).click();
+    // 書き出しはヘッダーから直接開ける（設定の奥に埋めない）。
+    await page.getByRole('button', { name: '書き出し' }).click();
+    await page.getByRole('button', { name: '3か月' }).click();
 
     const [download] = await Promise.all([
       page.waitForEvent('download'),
@@ -242,4 +241,52 @@ test('サンプルから1件だけ選んで追加できる', async ({ page }) =>
   await openRulePanel(page);
   await expect(page.locator('.rule-title')).toHaveCount(1);
   await expect(page.locator('.rule-title')).toHaveText('給与振込');
+});
+
+test.describe('狭い画面の読みやすさ', () => {
+  test('スマートフォン幅では予定を点で示し、1か月が縦に伸びない', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile', 'スマートフォン幅のときだけ確かめる');
+    await page.goto('');
+    await loadSamplePack(page, '基本セット');
+    await closeDialog(page);
+
+    // 幅50pxほどのセルに予定名を入れると1〜2文字ずつ縦に割れて読めなくなる。
+    // 狭い画面では名前を隠し、点の数で件数を示す。
+    const label = page.locator('.chips .chip-label').first();
+    await expect(label).toBeHidden();
+
+    const chip = page.locator('.chips .chip').first();
+    const box = await chip.boundingBox();
+    expect(box?.width).toBeLessThan(16);
+    expect(box?.height).toBeLessThan(16);
+
+    // 1か月がおおむね1〜2画面に収まること（以前は画面3枚分に伸びていた）。
+    const height = await page.locator('.calendar').evaluate((el) => el.scrollHeight);
+    expect(height).toBeLessThan(900);
+  });
+
+  test('点の意味を凡例で説明する', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile', 'スマートフォン幅のときだけ確かめる');
+    await page.goto('');
+    await loadSamplePack(page, '基本セット');
+    await closeDialog(page);
+    await expect(page.locator('.legend-narrow').first()).toBeVisible();
+    await expect(page.locator('.legend-wide').first()).toBeHidden();
+  });
+});
+
+test.describe('書き出しの初期値', () => {
+  test('既定は今月の1日から末日', async ({ page }) => {
+    // 試しに1回押しただけで1年分が取り込み先へ流れ込む事故を防ぐ。
+    await page.goto('');
+    await page.getByRole('button', { name: '書き出し' }).click();
+
+    const dates = page.locator('.export input[type="date"]');
+    const from = await dates.nth(0).inputValue();
+    const to = await dates.nth(1).inputValue();
+    expect(from).toMatch(/^\d{4}-\d{2}-01$/);
+    expect(to.slice(0, 7)).toBe(from.slice(0, 7));
+
+    await expect(page.getByText('取り込み先は専用のカレンダーを作ってから')).toBeVisible();
+  });
 });

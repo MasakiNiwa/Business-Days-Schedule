@@ -6,12 +6,12 @@
 import holidaysFixture from './fixtures/holidays.json' with { type: 'json' };
 import { createBusinessDayCalendar, createDefaultCalendars } from '../src/core/businessDay';
 import type { BusinessDayCalendar } from '../src/core/businessDay';
-import { createHolidayLookup, parseHolidayData } from '../src/core/holidays';
+import { createHolidayLookup } from '../src/core/holidays';
 import type { ScheduleContext } from '../src/core/schedule';
 import { createRule } from '../src/core/storage';
-import type { BusinessCalendar, Rule } from '../src/types';
+import type { BusinessCalendar, HolidayData, Rule } from '../src/types';
 
-export const holidays = createHolidayLookup(parseHolidayData(holidaysFixture));
+export const holidays = createHolidayLookup(holidaysFixture as HolidayData);
 
 export const [companyCalendarDef, bankCalendarDef] = createDefaultCalendars() as [
   BusinessCalendar,

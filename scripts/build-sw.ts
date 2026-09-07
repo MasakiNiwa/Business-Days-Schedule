@@ -44,7 +44,9 @@ export function buildServiceWorker(assets: string[], cacheName: string): string 
  *     内容が変わればURLも変わり、古いものを掴み続けることがない。
  *   - 画面遷移（navigate）はネットワーク優先。オフラインのときだけキャッシュへ。
  *     新しい版をすぐ受け取れるようにするため。
- *   - データはネットワーク優先。通信できない場合だけ保存済みのものを使う。
+ *
+ * サンプルの JSON も事前キャッシュに含まれる。デプロイのたびにキャッシュ名が
+ * 変わるので、古い版を掴み続けることはない。
  */
 const CACHE = ${JSON.stringify(cacheName)};
 const CACHE_PREFIX = 'bds-';
@@ -72,8 +74,6 @@ self.addEventListener('message', (event) => {
   if (event.data === 'SKIP_WAITING') void self.skipWaiting();
 });
 
-const isData = (url) => url.pathname.includes('/data/');
-
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.method !== 'GET') return;
@@ -88,30 +88,6 @@ self.addEventListener('fetch', (event) => {
         return (await cache.match(BASE)) ?? (await cache.match(BASE + 'index.html')) ?? Response.error();
       }),
     );
-    return;
-  }
-
-  if (isData(url)) {
-    const task = (async () => {
-        const cache = await caches.open(CACHE);
-        const cached = await cache.match(request);
-        try {
-          const response = await fetch(request, { cache: 'no-cache', signal: AbortSignal.timeout(5000) });
-          if (!response.ok) throw new Error('data unavailable');
-          const data = await response.clone().json();
-          if (url.pathname.endsWith('/holidays.json')) {
-            if (!data.meta || !data.meta.range || !data.holidays || Array.isArray(data.holidays)) throw new Error('invalid holidays');
-            const entries = Object.entries(data.holidays);
-            if (entries.length === 0 || data.meta.count !== entries.length || entries.some(([date, name]) => !/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || typeof name !== 'string' || !name.trim())) throw new Error('invalid holidays');
-          }
-          await cache.put(request, response.clone());
-          return response;
-        } catch {
-          return cached ?? Response.error();
-        }
-      })();
-    event.respondWith(task);
-    event.waitUntil(task.then(() => undefined));
     return;
   }
 

@@ -10,7 +10,8 @@
  *   csv … Google カレンダーの CSV 取り込み用。表計算で中身を確かめたいとき向け
  */
 
-import { dayOf, monthOf, addDays, yearOf } from './dateUtil';
+import { APP_NAME } from './buildInfo';
+import { dayOf, monthOf, addDays, weekdayOf, yearOf } from './dateUtil';
 import { describeRule } from './describe';
 import type { DateStr, Occurrence, Rule } from '../types';
 
@@ -27,6 +28,20 @@ const PRODUCT_ID = '-//Business Days Schedule//JA//';
 /** UID の名前空間。同じ予定を再取り込みしたときに重複ではなく更新として扱わせる。 */
 const UID_DOMAIN = 'business-days-schedule';
 
+/**
+ * 取り込み先で付く分類名。Outlook では色分けと絞り込みに使え、
+ * 「試しに入れた予定をまとめて消す」ときの手掛かりにもなる。
+ * 画面に出る名前と同じにする。別々に書くとどちらかだけ直し忘れる。
+ */
+export const EXPORT_CATEGORY = APP_NAME;
+
+const WEEKDAY_NAMES = ['日', '月', '火', '水', '木', '金', '土'] as const;
+
+/** "2026-01-25（日）" 。取り込み先では曜日が出ないことがあるので自分で添える。 */
+function withWeekday(date: DateStr): string {
+  return `${date}（${WEEKDAY_NAMES[weekdayOf(date)] ?? '?'}）`;
+}
+
 // ---------------------------------------------------------------------------
 // 共通
 // ---------------------------------------------------------------------------
@@ -38,27 +53,43 @@ function toBasicDate(date: DateStr): string {
   return `${yearOf(date)}${pad2(monthOf(date))}${pad2(dayOf(date))}`;
 }
 
-/** 予定の説明文。補正の由来を残すことが、この書き出しの主な価値になる。 */
+/**
+ * 予定の説明文。補正の由来を残すことが、この書き出しの主な価値になる。
+ *
+ * 取り込み先では本文が1行に潰れて表示されることがあるので、
+ * 「見出し: 中身」の形で頭から読めるようにする。
+ */
 export function describeOccurrence(occurrence: Occurrence, rule: Rule): string {
   const lines: string[] = [];
   if (occurrence.kind === 'notice') {
-    lines.push(`${occurrence.rawDate} の予定に対する事前準備`);
+    lines.push(`対象: ${withWeekday(occurrence.rawDate)}の「${rule.title}」`);
   } else if (occurrence.shifted) {
     lines.push(
-      `本来は ${occurrence.rawDate}（休業日）。${
-        occurrence.shiftDirection === 'prev' ? '前営業日へ前倒し' : '翌営業日へ後ろ倒し'
-      }。`,
+      `補正: 本来は ${withWeekday(occurrence.rawDate)}（休業日）。${
+        occurrence.shiftDirection === 'prev' ? '前営業日へ繰り上げ' : '翌営業日へ繰り下げ'
+      }`,
     );
   }
-  lines.push(describeRule(rule));
-  if (rule.note !== undefined && rule.note !== '') lines.push(rule.note);
+  lines.push(`ルール: ${describeRule(rule)}`);
+  if (rule.note !== undefined && rule.note !== '') lines.push(`メモ: ${rule.note}`);
   return lines.join('\n');
 }
 
+/**
+ * 件名。取り込み先の月表示では先頭の数文字しか見えないことが多いので、
+ * 予定の名前を頭に置き、補足は後ろへ回す。
+ *
+ *   給与支払            そのままの日
+ *   給与支払（繰上）     休業日に当たって前営業日へ動いた
+ *   給与支払（繰下）     休業日に当たって翌営業日へ動いた
+ *   【準備】給与支払     事前通知（準備日）
+ */
 export function titleOf(occurrence: Occurrence, rule: Rule): string {
-  return occurrence.kind === 'notice'
-    ? `${rule.title}: ${occurrence.noticeLabel ?? '準備'}`
-    : rule.title;
+  if (occurrence.kind === 'notice') {
+    return `【${occurrence.noticeLabel ?? '準備'}】${rule.title}`;
+  }
+  if (!occurrence.shifted) return rule.title;
+  return `${rule.title}（${occurrence.shiftDirection === 'prev' ? '繰上' : '繰下'}）`;
 }
 
 type Entry = { occurrence: Occurrence; rule: Rule };
@@ -173,7 +204,13 @@ export function buildIcs(
       `DTEND;VALUE=DATE:${toBasicDate(addDays(occurrence.date, 1))}`,
       `SUMMARY:${escapeIcsText(titleOf(occurrence, rule))}`,
       `DESCRIPTION:${escapeIcsText(describeOccurrence(occurrence, rule))}`,
+      `CATEGORIES:${escapeIcsText(EXPORT_CATEGORY)}`,
+      'STATUS:CONFIRMED',
+      // 予定は「時間を埋めるもの」ではなく目印なので、空き時間として入れる。
       'TRANSP:TRANSPARENT',
+      // Outlook は TRANSP を見ないため、同じことを Outlook 用の項目でも伝える。
+      'X-MICROSOFT-CDO-BUSYSTATUS:FREE',
+      'X-MICROSOFT-CDO-ALLDAYEVENT:TRUE',
       'END:VEVENT',
     );
   }

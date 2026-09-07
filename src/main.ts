@@ -5,7 +5,7 @@ import { showUpdateBanner } from './ui/updateBanner';
 
 const root = document.querySelector<HTMLElement>('#app');
 if (root !== null) {
-  void startApp(root);
+  startApp(root);
 }
 
 // 開発中はキャッシュが邪魔になるので、本番ビルドのときだけ登録する。

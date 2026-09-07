@@ -60,7 +60,14 @@ function renderRule(
     h(
       'div',
       { class: 'rule-actions' },
-      h('label', { class: 'switch', title: '有効/無効' }, toggle),
+      // 触る画面では title が出ないため、何のつまみなのかを文字でも出す。
+      h(
+        'label',
+        { class: 'switch' },
+        toggle,
+        // 無効のときに出る「無効」バッジと同じ言葉にそろえる。
+        h('span', { class: 'switch-text' }, '有効'),
+      ),
       button('編集', () => handlers.onEdit(rule.id), 'button button-sm button-quiet'),
     ),
   );

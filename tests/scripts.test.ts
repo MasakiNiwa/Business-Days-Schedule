@@ -52,6 +52,18 @@ describe('buildHolidayData', () => {
     expect(data.meta.sourceSha).toBe('abc123');
   });
 
+  it('出典の全期間をそのまま残す（年を絞らない）', () => {
+    // 過去へ遡って確かめたい場面があるため、古い年も落とさない。
+    const data = buildHolidayData(
+      { '1970-01-01': '元日', '2026-01-01': '元日', '2050-11-23': '勤労感謝の日' },
+      null,
+      now,
+    );
+    expect(Object.keys(data.holidays)).toEqual(['1970-01-01', '2026-01-01', '2050-11-23']);
+    expect(data.meta.range).toEqual({ from: '1970-01-01', to: '2050-12-31' });
+    expect(data.meta.count).toBe(3);
+  });
+
   it('1件も無ければ例外にする（既存データを空で上書きしない）', () => {
     expect(() => buildHolidayData({}, null, now)).toThrow();
   });

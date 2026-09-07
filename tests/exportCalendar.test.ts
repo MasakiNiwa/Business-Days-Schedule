@@ -21,7 +21,7 @@ import type { Occurrence, Rule } from '../src/types';
 import { makeRule, scheduleContext } from './helpers';
 
 const NOW = new Date('2026-09-05T01:23:45Z');
-const OPTIONS = { includeNotices: true, calendarName: '営業日スケジュール' };
+const OPTIONS = { includeNotices: true, calendarName: 'Business Days Schedule' };
 
 const salary = makeRule({
   id: 'salary',
@@ -99,7 +99,7 @@ describe('buildIcs', () => {
     expect(ics.startsWith('BEGIN:VCALENDAR\r\n')).toBe(true);
     expect(ics.endsWith('END:VCALENDAR\r\n')).toBe(true);
     expect(ics).toContain('VERSION:2.0');
-    expect(ics).toContain('X-WR-CALNAME:営業日スケジュール');
+    expect(ics).toContain('X-WR-CALNAME:Business Days Schedule');
   });
 
   it('改行はすべて CRLF', () => {
@@ -113,12 +113,26 @@ describe('buildIcs', () => {
   });
 
   it('補正の由来を説明に残す', () => {
-    expect(unfold(ics)).toContain('本来は 2026-10-25（休業日）。前営業日へ前倒し。');
+    expect(unfold(ics)).toContain('補正: 本来は 2026-10-25（日）（休業日）。前営業日へ繰り上げ');
   });
 
   it('事前通知も予定にする', () => {
-    expect(unfold(ics)).toContain('SUMMARY:給与振込: 振込データ作成');
-    expect(unfold(ics)).toContain('の予定に対する事前準備');
+    // 件名は予定の名前を頭に置く。取り込み先の月表示では先頭しか見えないため。
+    expect(unfold(ics)).toContain('SUMMARY:【振込データ作成】給与振込');
+    expect(unfold(ics)).toContain('対象: 2026-10-23（金）の「給与振込」');
+  });
+
+  it('補正された予定は件名でそれと分かる', () => {
+    expect(unfold(ics)).toContain('SUMMARY:給与振込（繰上）');
+  });
+
+  it('取り込み先で分類・終日・空き時間として扱われる', () => {
+    const text = unfold(ics);
+    expect(text).toContain('CATEGORIES:Business Days Schedule');
+    expect(text).toContain('TRANSP:TRANSPARENT');
+    // Outlook は TRANSP を見ないので、専用の項目でも空きだと伝える。
+    expect(text).toContain('X-MICROSOFT-CDO-BUSYSTATUS:FREE');
+    expect(text).toContain('X-MICROSOFT-CDO-ALLDAYEVENT:TRUE');
   });
 
   it('事前通知を除ける', () => {
@@ -192,7 +206,7 @@ describe('buildCsv', () => {
   it('説明の改行を1行にたたむ', () => {
     // 生の LF（CRLF でない改行）が無いこと。
     expect(csv).not.toMatch(/(?<!\r)\n/);
-    expect(csv).toContain('前営業日へ前倒し。 / 毎月25日');
+    expect(csv).toContain('前営業日へ繰り上げ / ルール: 毎月25日');
   });
 });
 
@@ -206,7 +220,7 @@ describe('describeOccurrence', () => {
     });
     const [occurrence] = occurrencesOf([plain], '2026-09-01', '2026-09-30');
     expect(occurrence).toBeDefined();
-    expect(describeOccurrence(occurrence as Occurrence, plain)).toBe('毎月10日 / 補正なし');
+    expect(describeOccurrence(occurrence as Occurrence, plain)).toBe('ルール: 毎月10日 / 補正なし');
   });
 });
 

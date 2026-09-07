@@ -9,7 +9,7 @@ import { createBusinessDayCalendar, COMPANY_CALENDAR_ID } from './core/businessD
 import type { BusinessDayCalendar } from './core/businessDay';
 import { addDays, lastDayOfMonth, monthOf, todayInTokyo, yearOf } from './core/dateUtil';
 import { named, select } from './ui/controls';
-import { createHolidayLookup, fetchHolidayData, outOfRangeMessage } from './core/holidays';
+import { createBundledHolidayLookup, outOfRangeMessage } from './core/holidays';
 import type { HolidayLookup } from './core/holidays';
 import { buildMonthGrid, gridRangeOf, shiftMonth } from './core/monthGrid';
 import { expandRules, groupByDate } from './core/schedule';
@@ -44,7 +44,7 @@ import {
 } from './core/exportCalendar';
 import { attachHorizontalSwipe } from './ui/swipe';
 import { applyTheme, nextTheme, themeIcon, themeLabel } from './ui/theme';
-import { longVersion, shortVersion } from './core/buildInfo';
+import { APP_NAME, APP_TAGLINE, longVersion, shortVersion } from './core/buildInfo';
 import { button } from './ui/controls';
 import { createDialog } from './ui/dialog';
 import type { DialogController } from './ui/dialog';
@@ -53,7 +53,6 @@ import { RuleEditor } from './ui/RuleEditor';
 import { renderRuleList } from './ui/RuleList';
 import { SettingsView } from './ui/SettingsView';
 
-const HOLIDAYS_URL = `${import.meta.env.BASE_URL}data/holidays.json`;
 const SAMPLES_DIR = `${import.meta.env.BASE_URL}data/samples/`;
 
 type Mode =
@@ -355,7 +354,7 @@ export class App {
     }
     const { occurrences } = this.occurrencesBetween(request.from, request.to);
     const rules = new Map(this.state.rules.map((rule) => [rule.id, rule]));
-    const options = { includeNotices: request.includeNotices, calendarName: 'Business Days Schedule' };
+    const options = { includeNotices: request.includeNotices, calendarName: APP_NAME };
     const text =
       request.format === 'ics'
         ? buildIcs(occurrences, rules, options)
@@ -393,12 +392,22 @@ export class App {
   // 描画
   // -------------------------------------------------------------------------
 
-  /** アプリ名と版。静的サイトは「いつのものを見ているか」が分かりにくいため常に出す。 */
+  /**
+   * アプリ名・何をするものか・版。
+   *
+   * 版は、静的サイトでは「いつのものを見ているか」が分かりにくく、
+   * 不具合の報告を受けたときに突き合わせられないと原因を追えないため常に出す。
+   */
   private renderBrand(): HTMLElement {
     return h(
       'div',
       { class: 'brand-bar' },
-      h('h1', { class: 'brand' }, 'Business Days Schedule'),
+      h(
+        'div',
+        { class: 'brand-text' },
+        h('h1', { class: 'brand' }, APP_NAME),
+        h('p', { class: 'brand-tagline' }, APP_TAGLINE),
+      ),
       h(
         'span',
         { class: 'brand-version', title: longVersion() },
@@ -421,6 +430,11 @@ export class App {
     const rulesButton = button('ルール', () => this.openMode('rules'), 'button button-sm');
     rulesButton.setAttribute('title', 'ルールの一覧・追加');
     if (this.mode.kind === 'rules') rulesButton.setAttribute('aria-pressed', 'true');
+
+    // 書き出しはこのアプリの出口なので、設定の中に埋めずヘッダーへ出す。
+    const exportButton = button('書き出し', () => this.openMode('calendarExport'), 'button button-sm');
+    exportButton.setAttribute('title', 'Outlook / Google カレンダーへ書き出す');
+    if (this.mode.kind === 'calendarExport') exportButton.setAttribute('aria-pressed', 'true');
 
     const settingsButton = button('⚙', () => this.openMode('settings'), 'nav');
     settingsButton.setAttribute('aria-label', '設定');
@@ -489,16 +503,15 @@ export class App {
         'div',
         { class: 'header-actions' },
         viewToggle,
-        rulesButton,
-        themeButton,
-        settingsButton,
-        helpButton,
+        // よく使うものと、たまにしか使わないものを見た目でも分ける。
+        h('div', { class: 'action-group' }, rulesButton, exportButton),
+        h('div', { class: 'action-group' }, themeButton, settingsButton, helpButton),
       ),
     );
   }
 
   /** ヘッダーのボタンはトグル動作にする。同じボタンをもう一度押せば閉じる。 */
-  private openMode(kind: 'settings' | 'help' | 'rules' | 'jump'): void {
+  private openMode(kind: 'settings' | 'help' | 'rules' | 'jump' | 'calendarExport'): void {
     this.mode = this.mode.kind === kind ? { kind: 'calendar' } : { kind };
     this.render();
   }
@@ -518,7 +531,7 @@ export class App {
         { class: 'footer-source' },
         `祝日データ: ${meta.source}（${meta.range.from} 〜 ${meta.range.to} / ${meta.count} 件 / 取得 ${meta.fetchedAt.slice(0, 10)}）`,
       ),
-      h('p', { class: 'footer-version' }, `Business Days Schedule ${longVersion()}`),
+      h('p', { class: 'footer-version' }, `${APP_NAME} ${longVersion()}`),
       h(
         'p',
         { class: 'footer-link' },
@@ -922,19 +935,9 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export async function startApp(root: HTMLElement): Promise<void> {
-  try {
-    const data = await fetchHolidayData(HOLIDAYS_URL);
-    new App(root, createHolidayLookup(data)).render();
-  } catch (error) {
-    clear(root);
-    root.append(
-      h('h1', {}, 'Business Days Schedule'),
-      h(
-        'p',
-        { class: 'banner banner-error' },
-        `祝日データを読み込めなかったため表示できません: ${messageOf(error)}`,
-      ),
-    );
-  }
+/**
+ * 起動。祝日データは同梱してあるので、待つものが無く同期で描き切れる。
+ */
+export function startApp(root: HTMLElement): void {
+  new App(root, createBundledHolidayLookup()).render();
 }

@@ -2,9 +2,16 @@
  * 祝日データ生成（docs/SPEC.md §3）。
  *
  *   holiday-jp/holiday_jp の holidays.yml
- *     → public/data/holidays.json
+ *     → src/data/holidays.json（ビルドでアプリ本体へ同梱される）
  *
  * 出典の SHA を先に固定し、同じ版のデータを取得・検査して公開に使う。
+ *
+ * 生成物を public/ ではなく src/ に置くのは、起動時に取りに行かせないため。
+ * 祝日データはデプロイのたびに作り直される「ビルド成果物」であって、
+ * 配信中に中身が変わるものではない。それを毎回 fetch すると、
+ * 何も得られないまま初回描画が1往復ぶん遅れる（§3.5）。
+ *
+ * 収録は出典の全期間。過去に遡って確かめたい場面があるため、年を絞らない。
  *
  * 使い方: npm run holidays
  */
@@ -21,7 +28,7 @@ const COMMITS_API =
   'https://api.github.com/repos/holiday-jp/holiday_jp/commits?path=holidays.yml&per_page=1';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const OUTPUT_PATH = resolve(ROOT, 'public/data/holidays.json');
+const OUTPUT_PATH = resolve(ROOT, 'src/data/holidays.json');
 
 /** "2026-01-01: 元日" 形式の1行。値にコロンを含みうるので最初のコロンだけで分割する。 */
 const LINE_PATTERN = /^(\d{4}-\d{2}-\d{2}):\s*(.+?)\s*$/;
@@ -66,6 +73,8 @@ export function buildHolidayData(
   sourceSha: string | null,
   now: Date,
 ): HolidayData {
+  // 出典の全期間をそのまま持つ。過去の年を遡って見ることがあるため、
+  // 年を絞って「その年は範囲外です」と出るほうが困る。
   const dates = Object.keys(holidays).sort();
   const first = dates[0];
   const last = dates[dates.length - 1];
@@ -76,8 +85,8 @@ export function buildHolidayData(
   const sorted: Record<string, string> = {};
   for (const date of dates) sorted[date] = holidays[date] as string;
 
-  // 収録範囲は暦年の境界に丸める。範囲末尾を最終祝日(11/23 など)にすると、
-  // その後の平日が「データ範囲外」と誤判定されてしまうため。
+  // 収録範囲は暦年の境界へ丸める。範囲末尾を最終祝日(2050-11-23 など)に
+  // すると、その後の平日が「データ範囲外」と誤判定されてしまうため。
   const range = { from: `${first.slice(0, 4)}-01-01`, to: `${last.slice(0, 4)}-12-31` };
 
   return {

@@ -27,19 +27,34 @@ const dateInputs = (root: ParentNode): HTMLInputElement[] =>
   [...root.querySelectorAll<HTMLInputElement>('input[type="date"]')];
 
 describe('renderCalendarExport', () => {
-  it('既定は今日から1年、iCalendar', () => {
+  it('既定は今月の1日から末日、iCalendar', () => {
+    // 試しに1回押しただけで1年分が取り込み先へ流れ込まないようにする。
     const { element } = open();
     const [from, to] = dateInputs(element);
-    expect(from?.value).toBe('2026-09-05');
-    expect(to?.value).toBe('2027-09-04');
+    expect(from?.value).toBe('2026-09-01');
+    expect(to?.value).toBe('2026-09-30');
     expect(element.querySelector<HTMLSelectElement>('select')?.value).toBe('ics');
+  });
+
+  it('取り込み先を分けるよう勧める', () => {
+    // 取り込みは取り消しが効かないので、書き出す前に必ず目に入る位置へ置く。
+    const { element } = open();
+    const callout = element.querySelector('.callout');
+    expect(callout?.textContent).toContain('専用のカレンダー');
+    expect(callout?.textContent).toContain('Outlook');
+    expect(callout?.textContent).toContain('Google カレンダー');
   });
 
   it('件数を出す', () => {
     const { element } = open(42);
     expect(element.querySelector('.export-summary')?.textContent).toBe(
-      '2026-09-05 〜 2027-09-04 の 42 件を書き出します。',
+      '2026-09-01 〜 2026-09-30 の 42 件を書き出します。',
     );
+  });
+
+  it('件数が多いときは短い期間から試すよう促す', () => {
+    const { element } = open(200);
+    expect(element.querySelector('.issue-warning')?.textContent).toContain('短い期間で試す');
   });
 
   it('該当が無ければ知らせる', () => {
@@ -47,12 +62,23 @@ describe('renderCalendarExport', () => {
     expect(element.querySelector('.issue-warning')?.textContent).toContain('該当する予定がありません');
   });
 
-  it('プリセットで期間を切り替えられる', () => {
+  it('プリセットは月の区切りで期間を切り替える', () => {
     const { element } = open();
-    clickText(element, '今日から3か月');
+    clickText(element, '3か月');
     const [from, to] = dateInputs(element);
-    expect(from?.value).toBe('2026-09-05');
-    expect(to?.value).toBe('2026-12-05');
+    expect(from?.value).toBe('2026-09-01');
+    expect(to?.value).toBe('2026-11-30');
+  });
+
+  it('プリセットは今の期間と一致するものを押された状態で示す', () => {
+    const { element } = open();
+    const pressed = () =>
+      [...element.querySelectorAll('.presets button')]
+        .filter((b) => b.getAttribute('aria-pressed') === 'true')
+        .map((b) => b.textContent);
+    expect(pressed()).toEqual(['今月']);
+    clickText(element, '来月');
+    expect(pressed()).toEqual(['来月']);
   });
 
   it('開始日が終了日より後なら書き出せない', () => {
@@ -71,8 +97,8 @@ describe('renderCalendarExport', () => {
     element.querySelector('select')?.dispatchEvent(new Event('change'));
     clickText(element, '書き出す');
     expect(handlers.onExport).toHaveBeenCalledWith({
-      from: '2026-09-05',
-      to: '2027-09-04',
+      from: '2026-09-01',
+      to: '2026-09-30',
       format: 'csv',
       includeNotices: true,
     });

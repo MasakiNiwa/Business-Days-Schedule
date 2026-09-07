@@ -1,10 +1,12 @@
 /**
- * 祝日データ（public/data/holidays.json）の参照レイヤ。
- * 取得元と生成方法は docs/SPEC.md §3。
+ * 祝日データの参照レイヤ（docs/SPEC.md §3）。
+ *
+ * データはビルド時に生成した src/data/holidays.json をそのまま同梱している。
+ * 起動時に取りに行かないので、通信の往復も、取得失敗時の分岐も存在しない。
  */
 
+import bundled from '../data/holidays.json';
 import type { DateStr, HolidayData, HolidayMeta } from '../types';
-import { isValidDateStr } from './dateUtil';
 
 export type HolidayLookup = {
   readonly meta: HolidayMeta;
@@ -24,6 +26,11 @@ export function createHolidayLookup(data: HolidayData): HolidayLookup {
     nameOf: (date) => map.get(date) ?? null,
     isOutOfRange: (date) => date < from || date > to,
   };
+}
+
+/** 同梱データ。生成と検査はビルド時に済んでいる（scripts/build-holidays.ts）。 */
+export function createBundledHolidayLookup(): HolidayLookup {
+  return createHolidayLookup(bundled as HolidayData);
 }
 
 /** 祝日を一切考慮しないルックアップ。テストや「祝日を使わない」設定で使う。 */
@@ -53,43 +60,4 @@ export function outOfRangeMessage(
   const { range } = lookup.meta;
   if (from >= range.from && to <= range.to) return null;
   return `${from} 〜 ${to} は祝日データの収録範囲（${range.from} 〜 ${range.to}）を外れています。範囲外の休業日判定は信頼できません。`;
-}
-
-/** 生の JSON が期待する形かを検証する。壊れたデータで無言に動き続けるのを防ぐ。 */
-export function parseHolidayData(input: unknown): HolidayData {
-  if (typeof input !== 'object' || input === null) {
-    throw new TypeError('祝日データがオブジェクトではありません');
-  }
-  const candidate = input as Partial<HolidayData>;
-  if (typeof candidate.holidays !== 'object' || candidate.holidays === null) {
-    throw new TypeError('祝日データに holidays がありません');
-  }
-  if (typeof candidate.meta !== 'object' || candidate.meta === null) {
-    throw new TypeError('祝日データに meta がありません');
-  }
-  const range = candidate.meta.range;
-  if (
-    typeof range !== 'object' ||
-    range === null ||
-    typeof range.from !== 'string' ||
-    typeof range.to !== 'string' || !isValidDateStr(range.from) || !isValidDateStr(range.to) || range.from > range.to
-  ) {
-    throw new TypeError('祝日データの meta.range が不正です');
-  }
-  const entries = Object.entries(candidate.holidays);
-  if (Array.isArray(candidate.holidays) || entries.length === 0 ||
-      candidate.meta.count !== entries.length ||
-      typeof candidate.meta.fetchedAt !== 'string' || !Number.isFinite(Date.parse(candidate.meta.fetchedAt)) ||
-      entries.some(([date, name]) => !isValidDateStr(date) || date < range.from || date > range.to || typeof name !== 'string' || name.trim() === '')) {
-    throw new TypeError('祝日データの件数・日付・名称が不正です');
-  }
-  return candidate as HolidayData;
-}
-
-export async function fetchHolidayData(url: string): Promise<HolidayData> {
-  const response = await fetch(url, { cache: 'no-cache' });
-  if (!response.ok) {
-    throw new Error(`祝日データの取得に失敗しました: ${response.status} ${response.statusText}`);
-  }
-  return parseHolidayData(await response.json());
 }

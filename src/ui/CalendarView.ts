@@ -249,15 +249,24 @@ export function renderCalendar(
   return table;
 }
 
-/** 凡例。記号の意味を説明する。 */
+/**
+ * 凡例。記号の意味を説明する。
+ *
+ * 狭い画面では予定を点だけで表すため（幅が足りず、名前を出すと1文字ずつ
+ * 縦に割れて読めなくなる）、そちら向けの説明を別に用意して出し分ける。
+ */
 export function renderLegend(hasNotices: boolean, hasShifts: boolean): HTMLElement {
   return h(
     'p',
     { class: 'legend' },
-    hasShifts
-      ? h('span', {}, '← → = 休業日のため移動（数字は元の日）')
-      : h('span', {}, '← → = 休業日のため前後の営業日へ移動'),
-    hasNotices ? h('span', {}, '破線 = 準備日') : null,
-    h('span', {}, '日付をクリックすると当日の予定を一覧できます'),
+    h(
+      'span',
+      { class: 'legend-wide' },
+      hasShifts ? '← → = 休業日のため移動（数字は元の日）' : '← → = 休業日のため前後の営業日へ移動',
+    ),
+    hasNotices ? h('span', { class: 'legend-wide' }, '破線 = 準備日') : null,
+    h('span', { class: 'legend-narrow' }, '● = 予定'),
+    hasNotices ? h('span', { class: 'legend-narrow' }, '○ = 準備日') : null,
+    h('span', {}, '日付を押すと当日の予定を一覧できます'),
   );
 }
