@@ -3,7 +3,7 @@
  */
 
 /** 画面・書き出し・文書で共通に使う呼び名。ばらけると同じものに見えなくなる。 */
-export const APP_NAME = '営業日スケジュール';
+export const APP_NAME = 'Business Days Schedule';
 
 /**
  * 何をするものかを一言で。反復ルールを組み立てるところがこのアプリの役目で、

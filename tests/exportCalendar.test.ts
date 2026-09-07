@@ -21,7 +21,7 @@ import type { Occurrence, Rule } from '../src/types';
 import { makeRule, scheduleContext } from './helpers';
 
 const NOW = new Date('2026-09-05T01:23:45Z');
-const OPTIONS = { includeNotices: true, calendarName: '営業日スケジュール' };
+const OPTIONS = { includeNotices: true, calendarName: 'Business Days Schedule' };
 
 const salary = makeRule({
   id: 'salary',
@@ -99,7 +99,7 @@ describe('buildIcs', () => {
     expect(ics.startsWith('BEGIN:VCALENDAR\r\n')).toBe(true);
     expect(ics.endsWith('END:VCALENDAR\r\n')).toBe(true);
     expect(ics).toContain('VERSION:2.0');
-    expect(ics).toContain('X-WR-CALNAME:営業日スケジュール');
+    expect(ics).toContain('X-WR-CALNAME:Business Days Schedule');
   });
 
   it('改行はすべて CRLF', () => {
@@ -128,7 +128,7 @@ describe('buildIcs', () => {
 
   it('取り込み先で分類・終日・空き時間として扱われる', () => {
     const text = unfold(ics);
-    expect(text).toContain('CATEGORIES:営業日スケジュール');
+    expect(text).toContain('CATEGORIES:Business Days Schedule');
     expect(text).toContain('TRANSP:TRANSPARENT');
     // Outlook は TRANSP を見ないので、専用の項目でも空きだと伝える。
     expect(text).toContain('X-MICROSOFT-CDO-BUSYSTATUS:FREE');

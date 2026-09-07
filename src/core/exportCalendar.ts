@@ -10,6 +10,7 @@
  *   csv … Google カレンダーの CSV 取り込み用。表計算で中身を確かめたいとき向け
  */
 
+import { APP_NAME } from './buildInfo';
 import { dayOf, monthOf, addDays, weekdayOf, yearOf } from './dateUtil';
 import { describeRule } from './describe';
 import type { DateStr, Occurrence, Rule } from '../types';
@@ -30,8 +31,9 @@ const UID_DOMAIN = 'business-days-schedule';
 /**
  * 取り込み先で付く分類名。Outlook では色分けと絞り込みに使え、
  * 「試しに入れた予定をまとめて消す」ときの手掛かりにもなる。
+ * 画面に出る名前と同じにする。別々に書くとどちらかだけ直し忘れる。
  */
-export const EXPORT_CATEGORY = '営業日スケジュール';
+export const EXPORT_CATEGORY = APP_NAME;
 
 const WEEKDAY_NAMES = ['日', '月', '火', '水', '木', '金', '土'] as const;
 

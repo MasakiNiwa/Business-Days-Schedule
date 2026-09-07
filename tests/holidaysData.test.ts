@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 import data from '../src/data/holidays.json' with { type: 'json' };
-import { YEARS_AHEAD, YEARS_BACK, validatePublishedHolidays } from '../scripts/build-holidays';
+import { validatePublishedHolidays } from '../scripts/build-holidays';
 import { isValidDateStr, todayInTokyo, yearOf } from '../src/core/dateUtil';
 import { createHolidayLookup } from '../src/core/holidays';
 import type { HolidayData } from '../src/types';
@@ -47,14 +47,13 @@ describe('src/data/holidays.json', () => {
     expect(last <= parsed.meta.range.to).toBe(true);
   });
 
-  it('必要な年数だけを持ち、余計な年を同梱していない', () => {
-    // 同梱データはアプリ本体の大きさに直結するので、実務で使う幅に絞る。
-    // 生成時点の年が基準なので、生成から時間が経つと今年より前へずれていく。
+  it('出典の全期間を持ち、過去へ遡って見られる', () => {
+    // 年を絞ると「その年は範囲外です」と出てしまう。遡って確かめたい場面があるため
+    // 収録は全期間のままにする（gzip で 5KB 程度なので同梱の負担にならない）。
     const from = yearOf(parsed.meta.range.from);
     const to = yearOf(parsed.meta.range.to);
-    expect(to - from).toBe(YEARS_BACK + YEARS_AHEAD);
-    expect(from).toBeLessThanOrEqual(thisYear);
-    expect(to).toBeGreaterThanOrEqual(thisYear + 1);
+    expect(from).toBeLessThanOrEqual(1970);
+    expect(to).toBeGreaterThanOrEqual(thisYear + 10);
   });
 
   it('今年と来年をカバーしている', () => {

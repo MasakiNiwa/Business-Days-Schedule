@@ -4,12 +4,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import {
-  YEARS_AHEAD,
-  YEARS_BACK,
-  buildHolidayData,
-  parseHolidaysYml,
-} from '../scripts/build-holidays';
+import { buildHolidayData, parseHolidaysYml } from '../scripts/build-holidays';
 
 describe('parseHolidaysYml', () => {
   it('holidays.yml の1行1レコードを読む', () => {
@@ -45,34 +40,31 @@ describe('parseHolidaysYml', () => {
 describe('buildHolidayData', () => {
   const now = new Date('2026-09-04T00:00:00Z');
 
-  it('日付昇順に並べ、生成年を基準に収録範囲を決める', () => {
+  it('日付昇順に並べ、収録範囲を暦年で丸める', () => {
     const data = buildHolidayData(
       { '2027-01-01': '元日', '2026-01-01': '元日', '2026-05-06': 'こどもの日 振替休日' },
       'abc123',
       now,
     );
     expect(Object.keys(data.holidays)).toEqual(['2026-01-01', '2026-05-06', '2027-01-01']);
-    expect(data.meta.range).toEqual({
-      from: `${2026 - YEARS_BACK}-01-01`,
-      to: `${2026 + YEARS_AHEAD}-12-31`,
-    });
+    expect(data.meta.range).toEqual({ from: '2026-01-01', to: '2027-12-31' });
     expect(data.meta.count).toBe(3);
     expect(data.meta.sourceSha).toBe('abc123');
   });
 
-  it('収録範囲の外にある年は同梱しない', () => {
-    // アプリ本体に埋め込むので、実務で使わない年まで持つと無駄に重くなる。
+  it('出典の全期間をそのまま残す（年を絞らない）', () => {
+    // 過去へ遡って確かめたい場面があるため、古い年も落とさない。
     const data = buildHolidayData(
       { '1970-01-01': '元日', '2026-01-01': '元日', '2050-11-23': '勤労感謝の日' },
       null,
       now,
     );
-    expect(Object.keys(data.holidays)).toEqual(['2026-01-01']);
-    expect(data.meta.count).toBe(1);
+    expect(Object.keys(data.holidays)).toEqual(['1970-01-01', '2026-01-01', '2050-11-23']);
+    expect(data.meta.range).toEqual({ from: '1970-01-01', to: '2050-12-31' });
+    expect(data.meta.count).toBe(3);
   });
 
-  it('範囲内に1件も無ければ例外にする（既存データを空で上書きしない）', () => {
+  it('1件も無ければ例外にする（既存データを空で上書きしない）', () => {
     expect(() => buildHolidayData({}, null, now)).toThrow();
-    expect(() => buildHolidayData({ '1970-01-01': '元日' }, null, now)).toThrow();
   });
 });
