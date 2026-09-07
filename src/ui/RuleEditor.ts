@@ -78,6 +78,9 @@ export type RuleEditorHandlers = {
   onDelete?: (ruleId: string) => void;
 };
 
+/** グループ名の入力候補。id は datalist と結ぶために使う。 */
+const GROUP_LIST_ID = 'rule-group-options';
+
 export class RuleEditor {
   readonly element: HTMLFormElement;
 
@@ -100,6 +103,8 @@ export class RuleEditor {
     private readonly handlers: RuleEditorHandlers,
     private readonly isNew: boolean,
     today: DateStr = todayInTokyo(),
+    /** すでに使われているグループ名。入力候補として出す。 */
+    private readonly knownGroups: readonly string[] = [],
   ) {
     this.draft = structuredClone(initial);
     this.drafts = defaultDrafts(this.draft.recurrence);
@@ -167,6 +172,16 @@ export class RuleEditor {
       this.refresh();
     }, '例: 給与振込');
 
+    // グループは選ぶことも新しく作ることもあるので、候補付きの自由入力にする。
+    // 選択肢だけにすると最初の1つを作れず、自由入力だけだと表記が揺れる。
+    const group = textInput(this.draft.group ?? '', (value) => {
+      this.draft.group = value;
+      this.refresh();
+    }, '例: 税務');
+    group.setAttribute('list', GROUP_LIST_ID);
+    const groupOptions = h('datalist', { id: GROUP_LIST_ID });
+    for (const name of this.knownGroups) groupOptions.append(h('option', { value: name }));
+
     const colorRow = h('div', { class: 'colors' });
     for (const color of COLORS) {
       const swatch = h('button', {
@@ -199,6 +214,11 @@ export class RuleEditor {
           },
         ),
         '社内の締めは自社、振込は銀行、のように使い分けます。',
+      ),
+      field(
+        'グループ',
+        h('div', { class: 'row' }, group, groupOptions),
+        'カレンダーの絞り込みと、外部カレンダーへの書き出しの単位になります。空欄なら未分類です。',
       ),
       h('details', { class: 'advanced-options', open: !this.isNew },
       h('summary', {}, '色・メモ・有効／無効'), field('色', colorRow), field(

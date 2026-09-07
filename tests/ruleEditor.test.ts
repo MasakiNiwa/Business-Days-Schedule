@@ -19,6 +19,7 @@ function open(
   rule: Rule,
   handlers: Partial<RuleEditorHandlers> = {},
   isNew = false,
+  knownGroups: readonly string[] = [],
 ): { editor: RuleEditor; form: HTMLFormElement; handlers: RuleEditorHandlers } {
   const full: RuleEditorHandlers = {
     onSave: vi.fn(),
@@ -26,9 +27,16 @@ function open(
     onDelete: vi.fn(),
     ...handlers,
   };
-  const editor = new RuleEditor(rule, calendars, scheduleContext, full, isNew, TODAY);
+  const editor = new RuleEditor(rule, calendars, scheduleContext, full, isNew, TODAY, knownGroups);
   return { editor, form: editor.element, handlers: full };
 }
+
+/** 「グループ」欄の入力。datalist と結ばれた自由入力。 */
+const groupInput = (form: HTMLFormElement): HTMLInputElement => {
+  const input = form.querySelector<HTMLInputElement>('input[list="rule-group-options"]');
+  if (input === null) throw new Error('グループ欄が見つかりません');
+  return input;
+};
 
 const previewDates = (form: HTMLFormElement): string[] =>
   [...form.querySelectorAll('.preview-date')].map((node) => node.textContent ?? '');
@@ -262,5 +270,32 @@ describe('編集操作', () => {
     const { form, handlers } = open(salary);
     clickText(form, 'キャンセル');
     expect(handlers.onCancel).toHaveBeenCalledOnce();
+  });
+});
+
+describe('グループ', () => {
+  it('既存のグループを入力候補として出す', () => {
+    // 選択肢だけにすると最初の1つを作れず、自由入力だけだと表記が揺れる。
+    const { form } = open(salary, {}, true, ['税務', '入金']);
+    const options = [...form.querySelectorAll('#rule-group-options option')].map((node) =>
+      node.getAttribute('value'),
+    );
+    expect(options).toEqual(['税務', '入金']);
+    expect(groupInput(form).getAttribute('list')).toBe('rule-group-options');
+  });
+
+  it('入力したグループを保存する', () => {
+    const onSave = vi.fn();
+    const { form } = open(salary, { onSave });
+    const input = groupInput(form);
+    input.value = '支払';
+    input.dispatchEvent(new Event('input'));
+    form.dispatchEvent(new Event('submit', { cancelable: true }));
+    expect(vi.mocked(onSave).mock.calls[0]?.[0]?.group).toBe('支払');
+  });
+
+  it('設定済みのグループを初期値として出す', () => {
+    const { form } = open(makeRule({ ...salary, group: '税務' }));
+    expect(groupInput(form).value).toBe('税務');
   });
 });

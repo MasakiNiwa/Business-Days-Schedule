@@ -20,6 +20,8 @@ export const LIMITS = {
   skipDates: 1000,
   arrayItems: 40,
   interval: 120,
+  /** グループ名。選ぶための札なので、長い文章を入れる場所ではない。 */
+  groupLength: 40,
 } as const;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -203,6 +205,15 @@ export function validateRule(rule: Rule): ValidationIssue[] {
     issues.push({
       path: 'title',
       message: `タイトルは${LIMITS.titleLength}文字以内にしてください`,
+      severity: 'error',
+    });
+  }
+
+  const group = value['group'];
+  if (group !== undefined && (!isStringValue(group) || group.length > LIMITS.groupLength)) {
+    issues.push({
+      path: 'group',
+      message: `グループ名は${LIMITS.groupLength}文字以内の文字列にしてください`,
       severity: 'error',
     });
   }

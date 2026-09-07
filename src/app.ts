@@ -8,10 +8,18 @@
 import { createBusinessDayCalendar, COMPANY_CALENDAR_ID } from './core/businessDay';
 import type { BusinessDayCalendar } from './core/businessDay';
 import { addDays, lastDayOfMonth, monthOf, todayInTokyo, yearOf } from './core/dateUtil';
-import { named, select } from './ui/controls';
+import { field, named, select } from './ui/controls';
 import { createBundledHolidayLookup, outOfRangeMessage } from './core/holidays';
 import type { HolidayLookup } from './core/holidays';
 import { buildMonthGrid, gridRangeOf, shiftMonth } from './core/monthGrid';
+import {
+  UNGROUPED,
+  collectGroups,
+  filterByGroup,
+  groupLabel,
+  hasUngrouped,
+  resolveActiveGroup,
+} from './core/group';
 import { expandRules, groupByDate } from './core/schedule';
 import type { ScheduleContext } from './core/schedule';
 import {
@@ -33,6 +41,7 @@ import { renderHelp } from './ui/HelpView';
 import { LIST_RANGES, renderList } from './ui/ListView';
 import { renderMonthPicker } from './ui/MonthPicker';
 import { renderCalendarExport } from './ui/CalendarExportView';
+import type { CalendarExportRequest } from './ui/CalendarExportView';
 import { renderSamplePicker } from './ui/SamplePicker';
 import { parseSampleIndex } from './core/samples';
 import type { SamplePack } from './core/samples';
@@ -211,7 +220,14 @@ export class App {
 
   private startAdd(): void {
     const calendarId = this.state.calendars[0]?.id ?? COMPANY_CALENDAR_ID;
-    this.mode = { kind: 'edit', rule: createRule({ calendarId }), isNew: true };
+    // グループで絞って見ているときは、そのグループの続きを足すのが自然。
+    // 何も指定せずに作ると、追加した直後に画面から消えて戸惑わせる。
+    const group = this.activeGroup();
+    this.mode = {
+      kind: 'edit',
+      rule: createRule(group === null ? { calendarId } : { calendarId, group }),
+      isNew: true,
+    };
     this.render();
   }
 
@@ -337,24 +353,30 @@ export class App {
   }
 
   /** 書き出し対象の発生日を数える／集める。 */
-  private occurrencesBetween(from: DateStr, to: DateStr): ReturnType<typeof expandRules> {
-    return expandRules(this.state.rules, { start: from, end: to }, this.scheduleContext(this.businessCalendars()));
+  private occurrencesBetween(
+    from: DateStr,
+    to: DateStr,
+    group: string | null,
+  ): ReturnType<typeof expandRules> {
+    return expandRules(
+      filterByGroup(this.state.rules, group),
+      { start: from, end: to },
+      this.scheduleContext(this.businessCalendars()),
+    );
   }
 
-  private exportCalendarFile(request: {
-    from: DateStr;
-    to: DateStr;
-    format: 'ics' | 'csv';
-    includeNotices: boolean;
-  }): void {
+  private exportCalendarFile(request: CalendarExportRequest): void {
     // 収録範囲を外れた期間を黙って書き出すと、誤った日付が他所のカレンダーへ渡る。
     const outOfRange = outOfRangeMessage(this.holidays, request.from, request.to);
     if (outOfRange !== null && !globalThis.confirm(`${outOfRange}\n\nこのまま書き出しますか？`)) {
       return;
     }
-    const { occurrences } = this.occurrencesBetween(request.from, request.to);
+    const { occurrences } = this.occurrencesBetween(request.from, request.to, request.group);
     const rules = new Map(this.state.rules.map((rule) => [rule.id, rule]));
-    const options = { includeNotices: request.includeNotices, calendarName: APP_NAME };
+    // 取り込み先ではカレンダー名が手掛かりになる。グループごとに別の名前を渡す。
+    const calendarName =
+      request.group === null ? APP_NAME : `${APP_NAME} — ${groupLabel(request.group)}`;
+    const options = { includeNotices: request.includeNotices, calendarName };
     const text =
       request.format === 'ics'
         ? buildIcs(occurrences, rules, options)
@@ -363,7 +385,7 @@ export class App {
     this.download(
       text,
       MIME_TYPES[request.format],
-      exportCalendarFileName(request.from, request.to, request.format),
+      exportCalendarFileName(request.from, request.to, request.format, request.group),
     );
     this.mode = { kind: 'calendar' };
     this.notify(`${request.format.toUpperCase()} を書き出しました。`);
@@ -558,6 +580,7 @@ export class App {
         },
         mode.isNew,
         this.today,
+        collectGroups(this.state.rules),
       );
       return editor.element;
     }
@@ -616,13 +639,18 @@ export class App {
       return renderCalendarExport(
         {
           onExport: (request) => this.exportCalendarFile(request),
-          countOccurrences: (from, to, includeNotices) =>
-            this.occurrencesBetween(from, to).occurrences.filter(
-              (occurrence) => includeNotices || occurrence.kind !== 'notice',
+          countOccurrences: (request) =>
+            this.occurrencesBetween(request.from, request.to, request.group).occurrences.filter(
+              (occurrence) => request.includeNotices || occurrence.kind !== 'notice',
             ).length,
           onClose: () => this.backToCalendar(),
         },
         this.today,
+        {
+          groups: collectGroups(this.state.rules),
+          hasUngrouped: hasUngrouped(this.state.rules),
+          activeGroup: this.activeGroup(),
+        },
       );
     }
 
@@ -743,6 +771,91 @@ export class App {
     existing.replaceWith(replacement);
   }
 
+  /**
+   * いま表示すべきルール。グループで絞っているときはそのグループだけ。
+   * カレンダー・一覧・書き出しのどこでも同じ集合を使う。片方だけ絞られていると、
+   * 画面に出ていない予定が書き出しに混ざる。
+   */
+  private visibleRules(): Rule[] {
+    return filterByGroup(this.state.rules, this.activeGroup());
+  }
+
+  /** 選択中のグループ。名前を変えた・最後の1件を消したときは「すべて」へ戻す。 */
+  private activeGroup(): string | null {
+    return resolveActiveGroup(this.state.rules, this.state.prefs.activeGroup);
+  }
+
+  private setActiveGroup(group: string | null): void {
+    this.state.prefs.activeGroup = group;
+    this.persist();
+    this.render();
+  }
+
+  private setChipDisplay(mode: 'text' | 'dot'): void {
+    this.state.prefs.chipDisplay = mode;
+    this.persist();
+    this.render();
+  }
+
+  /**
+   * カレンダー・一覧の上に置く絞り込みと表示の切り替え。
+   *
+   * ヘッダーではなくここに置くのは、どちらも「いま見ているものの見え方」を
+   * 決める操作で、対象のすぐ上にあるほうが結び付きが分かるため。
+   */
+  private renderViewToolbar(): HTMLElement | null {
+    const groups = collectGroups(this.state.rules);
+    const isCalendar = this.state.prefs.defaultView !== 'list';
+    if (groups.length === 0 && !isCalendar) return null;
+
+    const left = h('div', { class: 'toolbar-left' });
+    if (groups.length > 0) {
+      const options = [{ value: '\u0000all', label: 'すべてのグループ' }];
+      for (const group of groups) options.push({ value: group, label: group });
+      if (hasUngrouped(this.state.rules)) {
+        options.push({ value: UNGROUPED, label: groupLabel(UNGROUPED) });
+      }
+      const current = this.activeGroup();
+      left.append(
+        field(
+          'グループ',
+          select(options, current === null ? '\u0000all' : current, (value) =>
+            this.setActiveGroup(value === '\u0000all' ? null : value),
+          ),
+        ),
+      );
+    }
+
+    const right = h('div', { class: 'toolbar-right' });
+    if (isCalendar) {
+      const toggle = h('div', {
+        class: 'segmented',
+        role: 'group',
+        'aria-label': 'カレンダーの予定の出し方',
+      });
+      for (const [value, label, title] of [
+        ['text', '内容', '予定名まで出す'],
+        ['dot', '点', '点だけにして1か月を見渡す'],
+      ] as const) {
+        const item = h(
+          'button',
+          {
+            type: 'button',
+            class: 'segment',
+            title,
+            'aria-pressed': this.state.prefs.chipDisplay === value ? 'true' : 'false',
+          },
+          label,
+        );
+        item.addEventListener('click', () => this.setChipDisplay(value));
+        toggle.append(item);
+      }
+      right.append(h('span', { class: 'toolbar-label' }, '表示'), toggle);
+    }
+
+    return h('div', { class: 'view-toolbar' }, left, right);
+  }
+
   private buildOccurrences(): {
     occurrencesByDate: Map<DateStr, ReturnType<typeof expandRules>['occurrences']>;
     warnings: ReturnType<typeof expandRules>['warnings'];
@@ -750,7 +863,7 @@ export class App {
   } {
     const ctx = this.scheduleContext(this.businessCalendars());
     const range = gridRangeOf(this.view.year, this.view.month);
-    const { occurrences, warnings } = expandRules(this.state.rules, range, ctx);
+    const { occurrences, warnings } = expandRules(this.visibleRules(), range, ctx);
     return {
       occurrencesByDate: groupByDate(occurrences),
       warnings,
@@ -840,7 +953,7 @@ export class App {
     if (businessCalendar === undefined) throw new Error('営業日カレンダーが1件もありません');
 
     const { occurrences } = expandRules(
-      this.state.rules,
+      this.visibleRules(),
       { start: this.today, end: addDays(this.today, days - 1) },
       ctx,
     );
@@ -909,11 +1022,15 @@ export class App {
     const main = h(
       'main',
       { id: 'main', tabindex: '-1' },
+      this.renderViewToolbar(),
       this.state.prefs.defaultView === 'list'
         ? this.buildListPane()
         : this.buildCalendarPane(occurrencesByDate),
       ...(this.state.rules.length === 0 ? [this.renderEmptyPrompt()] : []),
     );
+
+    // 予定の出し方は画面全体に効く。画面幅では決めず、選ばれたものに従う。
+    this.root.classList.toggle('is-dots', this.state.prefs.chipDisplay === 'dot');
 
     clear(this.root);
     this.root.append(skipLink, this.renderBrand(), this.renderHeader(), banners, main, this.renderFooter());

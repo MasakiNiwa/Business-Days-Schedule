@@ -280,12 +280,29 @@ export function buildCsv(
 // ファイル名
 // ---------------------------------------------------------------------------
 
+/**
+ * ファイル名に混ぜられる形へ均す。
+ * グループ名は自由入力なので、そのまま入れると保存できない名前になりうる。
+ * 記号や空白を落とし、残らなければ名前に足さない。
+ */
+function fileNameSafe(value: string): string {
+  return value
+    .trim()
+    .replace(/[\\/:*?"<>|\s]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+}
+
 export function exportCalendarFileName(
   from: DateStr,
   to: DateStr,
   format: CalendarExportFormat,
+  group: string | null = null,
 ): string {
-  return `business-days-${from.replace(/-/g, '')}-${to.replace(/-/g, '')}.${format}`;
+  const period = `${from.replace(/-/g, '')}-${to.replace(/-/g, '')}`;
+  // グループごとに書き出すと同じ期間のファイルが並ぶ。名前で見分けられるようにする。
+  const suffix = group === null ? '' : fileNameSafe(group);
+  return `business-days-${period}${suffix === '' ? '' : `-${suffix}`}.${format}`;
 }
 
 export const MIME_TYPES: Record<CalendarExportFormat, string> = {
