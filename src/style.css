@@ -394,6 +394,9 @@ button {
   white-space: normal;
 }
 
+/* 凡例は画面幅で出し分ける。狭い画面ではセルの表し方そのものが変わるため。 */
+.legend-narrow { display: none; }
+
 .color-blue { --chip: var(--color-blue); }
 .color-green { --chip: var(--color-green); }
 .color-red { --chip: var(--color-red); }
@@ -482,8 +485,16 @@ button {
 
 .switch {
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
+  gap: 0.1rem;
   cursor: pointer;
+}
+
+.switch-text {
+  font-size: 0.68rem;
+  color: var(--fg-muted);
+  line-height: 1;
 }
 
 .rule-body p {
@@ -771,6 +782,14 @@ button {
   margin-bottom: 0.35rem;
 }
 
+/* いま選ばれている期間が分かるようにする。日付欄を読み比べずに済む。 */
+.presets [aria-pressed='true'] {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--bg);
+  font-weight: 600;
+}
+
 .colors {
   display: flex;
   gap: 0.35rem;
@@ -889,6 +908,34 @@ button {
   color: var(--notice-fg);
 }
 
+/* --- 注意書き ---------------------------------------------------------- */
+
+/*
+ * 取り消しの効かない操作の前に置く箱。読み飛ばされては意味がないので、
+ * 本文と同じ大きさの文字にし、左の帯で本文と区別する。
+ */
+.callout {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+  border-left: 4px solid var(--notice-fg);
+  background: var(--notice-bg);
+  color: var(--notice-fg);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.callout p {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.callout-title {
+  font-weight: 700;
+}
+
 .editor-actions {
   display: flex;
   gap: 0.4rem;
@@ -934,9 +981,20 @@ button {
 
 .header-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
-  gap: 0.35rem;
+  gap: 0.5rem;
   flex-wrap: wrap;
+}
+
+/*
+ * よく使うもの（ルール・書き出し）と、たまにしか使わないもの（配色・設定・ヘルプ）を
+ * 束ねて置く。並びが均一だと、どれが日常の操作なのか読み取れなくなるため。
+ */
+.action-group {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 .nav[aria-pressed='true'] {
@@ -1383,6 +1441,10 @@ button {
     width: auto;
   }
 
+  .list-notice-origin {
+    font-size: 0.72rem;
+  }
+
   .list-weekday {
     width: auto;
   }
@@ -1531,18 +1593,36 @@ button {
 .brand-bar {
   display: flex;
   align-items: baseline;
-  gap: 0.5rem;
+  justify-content: space-between;
+  gap: 0.75rem;
   padding-bottom: 0.5rem;
+}
+
+.brand-text {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.6rem;
+  min-width: 0;
 }
 
 .brand {
   font-size: 1rem;
-  font-weight: 600;
+  font-weight: 700;
   margin: 0;
   letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+/* 何をするものかの一言。名前より弱く、読み飛ばせる重さにする。 */
+.brand-tagline {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--fg-muted);
 }
 
 .brand-version {
+  flex: none;
   font-size: 0.75rem;
   color: var(--fg-faint);
   font-variant-numeric: tabular-nums;
@@ -1645,23 +1725,77 @@ main:focus {
     min-width: 6.5em;
   }
 
+  /*
+   * 操作は2段目にまとめ、1段しか使わないよう詰める。
+   * 3段になるとカレンダーが画面から押し出され、開いた瞬間に月が見えなくなる。
+   */
   .header-actions {
     grid-column: 1 / -1;
     justify-content: center;
+    gap: 0.3rem;
   }
 
-  /* 幅が狭くツールチップも使えないため、省略せず折り返してセルを伸ばす。 */
+  .action-group {
+    gap: 0.25rem;
+  }
+
+  .header-actions .nav {
+    width: 2rem;
+    height: 2rem;
+    font-size: 1.05rem;
+  }
+
+  .header-actions .button-sm,
+  .header-actions .segment {
+    padding: 0.3rem 0.45rem;
+    font-size: 0.8rem;
+  }
+
+  .app-header {
+    padding-bottom: 0.5rem;
+    margin-bottom: 0.6rem;
+  }
+
+  /*
+   * 幅がおよそ50pxしかない7列のセルに予定名を入れると、日本語は1〜2文字ずつ
+   * 縦に割れて読めたものにならず、1か月が画面3枚分に伸びる。
+   * 狭い画面では月表示の役目を「どの日に何件あるか」に絞り、点で表す。
+   * 中身は日付を押して詳細で読むか、一覧表示へ切り替えて読む。
+   */
   .cell {
     height: auto;
-    min-height: 4.2rem;
+    min-height: 3.6rem;
     padding: 0.2rem;
   }
 
-  .chip-label {
-    white-space: normal;
-    overflow: visible;
-    word-break: break-word;
+  .chips {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 3px;
+    padding-top: 2px;
   }
+
+  .chip {
+    width: 9px;
+    height: 9px;
+    padding: 0;
+    border-radius: 50%;
+    border: none;
+    background: var(--chip);
+  }
+
+  .chip.is-notice {
+    background: transparent;
+    border: 1.5px solid var(--chip);
+  }
+
+  .chip-label,
+  .chip-mark {
+    display: none;
+  }
+
+  .legend-wide { display: none; }
+  .legend-narrow { display: inline; }
 
   /* 幅が足りないので祝日名は日付の下へ折り返す（名前自体は残す）。 */
   .cell-head {
@@ -1676,8 +1810,34 @@ main:focus {
     max-width: 100%;
   }
 
-  .chip {
-    font-size: 0.68rem;
+  /*
+   * 一覧は5列のままだと予定名の幅が指2本ぶんも残らず、名前が縦に割れる。
+   * 説明（内容）の列は畳み、予定名に幅を渡す。説明は予定名を押せば編集画面で読める。
+   */
+  .list th:nth-child(5),
+  .list td:nth-child(5) {
+    display: none;
+  }
+
+  .list {
+    font-size: 0.8rem;
+  }
+
+  .list th,
+  .list td {
+    padding: 0.3rem 0.25rem;
+  }
+
+  .list-date {
+    width: auto;
+  }
+
+  .list-notice-origin {
+    font-size: 0.72rem;
+  }
+
+  .list-weekday {
+    width: auto;
   }
 
   .modal,

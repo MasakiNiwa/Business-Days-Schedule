@@ -19,7 +19,7 @@ describe('load / save', () => {
     const state = loadState(createMemoryStore());
     expect(state.rules).toEqual([]);
     expect(state.calendars.map((c) => c.id)).toEqual(['company', 'bank']);
-    expect(state.prefs.listDays).toBe(90);
+    expect(state.prefs.listDays).toBe(30);
     expect(state.prefs.theme).toBe('auto');
   });
 

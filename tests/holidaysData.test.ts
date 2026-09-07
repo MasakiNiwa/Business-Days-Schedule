@@ -1,20 +1,26 @@
 /**
- * 配信する public/data/holidays.json 自体の健全性検査（docs/SPEC.md §3.3）。
+ * 同梱する src/data/holidays.json 自体の健全性検査（docs/SPEC.md §3.3）。
  *
- * 祝日更新ワークフローはこのテストを通してから差分をコミットするため、
- * 取得や変換が壊れたデータをそのまま公開してしまう事故をここで止める。
+ * このデータはビルドでアプリ本体へ埋め込まれ、実行時には一切検証されない。
+ * 壊れたデータをそのまま公開してしまう事故は、ここで止めるしかない。
  */
 
 import { describe, expect, it } from 'vitest';
-import data from '../public/data/holidays.json' with { type: 'json' };
+import data from '../src/data/holidays.json' with { type: 'json' };
+import { YEARS_AHEAD, YEARS_BACK, validatePublishedHolidays } from '../scripts/build-holidays';
 import { isValidDateStr, todayInTokyo, yearOf } from '../src/core/dateUtil';
-import { createHolidayLookup, parseHolidayData } from '../src/core/holidays';
+import { createHolidayLookup } from '../src/core/holidays';
+import type { HolidayData } from '../src/types';
 
-const parsed = parseHolidayData(data);
+const parsed = data as HolidayData;
 const dates = Object.keys(parsed.holidays);
 const thisYear = yearOf(todayInTokyo());
 
-describe('public/data/holidays.json', () => {
+describe('src/data/holidays.json', () => {
+  it('公開前の検査を通る', () => {
+    expect(() => validatePublishedHolidays(parsed, thisYear)).not.toThrow();
+  });
+
   it('スキーマを満たす', () => {
     expect(parsed.meta.source).toBe('holiday-jp/holiday_jp');
     expect(parsed.meta.count).toBe(dates.length);
@@ -41,9 +47,17 @@ describe('public/data/holidays.json', () => {
     expect(last <= parsed.meta.range.to).toBe(true);
   });
 
+  it('必要な年数だけを持ち、余計な年を同梱していない', () => {
+    // 同梱データはアプリ本体の大きさに直結するので、実務で使う幅に絞る。
+    // 生成時点の年が基準なので、生成から時間が経つと今年より前へずれていく。
+    const from = yearOf(parsed.meta.range.from);
+    const to = yearOf(parsed.meta.range.to);
+    expect(to - from).toBe(YEARS_BACK + YEARS_AHEAD);
+    expect(from).toBeLessThanOrEqual(thisYear);
+    expect(to).toBeGreaterThanOrEqual(thisYear + 1);
+  });
+
   it('今年と来年をカバーしている', () => {
-    expect(yearOf(parsed.meta.range.from)).toBeLessThanOrEqual(thisYear);
-    expect(yearOf(parsed.meta.range.to)).toBeGreaterThanOrEqual(thisYear + 1);
     for (const year of [thisYear, thisYear + 1]) {
       const inYear = dates.filter((date) => yearOf(date) === year);
       // 祝日法上、通常の年は16日以上ある。極端に少ないのは取得漏れを疑う。

@@ -29,7 +29,7 @@ export type Preferences = {
 
 export const DEFAULT_PREFERENCES: Preferences = {
   defaultView: 'calendar',
-  listDays: 90,
+  listDays: 30,
   theme: 'auto',
   addedSamplePacks: [],
 };
