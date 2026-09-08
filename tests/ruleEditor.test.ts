@@ -233,7 +233,11 @@ describe('編集操作', () => {
     form.dispatchEvent(new Event('submit', { cancelable: true }));
     const notices = vi.mocked(handlers.onSave).mock.calls[0]?.[0]?.notices ?? [];
     expect(notices).toHaveLength(1);
-    expect(notices[0]).toMatchObject({ offset: -3, unit: 'business', label: '準備' });
+    expect(notices[0]).toMatchObject({
+      timing: { kind: 'offset', offset: -3, unit: 'business' },
+      role: 'before',
+      label: '準備',
+    });
     // 追加した時点で固定の id を持つ。順番ではなくこれが外部カレンダーの識別子になる。
     expect(notices[0]?.id).toBeTypeOf('string');
   });

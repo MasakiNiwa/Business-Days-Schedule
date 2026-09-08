@@ -53,7 +53,7 @@ describe('validateRule', () => {
       const issues = validateRule(
         makeRule({ title: 'x', notices: [{ offset, unit: 'business', label: '確認' }] }),
       );
-      expect(issues.map((i) => i.path), `offset=${offset}`).not.toContain('notices[0].offset');
+      expect(issues.map((i) => i.path), `offset=${offset}`).not.toContain('notices[0].timing');
     }
   });
 
@@ -61,7 +61,7 @@ describe('validateRule', () => {
     const issues = validateRule(
       makeRule({ title: 'x', notices: [{ offset: 0, unit: 'business', label: '確認' }] }),
     );
-    expect(issues.map((i) => i.path)).toContain('notices[0].offset');
+    expect(issues.map((i) => i.path)).toContain('notices[0].timing');
   });
 
   it('前後どちらも上限を超えたら弾く', () => {
@@ -70,7 +70,7 @@ describe('validateRule', () => {
       const issues = validateRule(
         makeRule({ title: 'x', notices: [{ offset, unit: 'business', label: '確認' }] }),
       );
-      expect(issues.map((i) => i.path), `offset=${offset}`).toContain('notices[0].offset');
+      expect(issues.map((i) => i.path), `offset=${offset}`).toContain('notices[0].timing');
     }
   });
 

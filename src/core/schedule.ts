@@ -23,8 +23,14 @@ import {
   parseDate,
   yearOf,
 } from './dateUtil';
-import { describeNotice } from './describe';
-import { legacyNoticeId } from './notice';
+import { describeTiming } from './describe';
+import {
+  declaredRoleOf,
+  legacyNoticeId,
+  noticeDate,
+  noticeSpanDays,
+  timingOf,
+} from './notice';
 import { expandRecurrence, skipsAdjustment } from './recurrence';
 import { MAX_SHIFT_DAYS } from './businessDay';
 
@@ -32,56 +38,31 @@ import { MAX_SHIFT_DAYS } from './businessDay';
 const MARGIN_MONTHS = 1;
 
 /**
- * 準備日（本体より前）が表示範囲に入る本体を取りこぼさないよう、探索の末尾を延ばす。
- * 準備日は本体より前に出るので、本体は表示範囲より後ろにありうる。
+ * 前後予定が表示範囲に入る本体を取りこぼさないよう、探索範囲を広げる。
+ *
+ * 準備日は本体より前に出るので、本体は表示範囲より後ろにありうる（末尾を延ばす）。
+ * フォローはその逆（先頭を戻す）。週や月で決めるものは前後どちらへも動きうるので、
+ * 両側へ広げる。広げ忘れると、本体が範囲の外にあるぶんが黙って消える。
  */
-export function noticeRangeEnd(rule: Rule, end: DateStr, calendar: BusinessDayCalendar): DateStr {
-  let latest = end;
+export function expandBoundsFor(
+  rule: Rule,
+  range: DateRange,
+  calendar: BusinessDayCalendar,
+): DateRange {
+  let { start, end } = range;
   for (const notice of rule.notices) {
-    if (notice.offset >= 0) continue;
-    const amount = Math.abs(notice.offset);
-    let date = end;
-    if (notice.unit === 'calendar') {
-      date = addDays(end, amount);
-    } else {
-      for (let remaining = amount; remaining > 0; remaining -= 1) {
-        const next = calendar.nextBusinessDay(date);
-        // 長期休業で探索が途切れても、そこまでにある本体は探索対象に残す。
-        if (next === null) break;
-        date = next;
-      }
-    }
+    const span = noticeSpanDays(timingOf(notice), calendar);
     // 休業日にある本体と営業日補正の移動幅も含める。
-    const bound = addDays(date, MAX_SHIFT_DAYS * 2);
-    if (bound > latest) latest = bound;
-  }
-  return latest;
-}
-
-/**
- * フォロー（本体より後）が表示範囲に入る本体を取りこぼさないよう、探索の先頭を戻す。
- * 準備日と向きが逆になるだけで、理屈は noticeRangeEnd と同じ。
- * これが無いと「月初に出るはずのフォロー」が、本体が前月にあるせいで生成されない。
- */
-export function followRangeStart(rule: Rule, start: DateStr, calendar: BusinessDayCalendar): DateStr {
-  let earliest = start;
-  for (const notice of rule.notices) {
-    if (notice.offset <= 0) continue;
-    const amount = notice.offset;
-    let date = start;
-    if (notice.unit === 'calendar') {
-      date = addDays(start, -amount);
-    } else {
-      for (let remaining = amount; remaining > 0; remaining -= 1) {
-        const prev = calendar.prevBusinessDay(date);
-        if (prev === null) break;
-        date = prev;
-      }
+    if (span.before > 0) {
+      const bound = addDays(end, span.before + MAX_SHIFT_DAYS * 2);
+      if (bound > end) end = bound;
     }
-    const bound = addDays(date, -MAX_SHIFT_DAYS * 2);
-    if (bound < earliest) earliest = bound;
+    if (span.after > 0) {
+      const bound = addDays(start, -(span.after + MAX_SHIFT_DAYS * 2));
+      if (bound < start) start = bound;
+    }
   }
-  return earliest;
+  return { start, end };
 }
 
 export type ScheduleContext = {
@@ -94,7 +75,7 @@ export type ScheduleContext = {
 export type ExpandWarning = {
   ruleId: string;
   rawDate: DateStr | null;
-  reason: 'unknown-calendar' | 'no-business-day' | 'notice-unresolved';
+  reason: 'unknown-calendar' | 'no-business-day' | 'notice-unresolved' | 'notice-role-mismatch';
   message: string;
 };
 
@@ -151,10 +132,62 @@ export function noticeDateOf(
   notice: Notice,
   calendar: BusinessDayCalendar,
 ): DateStr | null {
-  if (notice.offset === 0) return null;
-  return notice.unit === 'calendar'
-    ? addDays(effectiveDate, notice.offset)
-    : calendar.addBusinessDays(effectiveDate, notice.offset);
+  return noticeDate(effectiveDate, timingOf(notice), calendar);
+}
+
+/**
+ * 前後予定を1件ぶん組み立てる。展開とプレビューで同じ計算を使う。
+ * 別々に書くと、片方だけ直したときに画面と書き出しが食い違う。
+ */
+function buildRelated(
+  rule: Rule,
+  main: Occurrence,
+  notice: Notice,
+  noticeIndex: number,
+  calendar: BusinessDayCalendar,
+): { occurrence: Occurrence; warning: ExpandWarning | null } | null {
+  const date = noticeDateOf(main.date, notice, calendar);
+  if (date === null) return null;
+
+  // 前後の別は、意図ではなく実際の日付で決める。週や月で決めると、
+  // 「翌週の月曜、休業日なら前営業日へ」が本体を追い越して前へ戻る、
+  // といったことが起こりうるため。
+  const kind = date < main.date ? 'notice' : 'follow';
+  const intended = declaredRoleOf(notice);
+  const actual = kind === 'notice' ? 'before' : 'after';
+  // 設定が向きを言っていないもの（同じ週・同じ月）は照合しない。
+  const warning: ExpandWarning | null =
+    intended === null || intended === actual
+      ? null
+      : {
+          ruleId: rule.id,
+          rawDate: main.date,
+          reason: 'notice-role-mismatch',
+          message: `「${rule.title}」の${describeTiming(timingOf(notice))}（${notice.label}）は、${
+            intended === 'before' ? '本体より前' : '本体より後'
+          }のつもりの設定ですが ${date} に出ます（本体は ${main.date}）`,
+        };
+
+  return {
+    occurrence: {
+      ruleId: rule.id,
+      kind,
+      rawDate: main.date,
+      // 本体の基準日を引き継ぐ。祝日データが変わっても動かない識別子にするため。
+      baseDate: main.baseDate,
+      date,
+      shifted: false,
+      shiftDirection: null,
+      // 親（本体）の向きを引き継ぐ。両側補正のとき、これが無いと
+      // 前倒し側と後ろ倒し側の子を見分けられない。
+      seriesDirection: main.seriesDirection,
+      noticeLabel: notice.label,
+      noticeIndex,
+      // UID は順番ではなく固定の id を使う。1件消しても残りが動かないように。
+      noticeId: notice.id ?? legacyNoticeId(noticeIndex),
+    },
+    warning,
+  };
 }
 
 /** 1ルールを展開する。範囲の切り落としは行わない（呼び出し側で行う）。 */
@@ -230,37 +263,22 @@ function expandRule(
   for (const occurrence of byEffectiveDate.values()) {
     occurrences.push(occurrence);
     rule.notices.forEach((notice, noticeIndex) => {
-      const date = noticeDateOf(occurrence.date, notice, calendar);
-      if (date === null) {
+      const built = buildRelated(rule, occurrence, notice, noticeIndex, calendar);
+      if (built === null) {
         // 長期休業などで営業日を数えきれないと日付が出せない。黙って消すと
         // 「設定したのに出ない」を追えなくなるので、警告として残す。
         warnings.push({
           ruleId: rule.id,
           rawDate: occurrence.date,
           reason: 'notice-unresolved',
-          message: `「${rule.title}」の${describeNotice(notice.offset, notice.unit)}（${
+          message: `「${rule.title}」の${describeTiming(timingOf(notice))}（${
             notice.label
-          }）は ${occurrence.date} を起点に日付を決められませんでした（休業が長く営業日を数えきれません）`,
+          }）は ${occurrence.date} を起点に日付を決められませんでした`,
         });
         return;
       }
-      occurrences.push({
-        ruleId: rule.id,
-        kind: notice.offset < 0 ? 'notice' : 'follow',
-        rawDate: occurrence.date,
-        // 本体の基準日を引き継ぐ。祝日データが変わっても動かない識別子にするため。
-        baseDate: occurrence.baseDate,
-        date,
-        shifted: false,
-        shiftDirection: null,
-        // 親（本体）の向きを引き継ぐ。両側補正のとき、これが無いと
-        // 前倒し側と後ろ倒し側の子を見分けられない。
-        seriesDirection: occurrence.seriesDirection,
-        noticeLabel: notice.label,
-        noticeIndex,
-        // UID は順番ではなく固定の id を使う。1件消しても残りが動かないように。
-        noticeId: notice.id ?? legacyNoticeId(noticeIndex),
-      });
+      occurrences.push(built.occurrence);
+      if (built.warning !== null) warnings.push(built.warning);
     });
   }
 
@@ -288,14 +306,11 @@ export function expandRules(
   for (const rule of rules) {
     if (!rule.enabled) continue;
     // 展開範囲はルールごとに決める。長い準備日・フォローを持つルールだけ広げる。
-    const expandRange = withMargin(viewRange);
     const resolved = resolveCalendar(rule, ctx);
-    if (resolved !== null) {
-      const end = noticeRangeEnd(rule, viewRange.end, resolved.calendar);
-      if (end > expandRange.end) expandRange.end = end;
-      const start = followRangeStart(rule, viewRange.start, resolved.calendar);
-      if (start < expandRange.start) expandRange.start = start;
-    }
+    const expandRange =
+      resolved === null
+        ? withMargin(viewRange)
+        : expandBoundsFor(rule, withMargin(viewRange), resolved.calendar);
     const result = expandRule(rule, expandRange, ctx);
     warnings.push(...result.warnings);
     for (const occurrence of result.occurrences) {
@@ -387,21 +402,9 @@ function relatedOf(
   if (calendar === undefined) return [];
   const related: Occurrence[] = [];
   rule.notices.forEach((notice, noticeIndex) => {
-    const date = noticeDateOf(main.date, notice, calendar);
-    if (date === null) return;
-    related.push({
-      ruleId: rule.id,
-      kind: notice.offset < 0 ? 'notice' : 'follow',
-      rawDate: main.date,
-      baseDate: main.baseDate,
-      date,
-      shifted: false,
-      shiftDirection: null,
-      seriesDirection: main.seriesDirection,
-      noticeLabel: notice.label,
-      noticeIndex,
-      noticeId: notice.id ?? legacyNoticeId(noticeIndex),
-    });
+    // 展開と同じ組み立てを使う。別々に書くと画面と書き出しが食い違う。
+    const built = buildRelated(rule, main, notice, noticeIndex, calendar);
+    if (built !== null) related.push(built.occurrence);
   });
   return related.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
