@@ -3,8 +3,8 @@
  * ネットワークには触れず、パース部分だけを対象にする。
  */
 
-import { describe, expect, it } from 'vitest';
-import { buildHolidayData, parseHolidaysYml } from '../scripts/build-holidays';
+import { afterEach, describe, expect, it } from 'vitest';
+import { authHeaderFor, buildHolidayData, parseHolidaysYml } from '../scripts/build-holidays';
 
 describe('parseHolidaysYml', () => {
   it('holidays.yml の1行1レコードを読む', () => {
@@ -66,5 +66,34 @@ describe('buildHolidayData', () => {
 
   it('1件も無ければ例外にする（既存データを空で上書きしない）', () => {
     expect(() => buildHolidayData({}, null, now)).toThrow();
+  });
+});
+
+describe('authHeaderFor', () => {
+  const original = process.env['GITHUB_TOKEN'];
+  afterEach(() => {
+    if (original === undefined) delete process.env['GITHUB_TOKEN'];
+    else process.env['GITHUB_TOKEN'] = original;
+  });
+
+  it('GitHub API にはトークンを付ける', () => {
+    // 認証なしは IP あたり60回/時で、共用ランナーではすぐ 403 になる。
+    process.env['GITHUB_TOKEN'] = 'abc';
+    expect(authHeaderFor('https://api.github.com/repos/x/y/commits')).toEqual({
+      authorization: 'Bearer abc',
+    });
+  });
+
+  it('GitHub API 以外には付けない', () => {
+    // 資格情報を関係のない相手へ送らない。
+    process.env['GITHUB_TOKEN'] = 'abc';
+    expect(authHeaderFor('https://raw.githubusercontent.com/x/y/holidays.yml')).toEqual({});
+  });
+
+  it('トークンが無ければ付けない（手元でもそのまま動く）', () => {
+    delete process.env['GITHUB_TOKEN'];
+    expect(authHeaderFor('https://api.github.com/repos/x/y/commits')).toEqual({});
+    process.env['GITHUB_TOKEN'] = '';
+    expect(authHeaderFor('https://api.github.com/repos/x/y/commits')).toEqual({});
   });
 });
