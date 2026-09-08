@@ -16,7 +16,6 @@ import type {
   ColorToken,
   DateStr,
   Month,
-  Notice,
   NthWeekday,
   Recurrence,
   Rule,
@@ -737,22 +736,29 @@ export class RuleEditor {
     const render = (): void => {
       clear(list);
       this.draft.notices.forEach((notice, index) => {
+        // 向きは offset の符号で持つ。画面では「前／後」の選択として見せる。
+        const isFollow = notice.offset > 0;
+        const applyOffset = (amount: number, follow: boolean): void => {
+          const size = Math.max(1, Math.floor(Math.abs(amount)));
+          notice.offset = follow ? size : -size;
+        };
+
         list.append(
           h(
             'div',
             { class: 'row' },
             named(
               numberInput(Math.abs(notice.offset), (value) => {
-                notice.offset = -Math.max(1, Math.floor(value));
+                applyOffset(value, notice.offset > 0);
                 this.refresh();
               }, { min: 1, max: 365 }),
-              `${index + 1} 件目の準備日: 何日前か`,
+              `${index + 1} 件目: 本体から何日か`,
             ),
             named(
               select(
                 [
-                  { value: 'business', label: '営業日前' },
-                  { value: 'calendar', label: '日前' },
+                  { value: 'business', label: '営業日' },
+                  { value: 'calendar', label: '暦日' },
                 ],
                 notice.unit,
                 (value) => {
@@ -760,13 +766,28 @@ export class RuleEditor {
                   this.refresh();
                 },
               ),
-              `${index + 1} 件目の準備日: 単位`,
+              `${index + 1} 件目: 単位`,
+            ),
+            named(
+              select(
+                [
+                  { value: 'before', label: '前（準備）' },
+                  { value: 'after', label: '後（フォロー）' },
+                ],
+                isFollow ? 'after' : 'before',
+                (value) => {
+                  applyOffset(notice.offset, value === 'after');
+                  render();
+                  this.refresh();
+                },
+              ),
+              `${index + 1} 件目: 本体の前か後か`,
             ),
             named(
               textInput(notice.label, (value) => {
                 notice.label = value;
-              }, '例: 振込データ作成'),
-              `${index + 1} 件目の準備日: 表示名`,
+              }, isFollow ? '例: 入金消込' : '例: 振込データ作成'),
+              `${index + 1} 件目: 表示名`,
             ),
             button('削除', () => {
               this.draft.notices.splice(index, 1);
@@ -777,12 +798,20 @@ export class RuleEditor {
         );
       });
       list.append(
-        button('＋ 準備日を追加', () => {
-          const notice: Notice = { offset: -3, unit: 'business', label: '準備' };
-          this.draft.notices.push(notice);
-          render();
-          this.refresh();
-        }, 'button button-sm'),
+        h(
+          'div',
+          { class: 'row' },
+          button('＋ 準備日を追加（前）', () => {
+            this.draft.notices.push({ offset: -3, unit: 'business', label: '準備' });
+            render();
+            this.refresh();
+          }, 'button button-sm'),
+          button('＋ フォローを追加（後）', () => {
+            this.draft.notices.push({ offset: 3, unit: 'business', label: 'フォロー' });
+            render();
+            this.refresh();
+          }, 'button button-sm'),
+        ),
       );
     };
     render();
@@ -790,8 +819,19 @@ export class RuleEditor {
     return h(
       'section',
       { class: 'editor-section' },
-      h('h3', { class: 'editor-heading' }, '準備日'),
-      h('p', { class: 'field-hint' }, '確定日より前の準備日を表示します。メールやプッシュ通知は送信しません。'),
+      h('h3', { class: 'editor-heading' }, '前後の予定（準備日・フォロー）'),
+      h(
+        'p',
+        { class: 'field-hint' },
+        '本体の確定日を起点に、前（準備）と後（フォロー）の予定を出せます。' +
+          '本体が営業日補正で動けば、前後の予定も一緒に動きます。' +
+          'メールやプッシュ通知は送信しません。',
+      ),
+      h(
+        'p',
+        { class: 'field-hint' },
+        '例: 給与振込の「3営業日前に振込データ作成」、請求書発行の「5営業日後に入金消込」。',
+      ),
       list,
     );
   }

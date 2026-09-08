@@ -335,3 +335,121 @@ test.describe('書き出しの初期値', () => {
     await expect(page.getByText('取り込み先は専用のカレンダーを作ってから')).toBeVisible();
   });
 });
+
+test.describe('サンプルの内容表示', () => {
+  test('開いたあと畳める', async ({ page }) => {
+    // 12件の束を開くと画面がその一覧で埋まる。畳めないと他の束を見に行けない。
+    await page.goto('');
+    await openRulePanel(page);
+    await page.getByRole('button', { name: 'サンプル', exact: true }).click();
+    await expect(page.locator('dialog .samples')).toBeVisible();
+
+    const item = page.locator('.sample-item').filter({ hasText: '税務' });
+    // 一覧の下端にも同じ言葉のボタンがあるので、上の操作列に絞る。
+    const toggle = item.locator('.sample-actions').getByRole('button', { name: /内容を(選ぶ|閉じる)/ });
+
+    await toggle.click();
+    await expect(item.locator('.sample-choices .checkbox').first()).toBeVisible();
+    await expect(toggle).toHaveText('内容を閉じる');
+
+    await toggle.click();
+    await expect(item.locator('.sample-choices')).toBeHidden();
+    await expect(toggle).toHaveText('内容を選ぶ');
+
+    // 畳んだあとも開き直せる（取得済みの中身を捨てていない）。
+    await toggle.click();
+    await expect(item.locator('.sample-choices .checkbox').first()).toBeVisible();
+  });
+
+  test('一覧の下端にも畳む手がある', async ({ page }) => {
+    await page.goto('');
+    await openRulePanel(page);
+    await page.getByRole('button', { name: 'サンプル', exact: true }).click();
+    const item = page.locator('.sample-item').filter({ hasText: '税務' });
+    await item.locator('.sample-actions').getByRole('button', { name: '内容を選ぶ' }).click();
+    await expect(item.locator('.sample-choices .checkbox').first()).toBeVisible();
+
+    await item.locator('.sample-choices-actions').getByRole('button', { name: '内容を閉じる' }).click();
+    await expect(item.locator('.sample-choices')).toBeHidden();
+  });
+});
+
+test.describe('決算月への導線', () => {
+  test('カレンダーの上に決算月が出ていて、押すと設定が開く', async ({ page }) => {
+    // 決算月から逆算できること自体に気づかれなかった。
+    // 何が効いているかを見せる場所を、そのまま入口にする。
+    await page.goto('');
+    const summary = page.locator('.month-summary.is-link');
+    await expect(summary).toContainText('決算月');
+
+    await summary.click();
+    await expect(page.locator('dialog')).toBeVisible();
+    // 営業日カレンダーは自社・銀行の2つあり、どちらにも決算月がある。
+    await expect(page.getByText('事業年度の終わる月').first()).toBeVisible();
+  });
+});
+
+test.describe('フォロー予定', () => {
+  test('本体の後ろに置く予定を作れる', async ({ page }) => {
+    await page.goto('');
+    await loadSamplePack(page, '売上・入金');
+    await closeDialog(page);
+
+    // サンプルの「入金予定日」には翌営業日のフォローが付いている。
+    await page.locator('.header-actions').getByRole('button', { name: '一覧' }).click();
+    await expect(page.locator('.list-notice-origin').first()).toContainText('のフォロー');
+  });
+
+  test('編集画面から前後どちらも足せる', async ({ page }) => {
+    await page.goto('');
+    await openRulePanel(page);
+    await page.getByRole('button', { name: '＋ 新規ルール' }).click();
+    await page.getByRole('button', { name: '自由入力' }).click();
+
+    await page.getByRole('button', { name: '＋ フォローを追加（後）' }).click();
+    const direction = page.getByLabel('1 件目: 本体の前か後か');
+    await expect(direction).toHaveValue('after');
+
+    await page.getByRole('button', { name: '＋ 準備日を追加（前）' }).click();
+    await expect(page.getByLabel('2 件目: 本体の前か後か')).toHaveValue('before');
+  });
+});
+
+test.describe('グループの気づきやすさ', () => {
+  test('グループを使っていない人にも案内を出す', async ({ page }) => {
+    // 絞り込み欄そのものが出ないため、機能があること自体に気づけない。
+    await page.goto('');
+    await loadSamplePack(page, '基本セット');
+    // サンプルにはグループが付いているので、まず外した状態を作る。
+    await page.evaluate(() => {
+      const key = 'bds.v1.rules';
+      const rules = JSON.parse(window.localStorage.getItem(key) ?? '[]') as { group?: string }[];
+      for (const rule of rules) delete rule.group;
+      window.localStorage.setItem(key, JSON.stringify(rules));
+    });
+    await page.reload();
+
+    await expect(page.locator('.toolbar-left select')).toHaveCount(0);
+    await openRulePanel(page);
+    await expect(page.locator('.callout-info')).toContainText('グループで束ねられます');
+  });
+
+  test('グループが付いていれば一覧に出る', async ({ page }) => {
+    await page.goto('');
+    await loadSamplePack(page, '税務');
+    await closeDialog(page);
+    await openRulePanel(page);
+    await expect(page.locator('.rule-group-tag').first()).toHaveText('税務');
+  });
+});
+
+test.describe('ヘルプ', () => {
+  test('目次から節へ飛べる', async ({ page }) => {
+    await page.goto('');
+    await page.locator('.header-actions').getByRole('button', { name: 'ヘルプ' }).click();
+    await expect(page.locator('.help-toc-link').first()).toBeVisible();
+
+    await page.getByRole('link', { name: '決算月から逆算する' }).click();
+    await expect(page.locator('#help-fiscal')).toBeInViewport();
+  });
+});

@@ -61,8 +61,10 @@ function toBasicDate(date: DateStr): string {
  */
 export function describeOccurrence(occurrence: Occurrence, rule: Rule): string {
   const lines: string[] = [];
-  if (occurrence.kind === 'notice') {
-    lines.push(`対象: ${withWeekday(occurrence.rawDate)}の「${rule.title}」`);
+  if (occurrence.kind !== 'main') {
+    // 前に置く準備日か、後ろに置くフォローかで、対象との関係が逆になる。
+    const relation = occurrence.kind === 'follow' ? 'の後の予定' : 'の準備';
+    lines.push(`対象: ${withWeekday(occurrence.rawDate)}の「${rule.title}」${relation}`);
   } else if (occurrence.shifted) {
     lines.push(
       `補正: 本来は ${withWeekday(occurrence.rawDate)}（休業日）。${
@@ -82,11 +84,13 @@ export function describeOccurrence(occurrence: Occurrence, rule: Rule): string {
  *   給与支払            そのままの日
  *   給与支払（繰上）     休業日に当たって前営業日へ動いた
  *   給与支払（繰下）     休業日に当たって翌営業日へ動いた
- *   【準備】給与支払     事前通知（準備日）
+ *   【振込データ作成】給与支払   準備日（本体より前）
+ *   【入金消込】給与支払         フォロー（本体より後）
  */
 export function titleOf(occurrence: Occurrence, rule: Rule): string {
-  if (occurrence.kind === 'notice') {
-    return `【${occurrence.noticeLabel ?? '準備'}】${rule.title}`;
+  if (occurrence.kind !== 'main') {
+    const fallback = occurrence.kind === 'follow' ? 'フォロー' : '準備';
+    return `【${occurrence.noticeLabel ?? fallback}】${rule.title}`;
   }
   if (!occurrence.shifted) return rule.title;
   return `${rule.title}（${occurrence.shiftDirection === 'prev' ? '繰上' : '繰下'}）`;
@@ -101,7 +105,7 @@ function collectEntries(
 ): Entry[] {
   const entries: Entry[] = [];
   for (const occurrence of occurrences) {
-    if (!options.includeNotices && occurrence.kind === 'notice') continue;
+    if (!options.includeNotices && occurrence.kind !== 'main') continue;
     const rule = rules.get(occurrence.ruleId);
     if (rule === undefined) continue;
     entries.push({ occurrence, rule });

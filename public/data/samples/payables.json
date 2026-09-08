@@ -79,7 +79,13 @@
         "mode": "prev",
         "keepInMonth": false
       },
-      "notices": [],
+      "notices": [
+        {
+          "offset": 1,
+          "unit": "business",
+          "label": "振込結果の確認"
+        }
+      ],
       "period": {
         "start": null,
         "end": null

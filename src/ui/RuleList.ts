@@ -27,6 +27,8 @@ function renderRule(
   const period = describePeriod(rule.period);
 
   const meta: HTMLElement[] = [h('span', { class: 'rule-calendar' }, calendarName)];
+  const group = groupOf(rule);
+  if (group !== UNGROUPED) meta.push(h('span', { class: 'rule-group-tag' }, group));
   for (const notice of rule.notices) {
     meta.push(
       h('span', { class: 'rule-notice' }, `${describeNotice(notice.offset, notice.unit)}: ${notice.label}`),
@@ -128,7 +130,19 @@ export function renderRuleList(
   const grouped = [...buckets.keys()].some((group) => group !== UNGROUPED);
 
   if (!grouped) {
+    // グループを使っていない人には、絞り込み欄そのものが画面に出ない。
+    // 機能があること自体に気づけないので、ここで一度だけ知らせる。
     section.append(
+      h(
+        'div',
+        { class: 'callout callout-info' },
+        h('p', { class: 'callout-title' }, 'グループで束ねられます'),
+        h(
+          'p',
+          {},
+          '「編集」を押して〈グループ〉に「税務」「入金」などと入れると、カレンダーの上に絞り込みが出ます。その束だけを表示したり、束ごとに外部カレンダーへ書き出したりできます。',
+        ),
+      ),
       h('ul', { class: 'rules' }, ...rules.map((rule) => renderRule(rule, calendars, handlers))),
     );
   } else {

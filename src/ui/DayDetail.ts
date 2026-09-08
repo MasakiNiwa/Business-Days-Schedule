@@ -46,6 +46,8 @@ function renderOccurrence(
   const origin =
     occurrence.kind === 'notice'
       ? `${occurrence.rawDate} の予定に対する準備日`
+      : occurrence.kind === 'follow'
+      ? `${occurrence.rawDate} の予定に対するフォロー`
       : occurrence.shifted
         ? `本来は ${occurrence.rawDate}（休業日）。${
             occurrence.shiftDirection === 'prev' ? '前営業日へ前倒し' : '翌営業日へ後ろ倒し'
@@ -54,7 +56,7 @@ function renderOccurrence(
 
   return h(
     'li',
-    { class: `day-item${occurrence.kind === 'notice' ? ' is-notice' : ''}` },
+    { class: `day-item${occurrence.kind !== 'main' ? ' is-notice' : ''}` },
     h('span', { class: `rule-dot color-${rule.color}`, 'aria-hidden': 'true' }),
     h(
       'div',

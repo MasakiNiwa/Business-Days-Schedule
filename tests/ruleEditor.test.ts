@@ -228,7 +228,7 @@ describe('編集操作', () => {
 
   it('準備日を追加・削除できる', () => {
     const { form, handlers } = open(salary);
-    clickText(form, '＋ 準備日を追加');
+    clickText(form, '＋ 準備日を追加（前）');
     form.dispatchEvent(new Event('submit', { cancelable: true }));
     expect(vi.mocked(handlers.onSave).mock.calls[0]?.[0]?.notices).toEqual([
       { offset: -3, unit: 'business', label: '準備' },

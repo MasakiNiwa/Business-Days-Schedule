@@ -104,6 +104,20 @@ export class SettingsView {
       ...issues.map((issue) =>
         h('p', { class: `issue issue-${issue.severity}` }, issue.message),
       ),
+      // 決算月はこのカレンダーの性格を決める設定なので先頭に置く。
+      // 休業日の指定の下に埋めていたため、あることに気づかれなかった。
+      field(
+        '決算月',
+        select(
+          Array.from({ length: 12 }, (_, i) => ({ value: String(i + 1), label: `${i + 1}月` })),
+          String(calendar.fiscalYearEndMonth ?? 3),
+          (value) => {
+            this.calendars[index] = { ...calendar, fiscalYearEndMonth: Number(value) as Month };
+            this.commit();
+          },
+        ),
+        '事業年度の終わる月。「決算月基準」のルール（申告期限・期首・中間申告・四半期など）は、ここを変えるとまとめて追従します。3月決算なら申告期限は5月末、12月決算なら翌年2月末、というように自動で変わります。',
+      ),
       field(
         '週の休業日',
         h(
@@ -135,18 +149,6 @@ export class SettingsView {
         this.calendars[index] = { ...calendar, useNationalHolidays: value };
         this.commit();
       }),
-      field(
-        '決算月',
-        select(
-          Array.from({ length: 12 }, (_, i) => ({ value: String(i + 1), label: `${i + 1}月` })),
-          String(calendar.fiscalYearEndMonth ?? 3),
-          (value) => {
-            this.calendars[index] = { ...calendar, fiscalYearEndMonth: Number(value) as Month };
-            this.commit();
-          },
-        ),
-        '事業年度の終わる月。「決算月基準」のルール（申告期限・期首・中間申告・四半期など）は、ここを変えるとまとめて追従します。',
-      ),
       this.closedRangesField(calendar, index),
       this.dateListField(
         '臨時休業日',

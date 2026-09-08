@@ -606,6 +606,14 @@ button {
   margin-top: 0.15rem;
 }
 
+/* どの束に入っているかは一覧で一番知りたいので、他のメタより少し強く出す。 */
+.rule-group-tag {
+  padding: 0 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--fg-muted);
+}
+
 .rule-note {
   font-size: 0.78rem;
   color: var(--fg-faint);
@@ -1010,6 +1018,13 @@ button {
   font-weight: 700;
 }
 
+/* 危険の知らせではなく、気づいてほしいことの案内。落ち着いた色にする。 */
+.callout-info {
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--fg);
+}
+
 .editor-actions {
   display: flex;
   gap: 0.4rem;
@@ -1200,8 +1215,70 @@ button {
   gap: 1.1rem;
 }
 
+/*
+ * 目次。長いヘルプは頭から順に読ませるものではなく、困っている所へ
+ * 飛べることのほうが大事なので、先頭に行き先を並べる。
+ */
+.help-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-sunken);
+}
+
+.help-toc-link {
+  font-size: 0.78rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  text-decoration: none;
+}
+
+.help-toc-link:hover {
+  color: var(--fg);
+  border-color: var(--border-strong);
+}
+
+.help-toc-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* 節の切れ目を出す。1画面に収まらない長さなので、区切りが無いと迷子になる。 */
+.help-section {
+  scroll-margin-top: 0.5rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--border);
+}
+
+.help-steps {
+  margin: 0.4rem 0 0;
+  padding-left: 1.3rem;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--fg-muted);
+}
+
+.help-steps li + li {
+  margin-top: 0.35rem;
+}
+
+.help-note {
+  margin: 0.5rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: var(--fg-muted);
+  padding-left: 0.7rem;
+  border-left: 2px solid var(--border-strong);
+}
+
 .help-list {
-  margin: 0;
+  margin: 0.5rem 0 0;
   display: grid;
   grid-template-columns: max-content 1fr;
   gap: 0.4rem 0.8rem;
@@ -1228,6 +1305,11 @@ button {
 
   .help-list dd {
     margin-bottom: 0.5rem;
+  }
+
+  /* 用語が長いと1行に収まらない。狭い画面では折り返してよい。 */
+  .help-list dt {
+    white-space: normal;
   }
 }
 
@@ -1392,6 +1474,41 @@ button {
   margin: 0 0 0.5rem;
   font-size: 0.8rem;
   color: var(--fg-muted);
+}
+
+/* 押せることが分かる程度に。目立たせすぎるとカレンダーの邪魔になる。 */
+.month-summary.is-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.4rem;
+  margin-left: -0.4rem;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  text-align: left;
+}
+
+.month-summary.is-link::after {
+  content: '⚙';
+  font-size: 0.85em;
+  opacity: 0.7;
+}
+
+.month-summary.is-link:hover {
+  background: var(--bg-sunken);
+  border-color: var(--border);
+  color: var(--fg);
+}
+
+.month-summary.is-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.brand-tagline-lead {
+  color: var(--fg);
+  font-weight: 700;
 }
 
 /* --- 一覧表示 ------------------------------------------------------------ */
@@ -1953,6 +2070,14 @@ main:focus {
 .settings-navigation [aria-pressed='true'] { background: var(--fg); color: var(--bg); }
 .sample-choices { flex-basis: 100%; margin-top: 0.5rem; }
 .sample-choices .checkbox { margin: 0.5rem 0; }
+.sample-choices-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.7rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+}
 .sample-item:has(.sample-choices) { flex-wrap: wrap; }
 
 @media print {

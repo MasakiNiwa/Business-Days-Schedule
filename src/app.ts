@@ -53,7 +53,7 @@ import {
 } from './core/exportCalendar';
 import { attachHorizontalSwipe } from './ui/swipe';
 import { applyTheme, nextTheme, themeIcon, themeLabel } from './ui/theme';
-import { APP_NAME, APP_TAGLINE, longVersion, shortVersion } from './core/buildInfo';
+import { APP_NAME, APP_TAGLINE_LEAD, APP_TAGLINE_REST, longVersion, shortVersion } from './core/buildInfo';
 import { button } from './ui/controls';
 import { createDialog } from './ui/dialog';
 import type { DialogController } from './ui/dialog';
@@ -428,7 +428,13 @@ export class App {
         'div',
         { class: 'brand-text' },
         h('h1', { class: 'brand' }, APP_NAME),
-        h('p', { class: 'brand-tagline' }, APP_TAGLINE),
+        h(
+          'p',
+          { class: 'brand-tagline' },
+          // 他のカレンダーには無い部分なので、そこだけ強く出す。
+          h('strong', { class: 'brand-tagline-lead' }, APP_TAGLINE_LEAD),
+          APP_TAGLINE_REST,
+        ),
       ),
       h(
         'span',
@@ -641,7 +647,7 @@ export class App {
           onExport: (request) => this.exportCalendarFile(request),
           countOccurrences: (request) =>
             this.occurrencesBetween(request.from, request.to, request.group).occurrences.filter(
-              (occurrence) => request.includeNotices || occurrence.kind !== 'notice',
+              (occurrence) => request.includeNotices || occurrence.kind === 'main',
             ).length,
           onClose: () => this.backToCalendar(),
         },
@@ -867,7 +873,7 @@ export class App {
     return {
       occurrencesByDate: groupByDate(occurrences),
       warnings,
-      hasNotice: occurrences.some((occurrence) => occurrence.kind === 'notice'),
+      hasNotice: occurrences.some((occurrence) => occurrence.kind !== 'main'),
     };
   }
 
@@ -888,7 +894,7 @@ export class App {
 
     const rulesById = new Map<string, Rule>(this.state.rules.map((rule) => [rule.id, rule]));
     const all = [...occurrencesByDate.values()].flat();
-    const hasNotice = all.some((occurrence) => occurrence.kind === 'notice');
+    const hasNotice = all.some((occurrence) => occurrence.kind !== 'main');
     const hasShift = all.some((occurrence) => occurrence.shifted);
     const selectedDate = this.mode.kind === 'day' ? this.mode.date : null;
 
@@ -899,11 +905,10 @@ export class App {
       'section',
       { class: 'calendar-pane', 'aria-label': '月カレンダー' },
       h('p', { class: 'print-title' }, `${this.view.year}年${this.view.month}月`),
-      h(
-        'p',
-        { class: 'month-summary' },
-        `${baseCalendar.name}: 営業日 ${businessDays}日 / 休業日 ${totalDays - businessDays}日`,
-      ),
+      // 営業日数と決算月を、押せば設定へ行ける形で常に出す。
+      // 決算月は設定の中にしか出ておらず、そこから逆算できること自体に
+      // 気づかれなかった。何が効いているかを見せる場所が、そのまま入口になる。
+      this.renderCalendarSummary(baseCalendar.name, businessDays, totalDays - businessDays),
       renderCalendar(
         grid,
         rulesById,
@@ -922,6 +927,27 @@ export class App {
       onSwipeRight: () => this.goToMonth(-1),
     });
     return pane;
+  }
+
+  /**
+   * カレンダーの上に出す一行。いま何が効いているか（営業日数・決算月）を示し、
+   * そのまま設定への入口にする。
+   */
+  private renderCalendarSummary(
+    calendarName: string,
+    businessDays: number,
+    closedDays: number,
+  ): HTMLElement {
+    const fiscalMonth = this.state.calendars.find((item) => item.id === COMPANY_CALENDAR_ID)
+      ?.fiscalYearEndMonth ?? 3;
+
+    const open = button(
+      `${calendarName}: 営業日 ${businessDays}日 / 休業日 ${closedDays}日 ・ 決算月 ${fiscalMonth}月`,
+      () => this.openMode('settings'),
+      'month-summary is-link',
+    );
+    open.setAttribute('title', '営業日・決算月の設定を開く');
+    return open;
   }
 
   /** ルールが1件も無いときの導線。カレンダーだけでは何もできないため。 */

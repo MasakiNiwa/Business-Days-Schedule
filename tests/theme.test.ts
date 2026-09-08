@@ -43,7 +43,41 @@ describe('renderHelp', () => {
     const text = renderHelp(() => undefined).textContent ?? '';
     expect(text).toContain('←10');
     expect(text).toContain('→10');
-    expect(text).toContain('＋N件');
+    expect(text).toContain('破線の枠');
+  });
+
+  it('このアプリにしかない考え方を説明する', () => {
+    // 営業日補正・決算月基準・グループ・前後の予定は、ほかのカレンダーに
+    // 無い概念なので、画面だけでは伝わらない。ヘルプが唯一の説明になる。
+    const text = renderHelp(() => undefined).textContent ?? '';
+    for (const term of [
+      '決算月から逆算する',
+      '前後の予定（準備日・フォロー）',
+      'グループで束ねる',
+      '外部カレンダーへ書き出す',
+      '思ったとおりに出ないとき',
+    ]) {
+      expect(text, term).toContain(term);
+    }
+  });
+
+  it('はじめの手順と、つまずいたときの答えを載せる', () => {
+    const element = renderHelp(() => undefined);
+    expect(element.querySelectorAll('.help-steps li').length).toBeGreaterThanOrEqual(3);
+    const text = element.textContent ?? '';
+    expect(text).toContain('追加したはずの予定が見えない');
+    expect(text).toContain('決算月を変えたのに日付が動かない');
+  });
+
+  it('節ごとに目次から飛べる', () => {
+    // 1画面に収まらない長さなので、頭から読ませるのではなく行き先を出す。
+    const element = renderHelp(() => undefined);
+    const links = [...element.querySelectorAll<HTMLAnchorElement>('.help-toc-link')];
+    expect(links.length).toBeGreaterThanOrEqual(8);
+    for (const link of links) {
+      const id = link.getAttribute('href')?.slice(1) ?? '';
+      expect(element.querySelector(`#${id}`), id).not.toBeNull();
+    }
   });
 
   it('閉じるを呼べる', () => {

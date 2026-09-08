@@ -127,9 +127,11 @@ export function describeRule(rule: Rule): string {
 }
 
 /** 「3営業日前」のような事前通知の説明。 */
+/** "3営業日前" / "5営業日後" / "2日前"。符号が向きを表す。 */
 export function describeNotice(offset: number, unit: 'business' | 'calendar'): string {
   const amount = Math.abs(offset);
-  return unit === 'business' ? `${amount}営業日前` : `${amount}日前`;
+  const direction = offset < 0 ? '前' : '後';
+  return unit === 'business' ? `${amount}営業日${direction}` : `${amount}日${direction}`;
 }
 
 /** 有効期間の説明。無期限なら空文字。 */
