@@ -371,12 +371,33 @@ export class App {
     if (outOfRange !== null && !globalThis.confirm(`${outOfRange}\n\nこのまま書き出しますか？`)) {
       return;
     }
-    const { occurrences } = this.occurrencesBetween(request.from, request.to, request.group);
+    const { occurrences, warnings } = this.occurrencesBetween(
+      request.from,
+      request.to,
+      request.group,
+    );
+    // 日付を出せなかった準備日・フォローがあるまま黙って書き出すと、
+    // 取り込み先で「設定したのに無い」に気づけない。
+    const unresolved = [...new Set(warnings.map((warning) => warning.message))];
+    if (
+      unresolved.length > 0 &&
+      !globalThis.confirm(
+        `次の予定は日付を決められないため書き出されません。\n\n${unresolved.join(
+          '\n',
+        )}\n\nこのまま書き出しますか？`,
+      )
+    ) {
+      return;
+    }
     const rules = new Map(this.state.rules.map((rule) => [rule.id, rule]));
     // 取り込み先ではカレンダー名が手掛かりになる。グループごとに別の名前を渡す。
     const calendarName =
       request.group === null ? APP_NAME : `${APP_NAME} — ${groupLabel(request.group)}`;
-    const options = { includeNotices: request.includeNotices, calendarName };
+    const options = {
+      includeNotices: request.includeNotices,
+      includeFollows: request.includeFollows,
+      calendarName,
+    };
     const text =
       request.format === 'ics'
         ? buildIcs(occurrences, rules, options)
@@ -647,7 +668,9 @@ export class App {
           onExport: (request) => this.exportCalendarFile(request),
           countOccurrences: (request) =>
             this.occurrencesBetween(request.from, request.to, request.group).occurrences.filter(
-              (occurrence) => request.includeNotices || occurrence.kind === 'main',
+              (occurrence) =>
+                occurrence.kind === 'main' ||
+                (occurrence.kind === 'notice' ? request.includeNotices : request.includeFollows),
             ).length,
           onClose: () => this.backToCalendar(),
         },
@@ -859,7 +882,16 @@ export class App {
       right.append(h('span', { class: 'toolbar-label' }, '表示'), toggle);
     }
 
-    return h('div', { class: 'view-toolbar' }, left, right);
+    // 何で絞ったかは紙にも残す。絞り込んだ結果だけを渡されると誤解を招くため、
+    // 画面では隠し、印刷のときだけ見出しとして出す。
+    const current = this.activeGroup();
+    const printed = h(
+      'p',
+      { class: 'print-group' },
+      current === null ? '' : `グループ: ${groupLabel(current)}`,
+    );
+
+    return h('div', { class: 'view-toolbar' }, left, right, printed);
   }
 
   private buildOccurrences(): {

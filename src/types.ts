@@ -214,6 +214,17 @@ export type Occurrence = {
   date: DateStr;
   shifted: boolean;
   shiftDirection: 'prev' | 'next' | null;
+  /**
+   * この発生日が属する系列の向き。本体は自身の shiftDirection と同じ、
+   * 準備日・フォローは対応する本体の向きを引き継ぐ。
+   *
+   * 補正が `both` のとき、1つの基準日から前倒しと後ろ倒しの2系列が生まれる。
+   * 子（準備日・フォロー）自身は動いていないので shiftDirection は null になり、
+   * これだけでは2系列を見分けられない。外部カレンダーの UID は
+   * 「同じ予定かどうか」の判定に使われるため、見分けられないと
+   * 書き出す期間によって別の予定へ割り当てが移ってしまう。
+   */
+  seriesDirection: 'prev' | 'next' | null;
   noticeLabel?: string;
   /** 事前通知が rule.notices の何番目か。UID の一意性に使う。 */
   noticeIndex?: number;

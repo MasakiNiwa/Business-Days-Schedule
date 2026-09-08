@@ -5,10 +5,10 @@
  * 頭の中で追いにくいため、入力するそばから実際の日付を見せることで誤設定を防ぐ。
  */
 
-import { describeNotice, describeRule } from '../core/describe';
+import { describeRule } from '../core/describe';
 import { createRule } from '../core/storage';
 import { todayInTokyo, weekdayOf } from '../core/dateUtil';
-import { previewOccurrences } from '../core/schedule';
+import { previewSeries } from '../core/schedule';
 import type { ScheduleContext } from '../core/schedule';
 import { validateRule } from '../core/validate';
 import type {
@@ -153,8 +153,13 @@ export class RuleEditor {
       h('p', { class: 'field-hint' }, 'ひな型を選び、日付を自社の運用に合わせて直してください。'),
       h('div', { class: 'presets' }, ...presets.map((preset) => button(preset.label, () => {
         const calendarId = this.calendars.find((calendar) => calendar.id === (preset.bank ? 'bank' : 'company'))?.id ?? this.calendars[0]?.id ?? this.draft.calendarId;
+        // ひな型は繰り返しの形だけを差し替える。作りかけで決まっているもの
+        // （グループ）まで消すと、絞り込み中に作った予定が保存直後に画面から
+        // 消えて戸惑わせる。
+        const group = this.draft.group;
         this.draft = createRule({ title: preset.title, recurrence: structuredClone(preset.recurrence), calendarId,
-          adjust: { mode: preset.label === '会議' || preset.label === '自由入力' ? 'none' : 'prev', keepInMonth: false } });
+          adjust: { mode: preset.label === '会議' || preset.label === '自由入力' ? 'none' : 'prev', keepInMonth: false },
+          ...(group === undefined || group === '' ? {} : { group }) });
         Object.assign(this.drafts, defaultDrafts(this.draft.recurrence));
         this.showPresets = false;
         const form = this.build();
@@ -971,7 +976,8 @@ export class RuleEditor {
       return;
     }
 
-    const occurrences = previewOccurrences(this.draft, this.today, PREVIEW_COUNT, this.ctx);
+    const series = previewSeries(this.draft, this.today, PREVIEW_COUNT, this.ctx);
+    const occurrences = series.map((item) => item.main);
     this.nextDates.textContent = occurrences.length === 0 ? '' : `次回から: ${occurrences.slice(0, 3).map((item) => item.date).join(' / ')}`;
     if (occurrences.length === 0) {
       this.previewBody.append(
@@ -980,40 +986,48 @@ export class RuleEditor {
       return;
     }
 
+    const dayLabel = (date: string): string =>
+      `${date}（${WEEKDAY_NAMES[weekdayOf(date)] ?? ''}）`;
+
     const list = h('ol', { class: 'preview-list' });
-    for (const occurrence of occurrences) {
-      list.append(
-        h(
-          'li',
-          { class: occurrence.shifted ? 'is-shifted' : '' },
-          h('span', { class: 'preview-date' }, occurrence.date),
-          h('span', { class: 'preview-weekday' }, `(${WEEKDAY_NAMES[weekdayOf(occurrence.date)]})`),
-          // カレンダー上の ← → と同じ向き記号を使い、読み替えの手間をなくす。
-          occurrence.shifted
-            ? h(
-                'span',
-                { class: `preview-note is-${occurrence.shiftDirection ?? 'prev'}` },
-                `${occurrence.shiftDirection === 'prev' ? '←' : '→'} ${occurrence.rawDate} から${
-                  occurrence.shiftDirection === 'prev' ? '前倒し' : '後ろ倒し'
-                }`,
-              )
-            : null,
-        ),
+    for (const { main, related } of series) {
+      const item = h(
+        'li',
+        { class: main.shifted ? 'is-shifted' : '' },
+        h('span', { class: 'preview-date' }, main.date),
+        h('span', { class: 'preview-weekday' }, `(${WEEKDAY_NAMES[weekdayOf(main.date)]})`),
+        // カレンダー上の ← → と同じ向き記号を使い、読み替えの手間をなくす。
+        main.shifted
+          ? h(
+              'span',
+              { class: `preview-note is-${main.shiftDirection ?? 'prev'}` },
+              `${main.shiftDirection === 'prev' ? '←' : '→'} ${main.rawDate} から${
+                main.shiftDirection === 'prev' ? '前倒し' : '後ろ倒し'
+              }`,
+            )
+          : null,
       );
+
+      // 前後の予定も実際の日付で並べる。本体の日付しか出していなかったため、
+      // 「3営業日前」と「3営業日後」を取り違えていても画面で気づけなかった。
+      if (related.length > 0) {
+        const chain = h('ul', { class: 'preview-related' });
+        for (const item2 of related) {
+          chain.append(
+            h(
+              'li',
+              { class: `preview-related-item is-${item2.kind}` },
+              h('span', { class: 'preview-related-mark' }, item2.kind === 'follow' ? '↓後' : '↑前'),
+              h('span', { class: 'preview-date' }, dayLabel(item2.date)),
+              h('span', { class: 'preview-related-label' }, item2.noticeLabel ?? ''),
+            ),
+          );
+        }
+        item.append(chain);
+      }
+      list.append(item);
     }
     this.previewBody.append(list);
-
-    for (const notice of this.draft.notices) {
-      const first = occurrences[0];
-      if (first === undefined) break;
-      this.previewBody.append(
-        h(
-          'p',
-          { class: 'field-hint' },
-          `準備日「${notice.label}」は各回の${describeNotice(notice.offset, notice.unit)}に表示されます。`,
-        ),
-      );
-    }
   }
 
   private save(): void {

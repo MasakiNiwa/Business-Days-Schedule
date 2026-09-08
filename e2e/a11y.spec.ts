@@ -73,6 +73,26 @@ test.describe('axe-core', () => {
     await page.getByRole('button', { name: 'ヘルプ' }).click();
     await analyze(page, 'dialog');
   });
+
+  test('外部カレンダーへの書き出し', async ({ page }) => {
+    // 期間の開始日・終了日は1つの枠に2つ並ぶため、欄ごとに名前が要る。
+    await seedSamples(page);
+    await page.getByRole('button', { name: '書き出し' }).click();
+    await analyze(page, 'dialog');
+  });
+
+  test('サンプルの追加', async ({ page }) => {
+    await page.goto('');
+    await page.locator('.header-actions').getByRole('button', { name: 'ルール', exact: true }).click();
+    await page.getByRole('button', { name: 'サンプル', exact: true }).click();
+    await analyze(page, 'dialog');
+  });
+
+  test('日付の詳細', async ({ page }) => {
+    await seedSamples(page);
+    await page.locator('.cell.is-today').first().click();
+    await analyze(page, 'dialog');
+  });
 });
 
 test.describe('キーボード操作', () => {

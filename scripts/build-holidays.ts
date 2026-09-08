@@ -16,7 +16,7 @@
  * 使い方: npm run holidays
  */
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { isValidDateStr } from '../src/core/dateUtil';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -145,6 +145,12 @@ export function validatePublishedHolidays(data: HolidayData, year: number): void
  * 取得は「更新」であって「生成」ではない。前回の検査を通ったデータが手元にある
  * のに、更新に失敗しただけで公開そのものを止めるのは釣り合わない。
  * 実際に、認証なしの GitHub API が 403 になっただけで公開が丸ごと止まった。
+ *
+ * ただし代替に使えるのは「リポジトリに入っている版」であって、
+ * 「直前に公開した版」ではない。週次更新で新しい祝日を公開したあと、
+ * 次の更新が失敗して代替に落ちると、公開中のデータより古い版で
+ * 上書きしてしまう。祝日の更新だけが目的の実行では代替を使わない
+ * （--require-fresh。§3.4）。
  */
 async function existingIsUsable(year: number): Promise<boolean> {
   try {
@@ -156,9 +162,20 @@ async function existingIsUsable(year: number): Promise<boolean> {
   }
 }
 
+/** GitHub Actions へ結果を渡す。ワークフロー側が公開の可否を決められるようにする。 */
+async function reportRefreshed(refreshed: boolean): Promise<void> {
+  const target = process.env['GITHUB_OUTPUT'];
+  if (target === undefined || target === '') return;
+  await appendFile(target, `refreshed=${refreshed ? 'true' : 'false'}\n`, 'utf-8');
+}
+
 async function main(): Promise<void> {
   const now = new Date();
   const year = now.getUTCFullYear();
+  // 祝日の更新だけが目的の実行では、取得できなければ何も公開しない。
+  // 代替は「リポジトリの版」であって「公開中の版」ではないため、
+  // 使うと公開中のデータを古い版へ巻き戻しかねない。
+  const requireFresh = process.argv.includes('--require-fresh');
 
   let data: HolidayData;
   let sourceSha: string;
@@ -171,14 +188,24 @@ async function main(): Promise<void> {
     validatePublishedHolidays(data, year);
   } catch (error: unknown) {
     console.error(`祝日データを取得できませんでした: ${String(error)}`);
+    await reportRefreshed(false);
+    if (requireFresh) {
+      console.error('更新が目的の実行のため、既存データでの続行はしません。');
+      throw error;
+    }
     if (await existingIsUsable(year)) {
       // 既存データは検査を通っている。更新できなかっただけなので、公開は続ける。
+      // ただし公開中の版より古い可能性があるため、黙って通さず警告として残す。
       console.log(`既存の ${OUTPUT_PATH} をそのまま使います（今回は更新しません）。`);
+      console.log(
+        '::warning::祝日データを更新できませんでした。リポジトリの版で公開します（公開中の版より古い可能性があります）。',
+      );
       return;
     }
     // 手元に使えるデータが無いなら、ここで止めるほかない。
     throw error;
   }
+  await reportRefreshed(true);
 
   await mkdir(dirname(OUTPUT_PATH), { recursive: true });
   await writeFile(OUTPUT_PATH, `${JSON.stringify(data, null, 2)}\n`, 'utf-8');

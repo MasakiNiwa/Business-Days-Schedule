@@ -23,6 +23,7 @@ import {
   parseDate,
   yearOf,
 } from './dateUtil';
+import { describeNotice } from './describe';
 import { expandRecurrence, skipsAdjustment } from './recurrence';
 import { MAX_SHIFT_DAYS } from './businessDay';
 
@@ -92,7 +93,7 @@ export type ScheduleContext = {
 export type ExpandWarning = {
   ruleId: string;
   rawDate: DateStr | null;
-  reason: 'unknown-calendar' | 'no-business-day';
+  reason: 'unknown-calendar' | 'no-business-day' | 'notice-unresolved';
   message: string;
 };
 
@@ -220,6 +221,7 @@ function expandRule(
         date: result.date,
         shifted: result.shifted,
         shiftDirection: result.direction,
+        seriesDirection: result.direction,
       });
     }
   }
@@ -228,7 +230,19 @@ function expandRule(
     occurrences.push(occurrence);
     rule.notices.forEach((notice, noticeIndex) => {
       const date = noticeDateOf(occurrence.date, notice, calendar);
-      if (date === null) return;
+      if (date === null) {
+        // 長期休業などで営業日を数えきれないと日付が出せない。黙って消すと
+        // 「設定したのに出ない」を追えなくなるので、警告として残す。
+        warnings.push({
+          ruleId: rule.id,
+          rawDate: occurrence.date,
+          reason: 'notice-unresolved',
+          message: `「${rule.title}」の${describeNotice(notice.offset, notice.unit)}（${
+            notice.label
+          }）は ${occurrence.date} を起点に日付を決められませんでした（休業が長く営業日を数えきれません）`,
+        });
+        return;
+      }
       occurrences.push({
         ruleId: rule.id,
         kind: notice.offset < 0 ? 'notice' : 'follow',
@@ -238,6 +252,9 @@ function expandRule(
         date,
         shifted: false,
         shiftDirection: null,
+        // 親（本体）の向きを引き継ぐ。両側補正のとき、これが無いと
+        // 前倒し側と後ろ倒し側の子を見分けられない。
+        seriesDirection: occurrence.seriesDirection,
         noticeLabel: notice.label,
         noticeIndex,
       });
@@ -310,7 +327,31 @@ export function previewOccurrences(
   ctx: ScheduleContext,
   maxMonths = 60,
 ): Occurrence[] {
-  const result: Occurrence[] = [];
+  return previewSeries(rule, from, count, ctx, maxMonths).map((series) => series.main);
+}
+
+/** 本体と、それに紐づく準備日・フォローの組。 */
+export type PreviewSeries = {
+  main: Occurrence;
+  /** 日付昇順。本体より前のもの・後のものが混ざる。 */
+  related: Occurrence[];
+};
+
+/**
+ * 本体だけでなく、紐づく準備日・フォローも一緒に返す。
+ *
+ * 本体の日付しか出していなかったため、「3営業日前」を「3営業日後」と
+ * 取り違えていても画面で気づけなかった。前後を並べて見せれば、
+ * 保存する前に順番のおかしさが目に入る。
+ */
+export function previewSeries(
+  rule: Rule,
+  from: DateStr,
+  count: number,
+  ctx: ScheduleContext,
+  maxMonths = 60,
+): PreviewSeries[] {
+  const result: PreviewSeries[] = [];
   const { year, month } = parseDate(from);
   let cursor = makeDate(year, month, 1);
 
@@ -319,9 +360,25 @@ export function previewOccurrences(
     const end = lastDateOfMonth(yearOf(addMonths(cursor, 11)), monthOf(addMonths(cursor, 11)));
     // 無効化中のルールでもプレビューは見せたいので enabled を立てて展開する。
     const { occurrences } = expandRules([{ ...rule, enabled: true }], { start: cursor, end }, ctx);
+
+    // 準備日は本体より前の日付なので、本体を軸に集め直す。
+    // 同じ基準日でも両側補正では2系列に分かれるため、向きも鍵に含める。
+    const keyOf = (item: Occurrence): string => `${item.baseDate}|${item.seriesDirection ?? ''}`;
+    const relatedByKey = new Map<string, Occurrence[]>();
+    for (const occurrence of occurrences) {
+      if (occurrence.kind === 'main') continue;
+      const key = keyOf(occurrence);
+      const bucket = relatedByKey.get(key);
+      if (bucket === undefined) relatedByKey.set(key, [occurrence]);
+      else bucket.push(occurrence);
+    }
+
     for (const occurrence of occurrences) {
       if (occurrence.kind !== 'main' || occurrence.date < from) continue;
-      result.push(occurrence);
+      const related = [...(relatedByKey.get(keyOf(occurrence)) ?? [])].sort((a, b) =>
+        a.date < b.date ? -1 : a.date > b.date ? 1 : 0,
+      );
+      result.push({ main: occurrence, related });
       if (result.length >= count) break;
     }
     cursor = addMonths(cursor, 12);

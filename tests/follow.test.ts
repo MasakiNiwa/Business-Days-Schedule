@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { expandRules, followRangeStart, noticeDateOf } from '../src/core/schedule';
 import { describeNotice } from '../src/core/describe';
-import { companyCalendar, makeRule, scheduleContext } from './helpers';
+import { companyCalendar, makeCalendar, makeRule, scheduleContext } from './helpers';
 import type { Occurrence } from '../src/types';
 
 const invoice = makeRule({
@@ -169,5 +169,41 @@ describe('describeNotice', () => {
     expect(describeNotice(3, 'business')).toBe('3営業日後');
     expect(describeNotice(-2, 'calendar')).toBe('2日前');
     expect(describeNotice(2, 'calendar')).toBe('2日後');
+  });
+});
+
+describe('日付を決められない前後の予定', () => {
+  it('長期休業で数えきれないフォローを、黙って消さず警告に出す', () => {
+    // レビューで指摘された再現手順: 8月31日の本体、9〜10月が休業、翌営業日のフォロー。
+    // 以前は本体だけが残り、警告は0件だった（設定したのに出ない理由を追えない）。
+    const closedCalendar = makeCalendar({
+      id: 'closed-long',
+      // 営業日の探索は最大 MAX_SHIFT_DAYS(31日) 先までなので、
+      // それを超える休業だと翌営業日を数えきれない。
+      closedRanges: [{ from: '09-01', to: '10-31', label: '長期休業' }],
+    });
+    const ctx = {
+      calendars: new Map([[closedCalendar.id, closedCalendar]]),
+      fallbackCalendarId: closedCalendar.id,
+    };
+    const rule = makeRule({
+      id: 'long-closure',
+      title: '締め',
+      calendarId: closedCalendar.id,
+      recurrence: { type: 'monthlyByDay', interval: 1, days: [31], overflow: 'skip' },
+      adjust: { mode: 'none', keepInMonth: false },
+      notices: [{ offset: 1, unit: 'business', label: '確認' }],
+    });
+
+    // 8月31日ちょうどの1日だけを見る。この本体のフォローは休業を越えられない。
+    const result = expandRules([rule], { start: '2026-08-31', end: '2026-08-31' }, ctx);
+    expect(result.occurrences.map((o) => [o.kind, o.date])).toEqual([['main', '2026-08-31']]);
+    expect(result.warnings.map((w) => w.reason)).toContain('notice-unresolved');
+    expect(result.warnings.map((w) => w.message).join('\n')).toContain('確認');
+  });
+
+  it('数えられるときは警告を出さない', () => {
+    const result = expandRules([invoice], { start: '2026-09-01', end: '2026-09-30' }, scheduleContext);
+    expect(result.warnings).toEqual([]);
   });
 });

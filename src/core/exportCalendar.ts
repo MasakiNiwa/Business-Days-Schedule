@@ -18,8 +18,14 @@ import type { DateStr, Occurrence, Rule } from '../types';
 export type CalendarExportFormat = 'ics' | 'csv';
 
 export type CalendarExportOptions = {
-  /** 事前通知（準備日）も予定として書き出すか。 */
+  /** 準備日（本体より前）も予定として書き出すか。 */
   includeNotices: boolean;
+  /**
+   * フォロー（本体より後）も書き出すか。
+   * 準備日と別に持つのは、片方だけ要ることがあるため。
+   * 省略時は準備日と同じ扱いにする（既存の呼び出しを壊さない）。
+   */
+  includeFollows?: boolean;
   /** 取り込み先で表示されるカレンダー名。 */
   calendarName: string;
 };
@@ -105,7 +111,8 @@ function collectEntries(
 ): Entry[] {
   const entries: Entry[] = [];
   for (const occurrence of occurrences) {
-    if (!options.includeNotices && occurrence.kind !== 'main') continue;
+    if (occurrence.kind === 'notice' && !options.includeNotices) continue;
+    if (occurrence.kind === 'follow' && !(options.includeFollows ?? options.includeNotices)) continue;
     const rule = rules.get(occurrence.ruleId);
     if (rule === undefined) continue;
     entries.push({ occurrence, rule });
@@ -191,7 +198,11 @@ export function buildIcs(
       occurrence.kind,
       occurrence.baseDate,
       // 単一予定の識別子は、休日変更による補正の有無・方向に依存させない。
-      rule.adjust.mode === 'both' ? (occurrence.shiftDirection ?? 'prev') : 'single',
+      // 両側補正のときだけ2系列を区別する。子（準備日・フォロー）は自身が
+      // 動いていないので、親から引き継いだ seriesDirection を使う。
+      // shiftDirection を見ると子が全部同じ値になり、書き出す期間によって
+      // 連番の割り当てが変わってしまう（別の予定を上書きしうる）。
+      rule.adjust.mode === 'both' ? (occurrence.seriesDirection ?? 'prev') : 'single',
       occurrence.noticeIndex === undefined ? '' : `n${occurrence.noticeIndex}`,
     ].filter((part) => part !== '');
     const base = parts.join('-');
