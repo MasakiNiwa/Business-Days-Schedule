@@ -48,11 +48,30 @@ describe('validateRule', () => {
     expect(issues.map((i) => i.path)).toContain('period');
   });
 
-  it('事前通知は負の整数のみ', () => {
+  it('準備日（負）とフォロー（正）のどちらも受け付ける', () => {
+    for (const offset of [-3, 5]) {
+      const issues = validateRule(
+        makeRule({ title: 'x', notices: [{ offset, unit: 'business', label: '確認' }] }),
+      );
+      expect(issues.map((i) => i.path), `offset=${offset}`).not.toContain('notices[0].offset');
+    }
+  });
+
+  it('0 は本体と同じ日なので弾く', () => {
     const issues = validateRule(
-      makeRule({ title: 'x', notices: [{ offset: 3, unit: 'business', label: '' }] }),
+      makeRule({ title: 'x', notices: [{ offset: 0, unit: 'business', label: '確認' }] }),
     );
     expect(issues.map((i) => i.path)).toContain('notices[0].offset');
+  });
+
+  it('前後どちらも上限を超えたら弾く', () => {
+    // 営業日換算の巨大な値は、数えるだけで固まるため。
+    for (const offset of [-LIMITS.noticeOffset - 1, LIMITS.noticeOffset + 1]) {
+      const issues = validateRule(
+        makeRule({ title: 'x', notices: [{ offset, unit: 'business', label: '確認' }] }),
+      );
+      expect(issues.map((i) => i.path), `offset=${offset}`).toContain('notices[0].offset');
+    }
   });
 
   it('除外日の形式を検証する', () => {

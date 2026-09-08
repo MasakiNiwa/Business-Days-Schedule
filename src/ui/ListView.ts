@@ -30,8 +30,9 @@ function weekdayClass(date: DateStr, holidays: HolidayLookup): string {
 }
 
 function shiftCell(occurrence: Occurrence): HTMLElement | string {
-  if (occurrence.kind === 'notice') {
-    return h('span', { class: 'list-notice-origin' }, `${occurrence.rawDate} の準備`);
+  if (occurrence.kind !== 'main') {
+    const relation = occurrence.kind === 'follow' ? 'のフォロー' : 'の準備';
+    return h('span', { class: 'list-notice-origin' }, `${occurrence.rawDate} ${relation}`);
   }
   if (!occurrence.shifted || occurrence.shiftDirection === null) return '';
   return h(
@@ -70,9 +71,9 @@ function renderRow(
     h('span', { class: `rule-dot color-${rule.color}`, 'aria-hidden': 'true' }),
     h(
       'span',
-      { class: occurrence.kind === 'notice' ? 'is-notice-title' : '' },
-      occurrence.kind === 'notice'
-        ? `${rule.title}: ${occurrence.noticeLabel ?? '準備'}`
+      { class: occurrence.kind !== 'main' ? 'is-notice-title' : '' },
+      occurrence.kind !== 'main'
+        ? `${rule.title}: ${occurrence.noticeLabel ?? (occurrence.kind === 'follow' ? 'フォロー' : '準備')}`
         : rule.title,
     ),
   );

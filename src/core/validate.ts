@@ -15,7 +15,7 @@ export const LIMITS = {
   titleLength: 200,
   noteLength: 2000,
   notices: 20,
-  /** 事前通知のさかのぼり日数。1年より前に知らせても意味がない。 */
+  /** 準備日・フォローの前後日数。1年より外に置いても意味がない。 */
   noticeOffset: 365,
   skipDates: 1000,
   arrayItems: 40,
@@ -305,20 +305,21 @@ export function validateRule(rule: Rule): ValidationIssue[] {
   } else {
     notices.forEach((notice: unknown, index) => {
       if (!isRecord(notice)) {
-        issues.push({ path: `notices[${index}]`, message: '事前通知の形式が不正です', severity: 'error' });
+        issues.push({ path: `notices[${index}]`, message: '準備日・フォローの形式が不正です', severity: 'error' });
         return;
       }
       const offset = notice['offset'];
       if (
         typeof offset !== 'number' ||
         !Number.isInteger(offset) ||
-        offset >= 0 ||
-        // さかのぼり日数に上限を置く。営業日換算の巨大な値は、数えるだけで固まるため。
-        offset < -LIMITS.noticeOffset
+        // 0 は本体と同じ日で意味がない。
+        offset === 0 ||
+        // 前後の日数に上限を置く。営業日換算の巨大な値は、数えるだけで固まるため。
+        Math.abs(offset) > LIMITS.noticeOffset
       ) {
         issues.push({
           path: `notices[${index}].offset`,
-          message: `事前通知は -1 〜 -${LIMITS.noticeOffset} の整数で指定してください`,
+          message: `準備日・フォローは 0 を除く -${LIMITS.noticeOffset} 〜 ${LIMITS.noticeOffset} の整数で指定してください`,
           severity: 'error',
         });
       }

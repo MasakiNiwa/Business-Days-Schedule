@@ -29,10 +29,14 @@ import { MAX_SHIFT_DAYS } from './businessDay';
 /** 補正で月をまたぐ発生日を取りこぼさないためのマージン（月数）。 */
 const MARGIN_MONTHS = 1;
 
-/** 通知日から実際の営業日を先へ数え、本体の探索末尾を決める。 */
+/**
+ * 準備日（本体より前）が表示範囲に入る本体を取りこぼさないよう、探索の末尾を延ばす。
+ * 準備日は本体より前に出るので、本体は表示範囲より後ろにありうる。
+ */
 export function noticeRangeEnd(rule: Rule, end: DateStr, calendar: BusinessDayCalendar): DateStr {
   let latest = end;
   for (const notice of rule.notices) {
+    if (notice.offset >= 0) continue;
     const amount = Math.abs(notice.offset);
     let date = end;
     if (notice.unit === 'calendar') {
@@ -50,6 +54,32 @@ export function noticeRangeEnd(rule: Rule, end: DateStr, calendar: BusinessDayCa
     if (bound > latest) latest = bound;
   }
   return latest;
+}
+
+/**
+ * フォロー（本体より後）が表示範囲に入る本体を取りこぼさないよう、探索の先頭を戻す。
+ * 準備日と向きが逆になるだけで、理屈は noticeRangeEnd と同じ。
+ * これが無いと「月初に出るはずのフォロー」が、本体が前月にあるせいで生成されない。
+ */
+export function followRangeStart(rule: Rule, start: DateStr, calendar: BusinessDayCalendar): DateStr {
+  let earliest = start;
+  for (const notice of rule.notices) {
+    if (notice.offset <= 0) continue;
+    const amount = notice.offset;
+    let date = start;
+    if (notice.unit === 'calendar') {
+      date = addDays(start, -amount);
+    } else {
+      for (let remaining = amount; remaining > 0; remaining -= 1) {
+        const prev = calendar.prevBusinessDay(date);
+        if (prev === null) break;
+        date = prev;
+      }
+    }
+    const bound = addDays(date, -MAX_SHIFT_DAYS * 2);
+    if (bound < earliest) earliest = bound;
+  }
+  return earliest;
 }
 
 export type ScheduleContext = {
@@ -109,13 +139,17 @@ function resolveCalendar(
   };
 }
 
-/** 事前通知の日付。offset は負値、unit に応じて暦日／営業日で遡る。 */
+/**
+ * 準備日・フォローの日付。
+ * 符号が向きを決める。負なら本体より前へ、正なら本体より後へ、unit に応じて
+ * 暦日／営業日で数える。0 は本体と同じ日になるので作らない。
+ */
 export function noticeDateOf(
   effectiveDate: DateStr,
   notice: Notice,
   calendar: BusinessDayCalendar,
 ): DateStr | null {
-  if (notice.offset >= 0) return null;
+  if (notice.offset === 0) return null;
   return notice.unit === 'calendar'
     ? addDays(effectiveDate, notice.offset)
     : calendar.addBusinessDays(effectiveDate, notice.offset);
@@ -197,7 +231,7 @@ function expandRule(
       if (date === null) return;
       occurrences.push({
         ruleId: rule.id,
-        kind: 'notice',
+        kind: notice.offset < 0 ? 'notice' : 'follow',
         rawDate: occurrence.date,
         // 本体の基準日を引き継ぐ。祝日データが変わっても動かない識別子にするため。
         baseDate: occurrence.baseDate,
@@ -213,9 +247,12 @@ function expandRule(
   return { occurrences, warnings };
 }
 
+/** 同じ日では本体を先に、そのあと準備日・フォローの順で並べる。 */
+const KIND_ORDER = { main: 0, notice: 1, follow: 2 } as const;
+
 function compareOccurrence(a: Occurrence, b: Occurrence): number {
   if (a.date !== b.date) return a.date < b.date ? -1 : 1;
-  if (a.kind !== b.kind) return a.kind === 'main' ? -1 : 1;
+  if (a.kind !== b.kind) return KIND_ORDER[a.kind] - KIND_ORDER[b.kind];
   return a.ruleId < b.ruleId ? -1 : a.ruleId > b.ruleId ? 1 : 0;
 }
 
@@ -230,12 +267,14 @@ export function expandRules(
 
   for (const rule of rules) {
     if (!rule.enabled) continue;
-    // 展開範囲はルールごとに決める。長い事前通知を持つルールだけ先まで広げる。
+    // 展開範囲はルールごとに決める。長い準備日・フォローを持つルールだけ広げる。
     const expandRange = withMargin(viewRange);
     const resolved = resolveCalendar(rule, ctx);
     if (resolved !== null) {
       const end = noticeRangeEnd(rule, viewRange.end, resolved.calendar);
       if (end > expandRange.end) expandRange.end = end;
+      const start = followRangeStart(rule, viewRange.start, resolved.calendar);
+      if (start < expandRange.start) expandRange.start = start;
     }
     const result = expandRule(rule, expandRange, ctx);
     warnings.push(...result.warnings);

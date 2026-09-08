@@ -43,8 +43,10 @@ const dayOfDate = (date: string): string => String(Number(date.slice(8, 10)));
 /** 予定チップに付ける補足説明（ツールチップ・スクリーンリーダー向け）。 */
 export function occurrenceTitle(occurrence: Occurrence, rule: Rule): string {
   const lines = [rule.title, describeRule(rule)];
-  if (occurrence.kind === 'notice') {
-    lines.push(`${occurrence.noticeLabel ?? '準備日'}（${occurrence.rawDate} の予定に対して）`);
+  if (occurrence.kind !== 'main') {
+    const fallback = occurrence.kind === 'follow' ? 'フォロー' : '準備日';
+    const relation = occurrence.kind === 'follow' ? 'の予定の後' : 'の予定に対して';
+    lines.push(`${occurrence.noticeLabel ?? fallback}（${occurrence.rawDate} ${relation}）`);
   } else if (occurrence.shifted) {
     const direction = occurrence.shiftDirection === 'prev' ? '前営業日へ' : '翌営業日へ';
     lines.push(`本来は ${occurrence.rawDate}（休業日）。${direction}。`);
@@ -54,8 +56,10 @@ export function occurrenceTitle(occurrence: Occurrence, rule: Rule): string {
 }
 
 function renderOccurrence(occurrence: Occurrence, rule: Rule): HTMLElement {
-  const isNotice = occurrence.kind === 'notice';
-  const label = isNotice ? `${rule.title}: ${occurrence.noticeLabel ?? '準備'}` : rule.title;
+  const isRelated = occurrence.kind !== 'main';
+  const label = isRelated
+    ? `${rule.title}: ${occurrence.noticeLabel ?? (occurrence.kind === 'follow' ? 'フォロー' : '準備')}`
+    : rule.title;
 
   // 補正済みは「←10」「→10」と出す。向きと、元がいつだったかの両方が2〜3文字で分かる。
   const mark =
@@ -75,7 +79,7 @@ function renderOccurrence(occurrence: Occurrence, rule: Rule): HTMLElement {
   return h(
     'li',
     {
-      class: `chip color-${rule.color}${isNotice ? ' is-notice' : ''}`,
+      class: `chip color-${rule.color}${isRelated ? ' is-notice' : ''}${occurrence.kind === 'follow' ? ' is-follow' : ''}`,
       title: occurrenceTitle(occurrence, rule),
     },
     mark,
@@ -264,9 +268,9 @@ export function renderLegend(hasNotices: boolean, hasShifts: boolean): HTMLEleme
       { class: 'legend-wide' },
       hasShifts ? '← → = 休業日のため移動（数字は元の日）' : '← → = 休業日のため前後の営業日へ移動',
     ),
-    hasNotices ? h('span', { class: 'legend-wide' }, '破線 = 準備日') : null,
+    hasNotices ? h('span', { class: 'legend-wide' }, '破線 = 準備日・フォロー') : null,
     h('span', { class: 'legend-narrow' }, '● = 予定'),
-    hasNotices ? h('span', { class: 'legend-narrow' }, '○ = 準備日') : null,
+    hasNotices ? h('span', { class: 'legend-narrow' }, '○ = 準備日・フォロー') : null,
     h('span', {}, '日付を押すと当日の予定を一覧できます'),
   );
 }

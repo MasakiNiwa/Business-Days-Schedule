@@ -8,8 +8,16 @@ export const APP_NAME = 'Business Days Schedule';
 /**
  * 何をするものかを一言で。反復ルールを組み立てるところがこのアプリの役目で、
  * 日々見るのは会社で使っているカレンダーであることが多い。その関係を最初に伝える。
+ *
+ * 前半を分けて持つのは、そこが他のカレンダーには無い部分だからである。
+ * 「反復ルール」だけなら Outlook にもあるが、休祝日で前後にずらすことと、
+ * 決算月から逆算することはできない。画面ではそこを強調して出す。
  */
-export const APP_TAGLINE = '反復ルールを組んで、Outlook / Google カレンダーへ';
+export const APP_TAGLINE_LEAD = '営業日/決算月を反映した';
+export const APP_TAGLINE_REST = '反復ルールを組んで、Outlook / Google カレンダーへ';
+
+/** 強調を持てない場所（説明文・文書）向けの通し表記。 */
+export const APP_TAGLINE = `${APP_TAGLINE_LEAD}${APP_TAGLINE_REST}`;
 
 export type BuildInfo = {
   version: string;

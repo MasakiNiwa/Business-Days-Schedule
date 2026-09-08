@@ -154,7 +154,16 @@ export type Adjustment = {
 };
 
 /** 事前通知（準備日）。offset は負値のみ。 */
+/**
+ * 本体の予定に紐づく、前後の予定（docs/SPEC.md §5.4）。
+ *
+ * 符号が向きを決める。負なら本体より前（準備日）、正なら本体より後（フォロー）。
+ * 「振込データは3営業日前に作る」も「入金は5営業日後に消し込む」も、
+ * 同じ1つのルールにぶら下げられる。別のルールとして作らせると、
+ * 本体の日付が動いたときに片方だけ取り残される。
+ */
 export type Notice = {
+  /** 負 = 前（準備日）、正 = 後（フォロー）。0 は本体と同じ日なので認めない。 */
   offset: number;
   unit: 'business' | 'calendar';
   label: string;
@@ -191,7 +200,8 @@ export type Rule = {
 
 export type Occurrence = {
   ruleId: string;
-  kind: 'main' | 'notice';
+  /** main = 本体、notice = 本体より前の準備日、follow = 本体より後のフォロー。 */
+  kind: 'main' | 'notice' | 'follow';
   /** 補正前の基準日。事前通知では、対応する本体の確定日。 */
   rawDate: DateStr;
   /**

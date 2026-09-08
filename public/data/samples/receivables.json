@@ -85,6 +85,11 @@
           "offset": -2,
           "unit": "business",
           "label": "請求データの確認"
+        },
+        {
+          "offset": 5,
+          "unit": "business",
+          "label": "送付済みの確認"
         }
       ],
       "period": {
@@ -120,7 +125,13 @@
         "mode": "both",
         "keepInMonth": false
       },
-      "notices": [],
+      "notices": [
+        {
+          "offset": 1,
+          "unit": "business",
+          "label": "入金の確認"
+        }
+      ],
       "period": {
         "start": null,
         "end": null

@@ -68,28 +68,65 @@ export function renderSamplePicker(
     if (handlers.onLoadRules && handlers.onAddSelected) {
       const loadRules = handlers.onLoadRules;
       const addSelected = handlers.onAddSelected;
-      const browse = button('内容を選ぶ', () => {
-        browse.disabled = true;
-        choices.hidden = false;
+      // 開いたら閉じられること。12件の束を開くと画面がその一覧で埋まり、
+      // 畳めないと他の束を見に行けない。取得済みの中身は捨てず、開閉だけを切り替える。
+      let loaded = false;
+
+      const browse = h('button', { type: 'button', class: 'button button-sm' }, '内容を選ぶ');
+      const setOpen = (open: boolean): void => {
+        choices.hidden = !open;
+        browse.textContent = open ? '内容を閉じる' : '内容を選ぶ';
+        browse.setAttribute('aria-expanded', open ? 'true' : 'false');
+      };
+      setOpen(false);
+      browse.setAttribute('aria-controls', `sample-choices-${pack.id}`);
+      choices.id = `sample-choices-${pack.id}`;
+
+      browse.addEventListener('click', () => {
+        if (!choices.hidden) {
+          setOpen(false);
+          return;
+        }
+        setOpen(true);
+        if (loaded) return;
+
         choices.textContent = '読み込み中…';
-        void loadRules(pack).then((rules) => {
-          choices.replaceChildren();
-          const selected = new Set<string>();
-          const add = button('選んだ予定を追加', () => addSelected(pack, [...selected]), 'button button-sm button-primary');
-          add.disabled = true;
-          for (const rule of rules) {
-            choices.append(checkbox(`${rule.title} — ${describeRule(rule)}`, false, (checked) => {
-              if (checked) selected.add(rule.id); else selected.delete(rule.id);
-              add.disabled = selected.size === 0;
-              add.textContent = `選んだ ${selected.size} 件を追加`;
-            }));
-          }
-          choices.append(add);
-        }).catch(() => {
-          choices.textContent = '内容を取得できませんでした。もう一度お試しください。';
-          browse.disabled = false;
-        });
-      }, 'button button-sm');
+        void loadRules(pack)
+          .then((rules) => {
+            loaded = true;
+            choices.replaceChildren();
+            const selected = new Set<string>();
+            const add = button(
+              '選んだ予定を追加',
+              () => addSelected(pack, [...selected]),
+              'button button-sm button-primary',
+            );
+            add.disabled = true;
+            for (const rule of rules) {
+              choices.append(
+                checkbox(`${rule.title} — ${describeRule(rule)}`, false, (checked) => {
+                  if (checked) selected.add(rule.id);
+                  else selected.delete(rule.id);
+                  add.disabled = selected.size === 0;
+                  add.textContent =
+                    selected.size === 0 ? '選んだ予定を追加' : `選んだ ${selected.size} 件を追加`;
+                }),
+              );
+            }
+            // 一覧の下端にも畳む手を置く。長い束では上のボタンまで戻るのが遠い。
+            choices.append(
+              h(
+                'div',
+                { class: 'sample-choices-actions' },
+                add,
+                button('内容を閉じる', () => setOpen(false), 'button button-sm button-quiet'),
+              ),
+            );
+          })
+          .catch(() => {
+            choices.textContent = '内容を取得できませんでした。もう一度お試しください。';
+          });
+      });
       actions.prepend(browse);
     }
 
