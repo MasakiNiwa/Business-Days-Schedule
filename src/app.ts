@@ -49,6 +49,7 @@ import {
   buildCsv,
   buildIcs,
   exportCalendarFileName,
+  exportWarningPrompt,
   MIME_TYPES,
 } from './core/exportCalendar';
 import { attachHorizontalSwipe } from './ui/swipe';
@@ -378,15 +379,9 @@ export class App {
     );
     // 日付を出せなかった準備日・フォローがあるまま黙って書き出すと、
     // 取り込み先で「設定したのに無い」に気づけない。
-    const unresolved = [...new Set(warnings.map((warning) => warning.message))];
-    if (
-      unresolved.length > 0 &&
-      !globalThis.confirm(
-        `次の予定は日付を決められないため書き出されません。\n\n${unresolved.join(
-          '\n',
-        )}\n\nこのまま書き出しますか？`,
-      )
-    ) {
+    // 出ないものと、出るが確かめてほしいものは分けて伝える。
+    const prompt = exportWarningPrompt(warnings, request);
+    if (prompt !== null && !globalThis.confirm(`${prompt}\n\nこのまま書き出しますか？`)) {
       return;
     }
     const rules = new Map(this.state.rules.map((rule) => [rule.id, rule]));

@@ -14,6 +14,7 @@ import { APP_NAME } from './buildInfo';
 import { dayOf, monthOf, addDays, weekdayOf, yearOf } from './dateUtil';
 import { describeRule } from './describe';
 import type { DateStr, Occurrence, Rule } from '../types';
+import type { ExpandWarning } from './schedule';
 
 export type CalendarExportFormat = 'ics' | 'csv';
 
@@ -31,6 +32,17 @@ export type CalendarExportOptions = {
 };
 
 const PRODUCT_ID = '-//Business Days Schedule//JA//';
+/**
+ * UID に入れる「本体か、その前か後か」。
+ *
+ * 設定から決まる向き（noticeRole）を使う。日数指定では符号がそのまま向きなので、
+ * これまで書き出したぶんと同じ文字列になり、既存の UID は変わらない。
+ */
+function uidRole(occurrence: Occurrence): string {
+  if (occurrence.kind === 'main') return 'main';
+  return occurrence.noticeRole === 'before' ? 'notice' : 'follow';
+}
+
 /** UID の名前空間。同じ予定を再取り込みしたときに重複ではなく更新として扱わせる。 */
 const UID_DOMAIN = 'business-days-schedule';
 
@@ -120,6 +132,45 @@ function collectEntries(
   return entries;
 }
 
+/**
+ * 書き出す前に確かめてもらう文言。無ければ null（確認を挟まない）。
+ *
+ * 「日付を決められないため書き出されません」と一括で言っていたが、前後が
+ * 逆転しただけの警告は日付が決まっており、予定は書き出される。混ぜると、
+ * 出ているものを出ていないと読ませてしまう。出ないものと、出るが確かめて
+ * ほしいものを分ける。
+ *
+ * 書き出しに含めない側（準備日だけ／フォローだけ）の警告は出さない。
+ * 書き出される中身と関係のない話になるため。
+ */
+export function exportWarningPrompt(
+  warnings: readonly ExpandWarning[],
+  options: Pick<CalendarExportOptions, 'includeNotices' | 'includeFollows'>,
+): string | null {
+  const includeFollows = options.includeFollows ?? options.includeNotices;
+  const relevant = warnings.filter((warning) => {
+    if (warning.noticeRole === undefined) return true;
+    return warning.noticeRole === 'before' ? options.includeNotices : includeFollows;
+  });
+
+  const unique = (reason: (warning: ExpandWarning) => boolean): string[] => [
+    ...new Set(relevant.filter(reason).map((warning) => warning.message)),
+  ];
+  const missing = unique((warning) => warning.reason !== 'notice-role-mismatch');
+  const crossed = unique((warning) => warning.reason === 'notice-role-mismatch');
+
+  const sections: string[] = [];
+  if (missing.length > 0) {
+    sections.push(`次の予定は日付を決められないため書き出されません。\n${missing.join('\n')}`);
+  }
+  if (crossed.length > 0) {
+    sections.push(
+      `次の予定は書き出しますが、本体との前後が設定と逆になっています。\n${crossed.join('\n')}`,
+    );
+  }
+  return sections.length === 0 ? null : sections.join('\n\n');
+}
+
 // ---------------------------------------------------------------------------
 // iCalendar
 // ---------------------------------------------------------------------------
@@ -195,7 +246,11 @@ export function buildIcs(
     // 日付が動いたときに別の予定として二重に取り込まれてしまうため。
     const parts = [
       rule.id,
-      occurrence.kind,
+      // 実際に前後どちらへ出たか（kind）ではなく、設定が言っている向きを使う。
+      // kind は休業日の設定しだいで入れ替わる。「翌週月曜・休業日なら前営業日へ」は
+      // 月曜を休みにした途端フォローから準備日へ変わり、同じ予定の UID が
+      // 変わってしまっていた。取り込み先では別の予定として増える。
+      uidRole(occurrence),
       occurrence.baseDate,
       // 単一予定の識別子は、休日変更による補正の有無・方向に依存させない。
       // 両側補正のときだけ2系列を区別する。子（準備日・フォロー）は自身が

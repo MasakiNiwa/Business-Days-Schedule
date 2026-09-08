@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildIcs } from '../src/core/exportCalendar';
 import { expandRules } from '../src/core/schedule';
-import { makeRule, scheduleContext } from './helpers';
+import { makeCalendar, makeRule, scheduleContext } from './helpers';
 import type { Rule } from '../src/types';
 
 const OPTIONS = { includeNotices: true, calendarName: 'x' };
@@ -136,5 +136,76 @@ describe('前後の予定を消しても、残ったものの UID が変わら�
     const uids = [...uidsByDate(legacy, '2026-09-01', '2026-09-30').values()];
     expect(uids.some((uid) => uid.includes('-n0@'))).toBe(true);
     expect(uids.some((uid) => uid.includes('-n1@'))).toBe(true);
+  });
+});
+
+describe('前後が入れ替わっても UID が変わらない', () => {
+  /**
+   * 「翌週の月曜、休業日なら前営業日へ」。月曜を休業日にすると、
+   * 前営業日へ戻った結果が本体を追い越し、フォローから準備日へ変わる。
+   * 実際の日付から前後を決めて UID に入れていたため、同じ予定の識別子が
+   * 変わっていた。取り込み先では別の予定として増える。
+   */
+  const weekly = (openDates: string[]): { rule: Rule; ctx: typeof scheduleContext } => {
+    const rule = makeRule({
+      id: 'wk',
+      title: '週次報告',
+      calendarId: 'flex',
+      recurrence: { type: 'monthlyByDay', interval: 1, days: [20], overflow: 'clamp' },
+      adjust: { mode: 'none', keepInMonth: false },
+      notices: [
+        { id: 'n0', label: '提出', timing: { kind: 'weekday', weeks: 1, weekday: 1, onClosed: 'prev' } },
+      ],
+    });
+    const ctx = {
+      ...scheduleContext,
+      calendars: new Map(scheduleContext.calendars).set(
+        'flex',
+        makeCalendar({ id: 'flex', openDates }),
+      ),
+      fallbackCalendarId: 'flex',
+    };
+    return { rule, ctx };
+  };
+
+  const uidOfRelated = (openDates: string[]): { uid: string; date: string } => {
+    const { rule, ctx } = weekly(openDates);
+    const occurrences = expandRules([rule], { start: '2026-09-01', end: '2026-09-30' }, ctx)
+      .occurrences.filter((o) => o.kind !== 'main');
+    const ics = buildIcs(occurrences, new Map([[rule.id, rule]]), OPTIONS, NOW);
+    const uid = ics.split('\r\n').find((line) => line.startsWith('UID:'))?.slice(4) ?? '';
+    return { uid, date: occurrences[0]?.date ?? '' };
+  };
+
+  it('休業日の設定で前後が入れ替わっても、同じ予定として扱われる', () => {
+    // 2026-09-21（敬老の日）を営業日にすると 09-21。本体 09-20 より後 = フォロー。
+    const open = uidOfRelated(['2026-09-21']);
+    // 休業日のままなら前営業日 09-18 へ戻り、本体より前 = 準備日になる。
+    const closed = uidOfRelated([]);
+
+    expect(open.date).toBe('2026-09-21');
+    expect(closed.date).toBe('2026-09-18');
+    expect(closed.uid).toBe(open.uid);
+  });
+
+  it('日数指定の UID はこれまでと同じ形のまま', () => {
+    // 既に書き出したぶんと食い違わせない。負の offset は notice、正は follow。
+    const rule = makeRule({
+      id: 'r',
+      title: '給与振込',
+      recurrence: { type: 'monthlyByDay', interval: 1, days: [10], overflow: 'clamp' },
+      adjust: { mode: 'none', keepInMonth: false },
+      notices: [
+        { id: 'n0', label: '準備', timing: { kind: 'offset', offset: -3, unit: 'business' } },
+        { id: 'n1', label: '確認', timing: { kind: 'offset', offset: 3, unit: 'business' } },
+      ],
+    });
+    const occurrences = expandRules([rule], { start: '2026-09-01', end: '2026-09-30' }, scheduleContext)
+      .occurrences.filter((o) => o.kind !== 'main');
+    const ics = buildIcs(occurrences, new Map([[rule.id, rule]]), OPTIONS, NOW);
+    const uids = ics.split('\r\n').filter((line) => line.startsWith('UID:'));
+
+    expect(uids).toContain('UID:r-notice-2026-09-10-single-n0@business-days-schedule');
+    expect(uids).toContain('UID:r-follow-2026-09-10-single-n1@business-days-schedule');
   });
 });

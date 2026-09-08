@@ -84,20 +84,55 @@ const GROUP_LIST_ID = 'rule-group-options';
 
 /** 「どの週か」の選択肢。実務で使う範囲に絞る。 */
 const WEEK_OPTIONS = [
-  { value: '-2', label: '前々週の' },
-  { value: '-1', label: '前週の' },
-  { value: '0', label: '同じ週の' },
-  { value: '1', label: '翌週の' },
-  { value: '2', label: '翌々週の' },
+  { value: '-2', label: '前々週' },
+  { value: '-1', label: '前週' },
+  { value: '0', label: '同じ週' },
+  { value: '1', label: '翌週' },
+  { value: '2', label: '翌々週' },
 ];
+
+/** 前後予定の小さな入力欄。画面に見えるラベルを必ず付ける。 */
+function subField(labelText: string, control: HTMLElement): HTMLElement {
+  const element = field(labelText, control);
+  element.classList.add('field-compact');
+  return element;
+}
 
 /** 「どの月か」の選択肢。 */
 const MONTH_OPTIONS = [
-  { value: '-1', label: '前月の' },
-  { value: '0', label: '同じ月の' },
-  { value: '1', label: '翌月の' },
-  { value: '2', label: '2か月後の' },
-  { value: '3', label: '3か月後の' },
+  { value: '-1', label: '前月' },
+  { value: '0', label: '同じ月' },
+  { value: '1', label: '翌月' },
+  { value: '2', label: '2か月後' },
+  { value: '3', label: '3か月後' },
+];
+
+const TIMING_KIND_OPTIONS = [
+  { value: 'offset' as const, label: '日数で指定' },
+  { value: 'weekday' as const, label: '週と曜日で指定' },
+  { value: 'monthlyBusinessDay' as const, label: '月と第N営業日で指定' },
+];
+
+const UNIT_OPTIONS = [
+  { value: 'business' as const, label: '営業日' },
+  { value: 'calendar' as const, label: '暦日' },
+];
+
+const ROLE_OPTIONS = [
+  { value: 'before' as const, label: '前（準備）' },
+  { value: 'after' as const, label: '後（フォロー）' },
+];
+
+const ON_CLOSED_OPTIONS = [
+  { value: 'next' as const, label: '翌営業日へ送る' },
+  { value: 'prev' as const, label: '前営業日へ戻す' },
+  { value: 'none' as const, label: 'その日のまま' },
+];
+
+/** 月末からの指定に負の数を使わせない。繰り返し設定と同じ言い回しに揃える。 */
+const NTH_ORIGIN_OPTIONS = [
+  { value: 'start' as const, label: '月初から' },
+  { value: 'end' as const, label: '月末から' },
 ];
 
 /** 決め方を切り替えたときの初期値。役割（前・後）に近い形から始める。 */
@@ -118,6 +153,13 @@ export class RuleEditor {
   private draft: Rule;
   private readonly drafts: Record<RecurrenceKind, Recurrence>;
   private readonly recurrenceBody = h('div', { class: 'recurrence-body' });
+  /** 「→ 本体の3営業日前」の行。作り直さずに文字だけ替えるため持っておく。 */
+  private noticeHints: HTMLElement[] = [];
+  /**
+   * 前後予定ごと・決め方ごとの編集値。決め方を切り替えて戻したときに、
+   * さっきまで入れていた値を初期値で上書きしないため。
+   */
+  private readonly timingDrafts = new Map<string, Partial<Record<NoticeTiming['kind'], NoticeTiming>>>();
   private readonly previewBody = h('div', { class: 'preview-body' });
   private readonly issuesBody = h('div', { class: 'issues' });
   private readonly summaryBody = h('p', { class: 'rule-summary' });
@@ -591,9 +633,10 @@ export class RuleEditor {
             `${index + 1} 件目の起点`,
           ),
           named(
+            // 入力された数をそのまま持つ。0 を 1 に直して黙って保存すると、
+            // 画面に出ている数と保存される数が食い違う。検証で弾く。
             numberInput(Math.abs(nth), (value) => {
-              const magnitude = Math.max(1, Math.floor(value));
-              recurrence.nth[index] = fromEnd ? -magnitude : magnitude;
+              recurrence.nth[index] = fromEnd ? -value : value;
               this.refresh();
             }, { min: 1, max: 31 }),
             `${index + 1} 件目の営業日数`,
@@ -767,164 +810,104 @@ export class RuleEditor {
     }
   }
 
+  /**
+   * 前後の予定の編集。
+   *
+   * 入力欄の値と保存される値は必ず一致させる。以前は「第N営業日に 0」を
+   * 入力すると、その場で無視して前の値を残していた。画面には 0 が出たまま
+   * 説明とプレビューと保存値だけが古い値のままになり、何が保存されるのか
+   * 分からなくなっていた。おかしな値はそのまま持ち、検証で弾いて保存を止める。
+   *
+   * 打っている途中で作り直さないのも同じ理由。数値を1文字打つたびに
+   * 行ごと作り直すと入力欄から焦点が外れ、続きが打てなかった。
+   * 欄の顔ぶれが変わるとき（決め方の切り替え・追加・削除）だけ作り直す。
+   */
   private buildNotices(): HTMLElement {
     const list = h('div', { class: 'rows' });
 
-    /** 決め方を差し替える。id・名称・役割はそのまま持ち越す。 */
+    /** 値だけを差し替える。欄の顔ぶれは変えないので作り直さない。 */
     const setTiming = (index: number, timing: NoticeTiming): void => {
       const notice = this.draft.notices[index];
       if (notice === undefined) return;
       this.draft.notices[index] = { ...notice, timing };
+      this.rememberTiming(notice.id, timing);
+      this.syncNoticeHints();
+      this.refresh();
+    };
+
+    /** 決め方そのものを差し替える。欄の顔ぶれが変わるので作り直す。 */
+    const switchKind = (index: number, kind: NoticeTiming['kind']): void => {
+      const notice = this.draft.notices[index];
+      if (notice === undefined) return;
+      // 前に触っていた値があれば戻す。切り替えて戻すたびに初期値へ落ちると、
+      // 見比べるだけのつもりが設定をやり直す羽目になる。
+      const timing = this.recallTiming(notice.id, kind, roleOf(notice));
+      this.draft.notices[index] = { ...notice, timing };
+      render();
+      this.refresh();
+    };
+
+    const addNotice = (label: string, timing: NoticeTiming, role: 'before' | 'after'): void => {
+      // id を先に決める。順番ではなくこれが外部カレンダーの識別子になる。
+      this.draft.notices.push(createNotice({ label, timing, role }, this.draft.notices));
       render();
       this.refresh();
     };
 
     const render = (): void => {
       clear(list);
+      this.noticeHints = [];
+
       this.draft.notices.forEach((notice, index) => {
         const timing = timingOf(notice);
-        const label = `${index + 1} 件目`;
-
+        const ordinal = `${index + 1} 件目`;
         const rows = h('div', { class: 'notice-rows' });
 
-        // 決め方そのものの選択。ここを変えると下の入力欄が入れ替わる。
         rows.append(
           h(
             'div',
-            { class: 'row' },
-            named(
-              select(
-                [
-                  { value: 'offset', label: '日数で指定' },
-                  { value: 'weekday', label: '週と曜日で指定' },
-                  { value: 'monthlyBusinessDay', label: '月と第N営業日で指定' },
-                ],
-                timing.kind,
-                (value) => setTiming(index, defaultTimingFor(value, roleOf(notice))),
+            { class: 'notice-head' },
+            subField(
+              '予定名',
+              named(
+                textInput(notice.label, (value) => {
+                  const current = this.draft.notices[index];
+                  if (current !== undefined) current.label = value;
+                  this.syncNoticeHints();
+                  this.refresh();
+                }, '例: 振込データ作成'),
+                `${ordinal}: 予定名`,
               ),
-              `${label}: 日付の決め方`,
             ),
-            named(
-              textInput(notice.label, (value) => {
-                const current = this.draft.notices[index];
-                if (current !== undefined) current.label = value;
-              }, '例: 振込データ作成'),
-              `${label}: 表示名`,
+            subField(
+              '日付の決め方',
+              named(
+                select(TIMING_KIND_OPTIONS, timing.kind, (value) => switchKind(index, value)),
+                `${ordinal}: 日付の決め方`,
+              ),
             ),
             button('削除', () => {
               this.draft.notices.splice(index, 1);
               render();
               this.refresh();
-            }, 'button button-sm button-quiet'),
+            }, 'button button-sm button-quiet notice-remove'),
           ),
         );
 
-        if (timing.kind === 'offset') {
-          const isFollow = timing.offset > 0;
-          rows.append(
-            h(
-              'div',
-              { class: 'row' },
-              named(
-                numberInput(Math.abs(timing.offset), (value) => {
-                  const size = Math.max(1, Math.floor(Math.abs(value)));
-                  setTiming(index, { ...timing, offset: isFollow ? size : -size });
-                }, { min: 1, max: 365 }),
-                `${label}: 本体から何日か`,
-              ),
-              named(
-                select(
-                  [
-                    { value: 'business', label: '営業日' },
-                    { value: 'calendar', label: '暦日' },
-                  ],
-                  timing.unit,
-                  (value) => setTiming(index, { ...timing, unit: value }),
-                ),
-                `${label}: 単位`,
-              ),
-              named(
-                select(
-                  [
-                    { value: 'before', label: '前（準備）' },
-                    { value: 'after', label: '後（フォロー）' },
-                  ],
-                  isFollow ? 'after' : 'before',
-                  (value) => {
-                    const size = Math.abs(timing.offset);
-                    setTiming(index, { ...timing, offset: value === 'after' ? size : -size });
-                  },
-                ),
-                `${label}: 本体の前か後か`,
-              ),
-            ),
-          );
-        } else if (timing.kind === 'weekday') {
-          rows.append(
-            h(
-              'div',
-              { class: 'row' },
-              named(
-                select(
-                  WEEK_OPTIONS,
-                  String(timing.weeks),
-                  (value) => setTiming(index, { ...timing, weeks: Number(value) }),
-                ),
-                `${label}: どの週か`,
-              ),
-              named(
-                select(
-                  WEEKDAY_NAMES.map((name, weekday) => ({
-                    value: String(weekday),
-                    label: `${name}曜`,
-                  })),
-                  String(timing.weekday),
-                  (value) => setTiming(index, { ...timing, weekday: Number(value) as Weekday }),
-                ),
-                `${label}: 曜日`,
-              ),
-              named(
-                select(
-                  [
-                    { value: 'next', label: '休業日なら翌営業日へ' },
-                    { value: 'prev', label: '休業日なら前営業日へ' },
-                    { value: 'none', label: '休業日でもその日' },
-                  ],
-                  timing.onClosed,
-                  (value) => setTiming(index, { ...timing, onClosed: value }),
-                ),
-                `${label}: 曜日が休業日のとき`,
-              ),
-            ),
-          );
-        } else {
-          rows.append(
-            h(
-              'div',
-              { class: 'row' },
-              named(
-                select(
-                  MONTH_OPTIONS,
-                  String(timing.months),
-                  (value) => setTiming(index, { ...timing, months: Number(value) }),
-                ),
-                `${label}: どの月か`,
-              ),
-              named(
-                numberInput(timing.nth, (value) => {
-                  const nth = Math.trunc(value);
-                  if (nth === 0) return;
-                  setTiming(index, { ...timing, nth });
-                }, { min: -25, max: 25 }),
-                `${label}: 第N営業日（負は月末から）`,
-              ),
-              h('span', { class: 'unit' }, timing.nth > 0 ? '営業日（月初から）' : '営業日（月末から）'),
-            ),
-          );
-        }
+        rows.append(
+          this.buildTimingRow(
+            // 「月末から」を選んだ直後に日数を打つ、のように欄どうしが影響し合う。
+            // 作った時点の値を握ったままだと、片方の変更がもう片方に無視される。
+            () => timingOf(this.draft.notices[index] ?? notice),
+            ordinal,
+            (next) => setTiming(index, next),
+          ),
+        );
 
         // 何が起きるかを文章でも出す。設定欄だけでは読み取りにくいため。
-        rows.append(h('p', { class: 'field-hint' }, `→ 本体の${describeTiming(timing)}`));
+        const hint = h('p', { class: 'field-hint notice-summary' });
+        this.noticeHints.push(hint);
+        rows.append(hint);
         list.append(h('div', { class: 'notice-item' }, rows));
       });
 
@@ -933,28 +916,14 @@ export class RuleEditor {
           'div',
           { class: 'row' },
           button('＋ 準備日を追加（前）', () => {
-            // id を先に決める。順番ではなくこれが外部カレンダーの識別子になる。
-            this.draft.notices.push(
-              createNotice(
-                { label: '準備', timing: { kind: 'offset', offset: -3, unit: 'business' }, role: 'before' },
-                this.draft.notices,
-              ),
-            );
-            render();
-            this.refresh();
+            addNotice('準備', { kind: 'offset', offset: -3, unit: 'business' }, 'before');
           }, 'button button-sm'),
           button('＋ フォローを追加（後）', () => {
-            this.draft.notices.push(
-              createNotice(
-                { label: 'フォロー', timing: { kind: 'offset', offset: 3, unit: 'business' }, role: 'after' },
-                this.draft.notices,
-              ),
-            );
-            render();
-            this.refresh();
+            addNotice('フォロー', { kind: 'offset', offset: 3, unit: 'business' }, 'after');
           }, 'button button-sm'),
         ),
       );
+      this.syncNoticeHints();
     };
     render();
 
@@ -979,6 +948,175 @@ export class RuleEditor {
     );
   }
 
+  /**
+   * 決め方ごとの入力欄。ここで作る欄の顔ぶれは決め方の中では変わらない。
+   *
+   * 今の値は握らずに `read()` で毎回取り直す。「月末から」を選んでから日数を打つ、
+   * のように欄どうしが影響し合うため、作った時点の値を握ったままだと
+   * 片方の変更をもう片方が無視して打ち消してしまう。
+   */
+  private buildTimingRow(
+    read: () => NoticeTiming,
+    ordinal: string,
+    onChange: (next: NoticeTiming) => void,
+  ): HTMLElement {
+    const timing = read();
+    if (timing.kind === 'offset') {
+      /** 今の設定。日数側と向き側が互いを打ち消さないよう毎回取り直す。 */
+      const current = (): { offset: number; unit: 'business' | 'calendar' } => {
+        const now = read();
+        return now.kind === 'offset' ? now : timing;
+      };
+      return h(
+        'div',
+        { class: 'row notice-row' },
+        subField(
+          '本体から',
+          named(
+            // 入力された数をそのまま持つ。0 や空欄は検証で弾く。
+            numberInput(Math.abs(timing.offset), (value) => {
+              const now = current();
+              onChange({ kind: 'offset', unit: now.unit, offset: now.offset < 0 ? -value : value });
+            }, { min: 1, max: 365 }),
+            `${ordinal}: 本体から何日か`,
+          ),
+        ),
+        subField(
+          '単位',
+          named(
+            select(UNIT_OPTIONS, timing.unit, (value) =>
+              onChange({ kind: 'offset', offset: current().offset, unit: value }),
+            ),
+            `${ordinal}: 単位`,
+          ),
+        ),
+        subField(
+          '前か後か',
+          named(
+            select(ROLE_OPTIONS, timing.offset < 0 ? 'before' : 'after', (value) => {
+              const now = current();
+              const size = Math.abs(now.offset);
+              onChange({ kind: 'offset', unit: now.unit, offset: value === 'after' ? size : -size });
+            }),
+            `${ordinal}: 本体の前か後か`,
+          ),
+        ),
+      );
+    }
+
+    if (timing.kind === 'weekday') {
+      const current = (): typeof timing => {
+        const now = read();
+        return now.kind === 'weekday' ? now : timing;
+      };
+      return h(
+        'div',
+        { class: 'row notice-row' },
+        subField(
+          'どの週',
+          named(
+            select(WEEK_OPTIONS, String(timing.weeks), (value) =>
+              onChange({ ...current(), weeks: Number(value) }),
+            ),
+            `${ordinal}: どの週か`,
+          ),
+        ),
+        subField(
+          '曜日',
+          named(
+            select(
+              WEEKDAY_NAMES.map((name, weekday) => ({ value: String(weekday), label: `${name}曜` })),
+              String(timing.weekday),
+              (value) => onChange({ ...current(), weekday: Number(value) as Weekday }),
+            ),
+            `${ordinal}: 曜日`,
+          ),
+        ),
+        subField(
+          'その日が休業日なら',
+          named(
+            select(ON_CLOSED_OPTIONS, timing.onClosed, (value) =>
+              onChange({ ...current(), onClosed: value }),
+            ),
+            `${ordinal}: 曜日が休業日のとき`,
+          ),
+        ),
+      );
+    }
+
+    // 月末からの指定に負の数を使わせない。繰り返し設定と同じ「月初から／月末から」
+    // ＋営業日数の形にする。負数が要ることは読み上げ用のラベルにしか書けておらず、
+    // 画面を見ているだけでは気づけなかった。
+    const current = (): typeof timing => {
+      const now = read();
+      return now.kind === 'monthlyBusinessDay' ? now : timing;
+    };
+    return h(
+      'div',
+      { class: 'row notice-row' },
+      subField(
+        'どの月',
+        named(
+          select(MONTH_OPTIONS, String(timing.months), (value) =>
+            onChange({ ...current(), months: Number(value) }),
+          ),
+          `${ordinal}: どの月か`,
+        ),
+      ),
+      subField(
+        '数え方',
+        named(
+          select(NTH_ORIGIN_OPTIONS, timing.nth < 0 ? 'end' : 'start', (value) => {
+            const size = Math.abs(current().nth);
+            onChange({ ...current(), nth: value === 'end' ? -size : size });
+          }),
+          `${ordinal}: 月初から数えるか月末から数えるか`,
+        ),
+      ),
+      subField(
+        '営業日',
+        h(
+          'div',
+          { class: 'inline' },
+          named(
+            // 0 も空欄もそのまま持つ。前の値をこっそり残さない。
+            numberInput(Math.abs(timing.nth), (value) => {
+              const now = current();
+              onChange({ ...now, nth: now.nth < 0 ? -value : value });
+            }, { min: 1, max: 25 }),
+            `${ordinal}: 営業日数`,
+          ),
+          h('span', { class: 'unit' }, '営業日目'),
+        ),
+      ),
+    );
+  }
+
+  /** 決め方ごとの編集値を覚えておく。切り替えて戻したときに初期値へ落とさないため。 */
+  private rememberTiming(noticeId: string | undefined, timing: NoticeTiming): void {
+    if (noticeId === undefined) return;
+    const kept = this.timingDrafts.get(noticeId) ?? {};
+    kept[timing.kind] = timing;
+    this.timingDrafts.set(noticeId, kept);
+  }
+
+  private recallTiming(
+    noticeId: string | undefined,
+    kind: NoticeTiming['kind'],
+    role: 'before' | 'after',
+  ): NoticeTiming {
+    const kept = noticeId === undefined ? undefined : this.timingDrafts.get(noticeId)?.[kind];
+    return kept ?? defaultTimingFor(kind, role);
+  }
+
+  /** 「→ 本体の3営業日前」の行を今の設定に合わせる。作り直さずに文字だけ替える。 */
+  private syncNoticeHints(): void {
+    this.draft.notices.forEach((notice, index) => {
+      const hint = this.noticeHints[index];
+      if (hint === undefined) return;
+      hint.textContent = `→ 本体の${describeTiming(timingOf(notice))}`;
+    });
+  }
   private buildPeriod(): HTMLElement {
     return h(
       'section',
@@ -1119,20 +1257,39 @@ export class RuleEditor {
     // 直近の1組を、詳細を開かずに見せる。設定項目だけでは結果が想像しにくく、
     // 「次の10回をすべて見る」を開かないと確かめられないのは遠い。
     clear(this.nextDates);
+    const dayLabel = (date: string): string =>
+      `${date}（${WEEKDAY_NAMES[weekdayOf(date)] ?? ''}）`;
+
     const first = series[0];
     if (first !== undefined) {
+      // 曜日まで出す。「翌週水曜」のように曜日で決めた設定は、日付だけでは
+      // 合っているか確かめられない。
       const chain: string[] = [];
       for (const item of first.related) {
-        if (item.date < first.main.date) chain.push(`${item.date} ${item.noticeLabel ?? '準備'}`);
+        if (item.date < first.main.date) chain.push(`${dayLabel(item.date)} ${item.noticeLabel ?? '準備'}`);
       }
-      chain.push(`${first.main.date} ${this.draft.title === '' ? '（この予定）' : this.draft.title}`);
+      chain.push(
+        `${dayLabel(first.main.date)} ${this.draft.title === '' ? '（この予定）' : this.draft.title}`,
+      );
       for (const item of first.related) {
-        if (item.date >= first.main.date) chain.push(`${item.date} ${item.noticeLabel ?? 'フォロー'}`);
+        if (item.date >= first.main.date) chain.push(`${dayLabel(item.date)} ${item.noticeLabel ?? 'フォロー'}`);
       }
       this.nextDates.append(
         h('span', { class: 'next-dates-label' }, '直近:'),
         h('span', { class: 'next-dates-chain' }, chain.join(' → ')),
       );
+      // なぜその日になったのか。記号だけだと設定と結果が結び付かない。
+      if (first.main.shifted) {
+        this.nextDates.append(
+          h(
+            'span',
+            { class: 'next-dates-note' },
+            `${dayLabel(first.main.rawDate)}が休業日のため${
+              first.main.shiftDirection === 'prev' ? '前営業日へ' : '翌営業日へ'
+            }`,
+          ),
+        );
+      }
     }
     if (occurrences.length === 0) {
       this.previewBody.append(
@@ -1141,11 +1298,25 @@ export class RuleEditor {
       return;
     }
 
-    const dayLabel = (date: string): string =>
-      `${date}（${WEEKDAY_NAMES[weekdayOf(date)] ?? ''}）`;
+    // 日付を決められなかった前後予定は、保存する前に理由ごと見せる。
+    // プレビューから黙って消えるだけだと「設定したのに出ない」に気づけない。
+    const unresolved = new Map<string, string>();
+    const crossed = new Map<string, string>();
+    for (const item of series) {
+      for (const { notice, reason } of item.unresolved) {
+        unresolved.set(`${notice.id ?? notice.label}-${reason}`, `「${notice.label}」は ${reason}`);
+      }
+      for (const warning of item.warnings) crossed.set(warning.message, warning.message);
+    }
+    for (const message of unresolved.values()) {
+      this.previewBody.append(h('p', { class: 'issue issue-warning' }, `日付を決められません: ${message}`));
+    }
+    for (const message of crossed.values()) {
+      this.previewBody.append(h('p', { class: 'issue issue-warning' }, message));
+    }
 
     const list = h('ol', { class: 'preview-list' });
-    for (const { main, related } of series) {
+    for (const { main, related, unresolved: missing } of series) {
       const item = h(
         'li',
         { class: main.shifted ? 'is-shifted' : '' },
@@ -1166,7 +1337,7 @@ export class RuleEditor {
 
       // 前後の予定も実際の日付で並べる。本体の日付しか出していなかったため、
       // 「3営業日前」と「3営業日後」を取り違えていても画面で気づけなかった。
-      if (related.length > 0) {
+      if (related.length > 0 || missing.length > 0) {
         const chain = h('ul', { class: 'preview-related' });
         for (const item2 of related) {
           chain.append(
@@ -1176,6 +1347,18 @@ export class RuleEditor {
               h('span', { class: 'preview-related-mark' }, item2.kind === 'follow' ? '↓後' : '↑前'),
               h('span', { class: 'preview-date' }, dayLabel(item2.date)),
               h('span', { class: 'preview-related-label' }, item2.noticeLabel ?? ''),
+            ),
+          );
+        }
+        // 消さずに、その回ごとに「計算できません」と理由を残す。
+        for (const { notice, reason } of missing) {
+          chain.append(
+            h(
+              'li',
+              { class: 'preview-related-item is-unresolved' },
+              h('span', { class: 'preview-related-mark' }, '—'),
+              h('span', { class: 'preview-date' }, '計算できません'),
+              h('span', { class: 'preview-related-label' }, `${notice.label}: ${reason}`),
             ),
           );
         }

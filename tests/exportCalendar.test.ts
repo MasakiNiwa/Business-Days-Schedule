@@ -13,6 +13,7 @@ import {
   escapeCsvField,
   escapeIcsText,
   exportCalendarFileName,
+  exportWarningPrompt,
   foldIcsLine,
   toCsvDate,
 } from '../src/core/exportCalendar';
@@ -258,5 +259,73 @@ describe('exportCalendarFileName', () => {
     expect(exportCalendarFileName('2026-09-05', '2026-12-31', 'csv')).toBe(
       'business-days-20260905-20261231.csv',
     );
+  });
+});
+
+describe('exportWarningPrompt', () => {
+  const unresolved = {
+    ruleId: 'r',
+    rawDate: '2026-09-10',
+    reason: 'notice-unresolved' as const,
+    noticeRole: 'after' as const,
+    message: '「月次締め」の翌月の第25営業日（確定処理）は日付を決められませんでした',
+  };
+  const crossed = {
+    ruleId: 'r',
+    rawDate: '2026-09-20',
+    reason: 'notice-role-mismatch' as const,
+    noticeRole: 'after' as const,
+    message: '「週次報告」の翌週の月曜（提出）は、本体より後のつもりの設定ですが 2026-09-18 に出ます',
+  };
+  const both = { includeNotices: true, includeFollows: true };
+
+  it('警告が無ければ確認を挟まない', () => {
+    expect(exportWarningPrompt([], both)).toBeNull();
+  });
+
+  it('日付を決められないものは「書き出されません」と言う', () => {
+    const prompt = exportWarningPrompt([unresolved], both) ?? '';
+    expect(prompt).toContain('日付を決められないため書き出されません');
+    expect(prompt).toContain('確定処理');
+  });
+
+  it('前後が逆転しただけのものを「書き出されません」に混ぜない', () => {
+    // 日付は決まっており、予定は書き出される。混ぜると、出ているものを
+    // 出ていないと読ませてしまう。
+    const prompt = exportWarningPrompt([crossed], both) ?? '';
+    expect(prompt).toContain('書き出しますが');
+    expect(prompt).not.toContain('書き出されません');
+  });
+
+  it('両方あれば別々の段落にする', () => {
+    const prompt = exportWarningPrompt([unresolved, crossed], both) ?? '';
+    expect(prompt).toContain('日付を決められないため書き出されません');
+    expect(prompt).toContain('本体との前後が設定と逆になっています');
+    expect(prompt.split('\n\n')).toHaveLength(2);
+  });
+
+  it('書き出しに含めない側の警告は出さない', () => {
+    // フォローを外しているなら、フォローの話をしても書き出す中身と関係がない。
+    expect(exportWarningPrompt([unresolved, crossed], { includeNotices: true, includeFollows: false })).toBeNull();
+    const asPrep = { ...unresolved, noticeRole: 'before' as const };
+    expect(exportWarningPrompt([asPrep], { includeNotices: false, includeFollows: true })).toBeNull();
+    expect(exportWarningPrompt([asPrep], { includeNotices: true, includeFollows: false })).not.toBeNull();
+  });
+
+  it('前後予定に紐づかない警告は、含める設定にかかわらず出す', () => {
+    const missingCalendar = {
+      ruleId: 'r',
+      rawDate: null,
+      reason: 'unknown-calendar' as const,
+      message: 'カレンダーが見つかりません',
+    };
+    expect(
+      exportWarningPrompt([missingCalendar], { includeNotices: false, includeFollows: false }),
+    ).toContain('カレンダーが見つかりません');
+  });
+
+  it('同じ文言は1度だけ出す', () => {
+    const prompt = exportWarningPrompt([unresolved, { ...unresolved, rawDate: '2026-10-10' }], both) ?? '';
+    expect(prompt.split('確定処理')).toHaveLength(2);
   });
 });
