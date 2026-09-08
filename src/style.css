@@ -2369,3 +2369,21 @@ main:focus {
     cursor: auto;
   }
 }
+
+/*
+ * 書き出し前の説明。押す前に知っておくことだけ常に出し、手順は畳む。
+ * 長い説明が先に立つと、肝心の期間や形式の設定まで遠くなる。
+ */
+.callout-lead {
+  font-weight: 600;
+}
+
+.export-howto > summary {
+  cursor: pointer;
+  padding: 0.35rem 0;
+  font-weight: 600;
+}
+
+.export-howto p {
+  margin: 0.35rem 0 0;
+}

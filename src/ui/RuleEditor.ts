@@ -200,7 +200,10 @@ export class RuleEditor {
       this.buildBasics(),
       this.buildRecurrence(),
       this.buildAdjust(),
-      this.buildNotices(),
+      // 前後の予定は使わない人のほうが多い。既定では畳んで、いつ行うかを
+      // 決め終えるまでの道のりを短くする。既に付けてあるなら開いて出す。
+      h('details', { class: 'advanced-options', open: this.draft.notices.length > 0 },
+        h('summary', {}, '3. 準備や確認の予定を付ける（任意）'), this.buildNotices()),
       h('details', { class: 'advanced-options', open: !this.isNew || this.draft.period.start !== null || this.draft.skipDates.length > 0 },
         h('summary', {}, '詳細設定（期間・除外日）'), this.buildPeriod(), this.buildSkipDates()),
       h('details', { class: 'advanced-options' }, h('summary', {}, '次の10回をすべて見る'), this.buildPreview()),
@@ -280,6 +283,9 @@ export class RuleEditor {
     return h(
       'section',
       { class: 'editor-section' },
+      // どこまで進んだかが分かるよう、常に出る節に番号を振る。
+      // ひな型は近道であって手順の1つではないので、番号を持たせない。
+      h('h3', { class: 'editor-heading' }, '1. 何の予定ですか？'),
       field('タイトル', title),
       field(
         '営業日カレンダー',
@@ -339,7 +345,7 @@ export class RuleEditor {
     return h(
       'section',
       { class: 'editor-section' },
-      h('h3', { class: 'editor-heading' }, '繰り返し'),
+      h('h3', { class: 'editor-heading' }, '2. いつ行いますか？（繰り返し）'),
       tabs,
       this.recurrenceBody,
     );
@@ -967,6 +973,14 @@ export class RuleEditor {
         const now = read();
         return now.kind === 'offset' ? now : timing;
       };
+      /**
+       * 前か後かは符号ではなくこの旗で覚える。
+       *
+       * 打ち直そうとして欄を空にすると値は 0 になり、負を保つつもりで -0 を
+       * 書き戻すことになる。JavaScript では `-0 < 0` が false なので、
+       * 次の1文字で「前」が黙って「後」へ変わってしまう。
+       */
+      let follow = timing.offset >= 0;
       return h(
         'div',
         { class: 'row notice-row' },
@@ -975,8 +989,7 @@ export class RuleEditor {
           named(
             // 入力された数をそのまま持つ。0 や空欄は検証で弾く。
             numberInput(Math.abs(timing.offset), (value) => {
-              const now = current();
-              onChange({ kind: 'offset', unit: now.unit, offset: now.offset < 0 ? -value : value });
+              onChange({ kind: 'offset', unit: current().unit, offset: follow ? value : -value });
             }, { min: 1, max: 365 }),
             `${ordinal}: 本体から何日か`,
           ),
@@ -993,10 +1006,11 @@ export class RuleEditor {
         subField(
           '前か後か',
           named(
-            select(ROLE_OPTIONS, timing.offset < 0 ? 'before' : 'after', (value) => {
+            select(ROLE_OPTIONS, follow ? 'after' : 'before', (value) => {
+              follow = value === 'after';
               const now = current();
               const size = Math.abs(now.offset);
-              onChange({ kind: 'offset', unit: now.unit, offset: value === 'after' ? size : -size });
+              onChange({ kind: 'offset', unit: now.unit, offset: follow ? size : -size });
             }),
             `${ordinal}: 本体の前か後か`,
           ),
@@ -1051,6 +1065,9 @@ export class RuleEditor {
       const now = read();
       return now.kind === 'monthlyBusinessDay' ? now : timing;
     };
+    // 月初からか月末からかも符号ではなく旗で覚える。欄を空にすると 0 になり、
+    // -0 を書き戻しても `-0 < 0` は false なので数え方が黙って入れ替わる。
+    let fromEnd = timing.nth < 0;
     return h(
       'div',
       { class: 'row notice-row' },
@@ -1066,9 +1083,10 @@ export class RuleEditor {
       subField(
         '数え方',
         named(
-          select(NTH_ORIGIN_OPTIONS, timing.nth < 0 ? 'end' : 'start', (value) => {
+          select(NTH_ORIGIN_OPTIONS, fromEnd ? 'end' : 'start', (value) => {
+            fromEnd = value === 'end';
             const size = Math.abs(current().nth);
-            onChange({ ...current(), nth: value === 'end' ? -size : size });
+            onChange({ ...current(), nth: fromEnd ? -size : size });
           }),
           `${ordinal}: 月初から数えるか月末から数えるか`,
         ),
@@ -1081,8 +1099,7 @@ export class RuleEditor {
           named(
             // 0 も空欄もそのまま持つ。前の値をこっそり残さない。
             numberInput(Math.abs(timing.nth), (value) => {
-              const now = current();
-              onChange({ ...now, nth: now.nth < 0 ? -value : value });
+              onChange({ ...current(), nth: fromEnd ? -value : value });
             }, { min: 1, max: 25 }),
             `${ordinal}: 営業日数`,
           ),

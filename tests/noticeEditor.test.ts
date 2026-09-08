@@ -256,3 +256,42 @@ describe('直近1組', () => {
     );
   });
 });
+
+describe('打ち直しても向きが変わらない', () => {
+  /**
+   * 欄を空にすると値は 0 になり、負を保つつもりで -0 を書き戻すことになる。
+   * JavaScript では `-0 < 0` が false なので、符号で向きを覚えていると
+   * 次の1文字で「前」が黙って「後」に変わってしまっていた。
+   */
+  it('日数を打ち直しても「前」のまま', () => {
+    const { form, handlers } = open(byDays(-3));
+    const days = at(form, '1 件目: 本体から何日か');
+    type(days, '');
+    type(days, '1');
+    type(days, '12');
+
+    expect(at(form, '1 件目: 本体の前か後か').value).toBe('before');
+    expect(form.querySelector('.notice-summary')?.textContent).toBe('→ 本体の12営業日前');
+    expect(save(form, handlers)?.notices[0]?.timing).toMatchObject({ offset: -12 });
+  });
+
+  it('営業日数を打ち直しても「月末から」のまま', () => {
+    const { form, handlers } = open(monthly(-3));
+    const days = at(form, '1 件目: 営業日数');
+    type(days, '');
+    type(days, '2');
+
+    expect(at(form, '1 件目: 月初から数えるか月末から数えるか').value).toBe('end');
+    expect(save(form, handlers)?.notices[0]?.timing).toMatchObject({ nth: -2 });
+  });
+
+  it('向きを変えたあとに打ち直しても、変えた向きのまま', () => {
+    const { form, handlers } = open(byDays(-3));
+    choose(at(form, '1 件目: 本体の前か後か'), 'after');
+    const days = at(form, '1 件目: 本体から何日か');
+    type(days, '');
+    type(days, '7');
+
+    expect(save(form, handlers)?.notices[0]?.timing).toMatchObject({ offset: 7 });
+  });
+});

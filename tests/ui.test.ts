@@ -282,7 +282,7 @@ describe('renderRuleList', () => {
   it('ルールが無ければサンプル読み込みを促す', () => {
     const h = handlers();
     const section = renderRuleList([], calendars, h);
-    clickByText(section, 'サンプルを読み込む');
+    clickByText(section, '完成例を見る');
     expect(h.onLoadSamples).toHaveBeenCalledOnce();
   });
 
