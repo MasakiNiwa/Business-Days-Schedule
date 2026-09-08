@@ -186,9 +186,9 @@ test.describe('入力欄の名前', () => {
     await openRulePanel(page);
     await page.getByRole('button', { name: '＋ 新規ルール' }).click();
 
-    await expect(page.getByLabel('補正', { exact: true })).toBeVisible();
+    await expect(page.getByLabel('休業日の場合', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: '第N営業日' }).click();
-    await expect(page.getByLabel('補正', { exact: true })).toBeHidden();
+    await expect(page.getByLabel('休業日の場合', { exact: true })).toBeHidden();
     await expect(page.locator('.editor-section').filter({ hasText: '休業日にあたったとき' })).toContainText(
       '補正の設定はありません',
     );
@@ -265,7 +265,9 @@ test('給与のひな型から1件保存できる', async ({ page }) => {
   await expect(page.getByLabel('タイトル')).toHaveValue('給与振込');
   await expect(page.getByLabel('営業日カレンダー')).toHaveValue('bank');
   await expect(page.locator('.rule-summary')).toContainText('25日');
-  await expect(page.locator('.next-dates')).toContainText('次回から');
+  // 詳細を開かなくても、直近の日付が見えること。
+  await expect(page.locator('.next-dates')).toContainText('直近');
+  await expect(page.locator('.next-dates-chain')).toContainText('給与振込');
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await page.reload();
   await openRulePanel(page);

@@ -11,8 +11,8 @@
  */
 
 import { createHash } from 'node:crypto';
-import { readFile, readdir, writeFile } from 'node:fs/promises';
-import { join, relative, resolve } from 'node:path';
+import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(import.meta.url), '../..');
@@ -107,7 +107,24 @@ self.addEventListener('fetch', (event) => {
 `;
 }
 
+/**
+ * 同梱している祝日データを、公開成果物にも1つ置く。
+ *
+ * アプリは実行時にこれを読まない（同梱ぶんを使う。§3.5）。置く理由は、
+ * 「いま公開されているのがどの版か」を次のデプロイから読み戻せるようにするため。
+ * これが無いと、取得に失敗したときの代替がリポジトリの版だけになり、
+ * 週次で更新したぶんを巻き戻してしまう（§3.4）。
+ */
+async function copyHolidaySnapshot(): Promise<void> {
+  const source = join(ROOT, 'src/data/holidays.json');
+  const target = join(DIST, 'data/holidays.json');
+  await mkdir(dirname(target), { recursive: true });
+  await copyFile(source, target);
+  console.log(`公開中の版として ${relative(ROOT, target)} を置きました。`);
+}
+
 async function main(): Promise<void> {
+  await copyHolidaySnapshot();
   const files = await collectFiles(DIST);
   const assets: string[] = [BASE];
   const hash = createHash('sha256');

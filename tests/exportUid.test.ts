@@ -83,3 +83,58 @@ describe('UID は書き出す期間に依存しない', () => {
     }
   });
 });
+
+describe('前後の予定を消しても、残ったものの UID が変わらない', () => {
+  /** レビューの再現手順: 1営業日後「着金確認」と3営業日後「消込確認」。 */
+  const withBoth = makeRule({
+    id: 'ar2',
+    title: '請求',
+    recurrence: { type: 'monthlyByDay', interval: 1, days: [10], overflow: 'clamp' },
+    adjust: { mode: 'none', keepInMonth: false },
+    notices: [
+      { id: 'n0', offset: 1, unit: 'business', label: '着金確認' },
+      { id: 'n1', offset: 3, unit: 'business', label: '消込確認' },
+    ],
+  });
+
+  it('先頭を消しても、残ったものは自分の UID を保つ', () => {
+    // 順番を使っていたため、消込確認が着金確認の UID を引き継いでいた。
+    const before = uidsByDate(withBoth, '2026-09-01', '2026-09-30');
+    const afterDelete = makeRule({ ...withBoth, notices: [withBoth.notices[1]!] });
+    const after = uidsByDate(afterDelete, '2026-09-01', '2026-09-30');
+
+    // 消込確認が出る日（3営業日後）の UID が変わっていないこと。
+    for (const [date, uid] of after) {
+      expect(before.get(date), `${date}`).toBe(uid);
+    }
+    // 消した着金確認の UID を、誰も引き継いでいないこと。
+    const removed = [...before.entries()].find(([date]) => !after.has(date))?.[1];
+    expect(removed).toBeDefined();
+    expect([...after.values()]).not.toContain(removed);
+  });
+
+  it('並べ替えても UID が入れ替わらない', () => {
+    const reordered = makeRule({
+      ...withBoth,
+      notices: [withBoth.notices[1]!, withBoth.notices[0]!],
+    });
+    const before = uidsByDate(withBoth, '2026-09-01', '2026-09-30');
+    const after = uidsByDate(reordered, '2026-09-01', '2026-09-30');
+    expect([...after.entries()].sort()).toEqual([...before.entries()].sort());
+  });
+
+  it('id を持たない古いデータは、今の順番から引き継いで UID を変えない', () => {
+    // 移行の時点で既存の書き出しと食い違わせない。
+    const legacy = makeRule({
+      ...withBoth,
+      id: 'legacy',
+      notices: [
+        { offset: 1, unit: 'business', label: '着金確認' },
+        { offset: 3, unit: 'business', label: '消込確認' },
+      ],
+    });
+    const uids = [...uidsByDate(legacy, '2026-09-01', '2026-09-30').values()];
+    expect(uids.some((uid) => uid.includes('-n0@'))).toBe(true);
+    expect(uids.some((uid) => uid.includes('-n1@'))).toBe(true);
+  });
+});

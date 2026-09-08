@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { expandRules, followRangeStart, noticeDateOf } from '../src/core/schedule';
+import { expandRules, followRangeStart, noticeDateOf, previewSeries } from '../src/core/schedule';
 import { describeNotice } from '../src/core/describe';
 import { companyCalendar, makeCalendar, makeRule, scheduleContext } from './helpers';
 import type { Occurrence } from '../src/types';
@@ -205,5 +205,51 @@ describe('日付を決められない前後の予定', () => {
   it('数えられるときは警告を出さない', () => {
     const result = expandRules([invoice], { start: '2026-09-01', end: '2026-09-30' }, scheduleContext);
     expect(result.warnings).toEqual([]);
+  });
+});
+
+describe('プレビューの前後の予定（探索範囲の境目）', () => {
+  it('探索の区切りをまたぐフォローも欠けない', () => {
+    // レビューの再現手順: 2026年9月から見て、本体 2027-08-25、10日後のフォロー 2027-09-04。
+    // 内部で1年ずつ探索していたため、区切り（2027-08-31）の外にあるフォローが
+    // 切り落とされ、プレビューだけ実際の表示と食い違っていた。
+    const rule = makeRule({
+      id: 'edge',
+      title: '年次締め',
+      recurrence: { type: 'monthlyByDay', interval: 1, months: [8], days: [25], overflow: 'clamp' },
+      adjust: { mode: 'none', keepInMonth: false },
+      notices: [{ offset: 10, unit: 'calendar', label: '確認' }],
+    });
+
+    const series = previewSeries(rule, '2026-09-01', 3, scheduleContext);
+    expect(series[0]?.main.date).toBe('2027-08-25');
+    expect(series[0]?.related.map((r) => r.date)).toEqual(['2027-09-04']);
+    // 2回目以降も同じように出ること。
+    for (const item of series) expect(item.related, item.main.date).toHaveLength(1);
+  });
+
+  it('プレビューの前後の予定は、実際の展開と同じ日付になる', () => {
+    const rule = makeRule({
+      id: 'agree',
+      title: '請求',
+      recurrence: { type: 'monthlyByDay', interval: 1, days: [25], overflow: 'clamp' },
+      adjust: { mode: 'prev', keepInMonth: false },
+      notices: [
+        { offset: -3, unit: 'business', label: '準備' },
+        { offset: 2, unit: 'business', label: '確認' },
+      ],
+    });
+    const [first] = previewSeries(rule, '2026-09-01', 1, scheduleContext);
+    expect(first).toBeDefined();
+
+    // 準備日は本体より前に出るので、比較する範囲は本体より前から取る。
+    const expanded = expandRules(
+      [rule],
+      { start: '2026-09-01', end: '2026-12-31' },
+      scheduleContext,
+    ).occurrences.filter((o) => o.kind !== 'main' && o.rawDate === first!.main.date);
+    expect(first!.related.map((r) => r.date)).toEqual(
+      expanded.map((o) => o.date).sort(),
+    );
   });
 });

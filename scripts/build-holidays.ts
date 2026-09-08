@@ -152,14 +152,39 @@ export function validatePublishedHolidays(data: HolidayData, year: number): void
  * 上書きしてしまう。祝日の更新だけが目的の実行では代替を使わない
  * （--require-fresh。§3.4）。
  */
-async function existingIsUsable(year: number): Promise<boolean> {
+async function readLocal(year: number): Promise<HolidayData | null> {
   try {
     const data = JSON.parse(await readFile(OUTPUT_PATH, 'utf-8')) as HolidayData;
     validatePublishedHolidays(data, year);
-    return true;
+    return data;
   } catch {
-    return false;
+    return null;
   }
+}
+
+/**
+ * いま公開されているデータ。ビルドのたびに公開成果物へ同じ JSON を置いてあるので、
+ * そこから読み戻せる（アプリは実行時に読まない。§3.5）。
+ *
+ * これが無いと、代替に使えるのはリポジトリの版だけになる。週次で新しい祝日を
+ * 公開したあとリポジトリを更新していないと、次のコード公開で古い版へ巻き戻る。
+ */
+async function readPublished(url: string, year: number): Promise<HolidayData | null> {
+  try {
+    const data = JSON.parse(await fetchText(url)) as HolidayData;
+    validatePublishedHolidays(data, year);
+    return data;
+  } catch (error: unknown) {
+    console.error(`公開中の祝日データを読めませんでした: ${String(error)}`);
+    return null;
+  }
+}
+
+/** 取得時刻の新しいほうを選ぶ。読めなかったものは候補から外す。 */
+export function newerOf(a: HolidayData | null, b: HolidayData | null): HolidayData | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  return Date.parse(a.meta.fetchedAt) >= Date.parse(b.meta.fetchedAt) ? a : b;
 }
 
 /** GitHub Actions へ結果を渡す。ワークフロー側が公開の可否を決められるようにする。 */
@@ -176,6 +201,9 @@ async function main(): Promise<void> {
   // 代替は「リポジトリの版」であって「公開中の版」ではないため、
   // 使うと公開中のデータを古い版へ巻き戻しかねない。
   const requireFresh = process.argv.includes('--require-fresh');
+  // 公開中のデータの置き場所。渡されていれば、代替の候補として読みに行く。
+  const publishedIndex = process.argv.indexOf('--published-url');
+  const publishedUrl = publishedIndex === -1 ? undefined : process.argv[publishedIndex + 1];
 
   let data: HolidayData;
   let sourceSha: string;
@@ -193,17 +221,31 @@ async function main(): Promise<void> {
       console.error('更新が目的の実行のため、既存データでの続行はしません。');
       throw error;
     }
-    if (await existingIsUsable(year)) {
-      // 既存データは検査を通っている。更新できなかっただけなので、公開は続ける。
-      // ただし公開中の版より古い可能性があるため、黙って通さず警告として残す。
-      console.log(`既存の ${OUTPUT_PATH} をそのまま使います（今回は更新しません）。`);
-      console.log(
-        '::warning::祝日データを更新できませんでした。リポジトリの版で公開します（公開中の版より古い可能性があります）。',
-      );
-      return;
+
+    // 代替は「リポジトリの版」と「いま公開中の版」の新しいほうを使う。
+    // リポジトリの版だけに落とすと、週次で更新したぶんを巻き戻してしまう。
+    const local = await readLocal(year);
+    const published =
+      publishedUrl === undefined ? null : await readPublished(publishedUrl, year);
+    const fallback = newerOf(local, published);
+    if (fallback === null) {
+      // 手元にも公開先にも使えるデータが無いなら、ここで止めるほかない。
+      throw error;
     }
-    // 手元に使えるデータが無いなら、ここで止めるほかない。
-    throw error;
+
+    const source = fallback === published ? '公開中の版' : `リポジトリの版（${OUTPUT_PATH}）`;
+    if (fallback !== local) {
+      await mkdir(dirname(OUTPUT_PATH), { recursive: true });
+      await writeFile(OUTPUT_PATH, `${JSON.stringify(fallback, null, 2)}\n`, 'utf-8');
+    }
+    console.log(`${source}をそのまま使います（今回は更新しません）。`);
+    console.log(
+      `::warning::祝日データを更新できませんでした。${source}（取得 ${fallback.meta.fetchedAt.slice(
+        0,
+        10,
+      )}）で公開します。`,
+    );
+    return;
   }
   await reportRefreshed(true);
 

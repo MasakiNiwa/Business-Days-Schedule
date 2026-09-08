@@ -40,13 +40,18 @@ jobs:
       # すぐ 403 になる。実際にそれで公開が止まったので、トークンを渡す。
       #
       # 取れなかったときの扱いは、実行のきっかけで変える。
-      #   push / 手動 … リポジトリの既存データで公開を続ける（目的はコードの公開）
+      #   push / 手動 … 代替データで公開を続ける（目的はコードの公開）
       #   週次        … 何も公開しない（目的は祝日の更新そのもの）
-      # 代替は「リポジトリの版」であって「公開中の版」ではないため、週次で使うと
-      # 公開中のデータを古い版へ巻き戻しかねない（docs/SPEC.md §3.4）。
+      # 代替は「リポジトリの版」と「いま公開中の版」の新しいほうを使う
+      # （docs/SPEC.md §3.4）。
       - name: 最新の祝日データを取得
         id: holidays
-        run: npm run holidays -- ${{ github.event_name == 'schedule' && '--require-fresh' || '' }}
+        # --published-url は、取得に失敗したときに「いま公開中の版」を読み戻す先。
+        # リポジトリの版だけに落とすと、週次で更新したぶんを巻き戻してしまう。
+        run: >-
+          npm run holidays --
+          ${{ github.event_name == 'schedule' && '--require-fresh' || '' }}
+          --published-url https://masakiniwa.github.io/Business-Days-Schedule/data/holidays.json
         env:
           GITHUB_TOKEN: ${{ github.token }}
 

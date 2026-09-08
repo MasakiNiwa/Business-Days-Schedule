@@ -53,3 +53,27 @@ test.describe('Service Worker', () => {
     await expect(about).toContainText(/v\d+\.\d+\.\d+/);
   });
 });
+
+test.describe('公開中の祝日データ', () => {
+  test('公開成果物に版が置いてあり、次のデプロイから読み戻せる', async ({ page, baseURL }) => {
+    // これが無いと、取得に失敗したときの代替がリポジトリの版だけになり、
+    // 週次で更新したぶんを巻き戻してしまう（docs/SPEC.md §3.4）。
+    const response = await page.request.get(new URL('data/holidays.json', baseURL).href);
+    expect(response.ok()).toBe(true);
+    const data = (await response.json()) as {
+      meta: { source: string; fetchedAt: string; count: number };
+    };
+    expect(data.meta.source).toBe('holiday-jp/holiday_jp');
+    expect(Number.isFinite(Date.parse(data.meta.fetchedAt))).toBe(true);
+    expect(data.meta.count).toBeGreaterThan(0);
+  });
+
+  test('アプリはこのファイルを起動時に取りに行かない', async ({ page }) => {
+    // 同梱ぶんを使う（§3.5）。置いてあるのは次のデプロイのための記録。
+    const requested: string[] = [];
+    page.on('request', (request) => requested.push(request.url()));
+    await page.goto('');
+    await page.locator('.app-header').waitFor();
+    expect(requested.filter((url) => url.includes('data/holidays.json'))).toEqual([]);
+  });
+});

@@ -24,6 +24,7 @@ import {
   yearOf,
 } from './dateUtil';
 import { describeNotice } from './describe';
+import { legacyNoticeId } from './notice';
 import { expandRecurrence, skipsAdjustment } from './recurrence';
 import { MAX_SHIFT_DAYS } from './businessDay';
 
@@ -257,6 +258,8 @@ function expandRule(
         seriesDirection: occurrence.seriesDirection,
         noticeLabel: notice.label,
         noticeIndex,
+        // UID は順番ではなく固定の id を使う。1件消しても残りが動かないように。
+        noticeId: notice.id ?? legacyNoticeId(noticeIndex),
       });
     });
   }
@@ -352,6 +355,7 @@ export function previewSeries(
   maxMonths = 60,
 ): PreviewSeries[] {
   const result: PreviewSeries[] = [];
+  const calendar = resolveCalendar(rule, ctx)?.calendar;
   const { year, month } = parseDate(from);
   let cursor = makeDate(year, month, 1);
 
@@ -361,27 +365,43 @@ export function previewSeries(
     // 無効化中のルールでもプレビューは見せたいので enabled を立てて展開する。
     const { occurrences } = expandRules([{ ...rule, enabled: true }], { start: cursor, end }, ctx);
 
-    // 準備日は本体より前の日付なので、本体を軸に集め直す。
-    // 同じ基準日でも両側補正では2系列に分かれるため、向きも鍵に含める。
-    const keyOf = (item: Occurrence): string => `${item.baseDate}|${item.seriesDirection ?? ''}`;
-    const relatedByKey = new Map<string, Occurrence[]>();
-    for (const occurrence of occurrences) {
-      if (occurrence.kind === 'main') continue;
-      const key = keyOf(occurrence);
-      const bucket = relatedByKey.get(key);
-      if (bucket === undefined) relatedByKey.set(key, [occurrence]);
-      else bucket.push(occurrence);
-    }
-
     for (const occurrence of occurrences) {
       if (occurrence.kind !== 'main' || occurrence.date < from) continue;
-      const related = [...(relatedByKey.get(keyOf(occurrence)) ?? [])].sort((a, b) =>
-        a.date < b.date ? -1 : a.date > b.date ? 1 : 0,
-      );
-      result.push({ main: occurrence, related });
+      // 前後の予定は、展開結果から拾わずこの本体から直接数える。
+      // 拾い方だと、探索範囲の境目をまたぐもの（8月の本体に対する9月のフォローなど）が
+      // 切り落とされ、実際のカレンダーや書き出しと食い違ってしまう。
+      result.push({ main: occurrence, related: relatedOf(rule, occurrence, calendar) });
       if (result.length >= count) break;
     }
     cursor = addMonths(cursor, 12);
   }
   return result;
+}
+
+/** 1つの本体にぶら下がる準備日・フォローを、日付昇順で返す。 */
+function relatedOf(
+  rule: Rule,
+  main: Occurrence,
+  calendar: BusinessDayCalendar | undefined,
+): Occurrence[] {
+  if (calendar === undefined) return [];
+  const related: Occurrence[] = [];
+  rule.notices.forEach((notice, noticeIndex) => {
+    const date = noticeDateOf(main.date, notice, calendar);
+    if (date === null) return;
+    related.push({
+      ruleId: rule.id,
+      kind: notice.offset < 0 ? 'notice' : 'follow',
+      rawDate: main.date,
+      baseDate: main.baseDate,
+      date,
+      shifted: false,
+      shiftDirection: null,
+      seriesDirection: main.seriesDirection,
+      noticeLabel: notice.label,
+      noticeIndex,
+      noticeId: notice.id ?? legacyNoticeId(noticeIndex),
+    });
+  });
+  return related.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
