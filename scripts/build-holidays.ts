@@ -16,7 +16,7 @@
  * 使い方: npm run holidays
  */
 
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { isValidDateStr } from '../src/core/dateUtil';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,11 +49,35 @@ export function parseHolidaysYml(text: string): Record<string, string> {
   return holidays;
 }
 
+/**
+ * 認証トークンを付けるか。
+ *
+ * 認証なしの api.github.com は IP あたり60回/時で、共用ランナーでは
+ * すぐ 403 rate limit exceeded になる（実際にそれで公開が止まった）。
+ * GitHub Actions が渡すトークンを使えばリポジトリあたり1000回/時まで上がる。
+ */
+export function authHeaderFor(url: string): Record<string, string> {
+  const token = process.env['GITHUB_TOKEN'];
+  if (token === undefined || token === '') return {};
+  if (!url.startsWith('https://api.github.com/')) return {};
+  return { authorization: `Bearer ${token}` };
+}
+
 async function fetchText(url: string): Promise<string> {
-  const response = await fetch(url, {
-    headers: { 'user-agent': 'business-days-schedule-build-script' },
-    signal: AbortSignal.timeout(15_000),
-  });
+  const base = { 'user-agent': 'business-days-schedule-build-script' };
+  const auth = authHeaderFor(url);
+
+  const attempt = async (headers: Record<string, string>): Promise<Response> =>
+    fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
+
+  let response = await attempt({ ...base, ...auth });
+
+  // トークンが期限切れ・別用途のものだと 401/403 になる。付けなければ通ることが
+  // あるので、その場合だけ一度だけ認証なしで試す。付けたせいで失敗するのは本末転倒。
+  if (!response.ok && Object.keys(auth).length > 0 && (response.status === 401 || response.status === 403)) {
+    response = await attempt(base);
+  }
+
   if (!response.ok) {
     throw new Error(`取得に失敗しました (${response.status} ${response.statusText}): ${url}`);
   }
@@ -115,13 +139,46 @@ export function validatePublishedHolidays(data: HolidayData, year: number): void
   }
 }
 
+/**
+ * 取得できなかったときに、リポジトリに入っている既存データで代替できるか調べる。
+ *
+ * 取得は「更新」であって「生成」ではない。前回の検査を通ったデータが手元にある
+ * のに、更新に失敗しただけで公開そのものを止めるのは釣り合わない。
+ * 実際に、認証なしの GitHub API が 403 になっただけで公開が丸ごと止まった。
+ */
+async function existingIsUsable(year: number): Promise<boolean> {
+  try {
+    const data = JSON.parse(await readFile(OUTPUT_PATH, 'utf-8')) as HolidayData;
+    validatePublishedHolidays(data, year);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function main(): Promise<void> {
-  const sourceSha = await fetchSourceSha();
-  const yml = await fetchText(`https://raw.githubusercontent.com/holiday-jp/holiday_jp/${sourceSha}/holidays.yml`);
-  const holidays = parseHolidaysYml(yml);
   const now = new Date();
-  const data = buildHolidayData(holidays, sourceSha, now);
-  validatePublishedHolidays(data, now.getUTCFullYear());
+  const year = now.getUTCFullYear();
+
+  let data: HolidayData;
+  let sourceSha: string;
+  try {
+    sourceSha = await fetchSourceSha();
+    const yml = await fetchText(
+      `https://raw.githubusercontent.com/holiday-jp/holiday_jp/${sourceSha}/holidays.yml`,
+    );
+    data = buildHolidayData(parseHolidaysYml(yml), sourceSha, now);
+    validatePublishedHolidays(data, year);
+  } catch (error: unknown) {
+    console.error(`祝日データを取得できませんでした: ${String(error)}`);
+    if (await existingIsUsable(year)) {
+      // 既存データは検査を通っている。更新できなかっただけなので、公開は続ける。
+      console.log(`既存の ${OUTPUT_PATH} をそのまま使います（今回は更新しません）。`);
+      return;
+    }
+    // 手元に使えるデータが無いなら、ここで止めるほかない。
+    throw error;
+  }
 
   await mkdir(dirname(OUTPUT_PATH), { recursive: true });
   await writeFile(OUTPUT_PATH, `${JSON.stringify(data, null, 2)}\n`, 'utf-8');
@@ -129,7 +186,7 @@ async function main(): Promise<void> {
   console.log(
     `祝日データを生成しました: ${data.meta.count} 件 (${data.meta.range.from} 〜 ${data.meta.range.to})`,
   );
-  console.log(`出典 SHA: ${sourceSha ?? '(取得できず)'}`);
+  console.log(`出典 SHA: ${sourceSha}`);
 }
 
 // テストから import されたときは実行しない。
