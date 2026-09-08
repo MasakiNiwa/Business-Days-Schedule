@@ -6,6 +6,7 @@
  */
 
 import { describeRule } from '../core/describe';
+import { createNotice } from '../core/notice';
 import { createRule } from '../core/storage';
 import { todayInTokyo, weekdayOf } from '../core/dateUtil';
 import { previewSeries } from '../core/schedule';
@@ -695,7 +696,7 @@ export class RuleEditor {
       'div',
       { class: 'adjust-controls' },
       field(
-        '補正',
+        '休業日の場合',
         modeSelect,
         '「前後の営業日の両方へ」は、取引先ごとに前倒し・後ろ倒しが分かれるときに使います。1つの基準日から前後2件が表示されます。',
       ),
@@ -807,12 +808,17 @@ export class RuleEditor {
           'div',
           { class: 'row' },
           button('＋ 準備日を追加（前）', () => {
-            this.draft.notices.push({ offset: -3, unit: 'business', label: '準備' });
+            // id を先に決める。順番ではなくこれが外部カレンダーの識別子になる。
+            this.draft.notices.push(
+              createNotice({ offset: -3, unit: 'business', label: '準備' }, this.draft.notices),
+            );
             render();
             this.refresh();
           }, 'button button-sm'),
           button('＋ フォローを追加（後）', () => {
-            this.draft.notices.push({ offset: 3, unit: 'business', label: 'フォロー' });
+            this.draft.notices.push(
+              createNotice({ offset: 3, unit: 'business', label: 'フォロー' }, this.draft.notices),
+            );
             render();
             this.refresh();
           }, 'button button-sm'),
@@ -978,7 +984,24 @@ export class RuleEditor {
 
     const series = previewSeries(this.draft, this.today, PREVIEW_COUNT, this.ctx);
     const occurrences = series.map((item) => item.main);
-    this.nextDates.textContent = occurrences.length === 0 ? '' : `次回から: ${occurrences.slice(0, 3).map((item) => item.date).join(' / ')}`;
+    // 直近の1組を、詳細を開かずに見せる。設定項目だけでは結果が想像しにくく、
+    // 「次の10回をすべて見る」を開かないと確かめられないのは遠い。
+    clear(this.nextDates);
+    const first = series[0];
+    if (first !== undefined) {
+      const chain: string[] = [];
+      for (const item of first.related) {
+        if (item.date < first.main.date) chain.push(`${item.date} ${item.noticeLabel ?? '準備'}`);
+      }
+      chain.push(`${first.main.date} ${this.draft.title === '' ? '（この予定）' : this.draft.title}`);
+      for (const item of first.related) {
+        if (item.date >= first.main.date) chain.push(`${item.date} ${item.noticeLabel ?? 'フォロー'}`);
+      }
+      this.nextDates.append(
+        h('span', { class: 'next-dates-label' }, '直近:'),
+        h('span', { class: 'next-dates-chain' }, chain.join(' → ')),
+      );
+    }
     if (occurrences.length === 0) {
       this.previewBody.append(
         h('p', { class: 'issue issue-warning' }, 'この設定では発生する日がありません。'),
@@ -997,12 +1020,13 @@ export class RuleEditor {
         h('span', { class: 'preview-date' }, main.date),
         h('span', { class: 'preview-weekday' }, `(${WEEKDAY_NAMES[weekdayOf(main.date)]})`),
         // カレンダー上の ← → と同じ向き記号を使い、読み替えの手間をなくす。
+        // 「なぜ動いたか」を言葉で添える。記号だけだと設定と結果が結び付かない。
         main.shifted
           ? h(
               'span',
               { class: `preview-note is-${main.shiftDirection ?? 'prev'}` },
-              `${main.shiftDirection === 'prev' ? '←' : '→'} ${main.rawDate} から${
-                main.shiftDirection === 'prev' ? '前倒し' : '後ろ倒し'
+              `${main.shiftDirection === 'prev' ? '←' : '→'} ${dayLabel(main.rawDate)}が休業日のため${
+                main.shiftDirection === 'prev' ? '前営業日へ' : '翌営業日へ'
               }`,
             )
           : null,

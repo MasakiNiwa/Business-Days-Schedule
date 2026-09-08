@@ -163,6 +163,16 @@ export type Adjustment = {
  * 本体の日付が動いたときに片方だけ取り残される。
  */
 export type Notice = {
+  /**
+   * この前後予定を指す固定の識別子。外部カレンダーの UID に使う。
+   *
+   * 配列の順番を使っていたため、1件消すと残りの識別子がずれ、消したものの
+   * 識別子を引き継いでしまっていた（取り込み先で別予定と取り違えられる）。
+   *
+   * 省略された古いデータは、読み込み時に今の順番から `n0`, `n1`, … を割り当てる。
+   * こうすると、既に書き出したぶんの UID が変わらない。
+   */
+  id?: string;
   /** 負 = 前（準備日）、正 = 後（フォロー）。0 は本体と同じ日なので認めない。 */
   offset: number;
   unit: 'business' | 'calendar';
@@ -228,6 +238,8 @@ export type Occurrence = {
   noticeLabel?: string;
   /** 事前通知が rule.notices の何番目か。UID の一意性に使う。 */
   noticeIndex?: number;
+  /** 対応する Notice.id。UID はこれを使う（順番に依存させないため）。 */
+  noticeId?: string;
 };
 
 export type DateRange = { start: DateStr; end: DateStr };

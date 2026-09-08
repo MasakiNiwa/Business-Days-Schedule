@@ -203,7 +203,9 @@ export function buildIcs(
       // shiftDirection を見ると子が全部同じ値になり、書き出す期間によって
       // 連番の割り当てが変わってしまう（別の予定を上書きしうる）。
       rule.adjust.mode === 'both' ? (occurrence.seriesDirection ?? 'prev') : 'single',
-      occurrence.noticeIndex === undefined ? '' : `n${occurrence.noticeIndex}`,
+      // 順番ではなく固定の id を使う。1件消したときに、残った予定が
+      // 消したものの識別子を引き継いでしまうため。
+      occurrence.noticeId ?? '',
     ].filter((part) => part !== '');
     const base = parts.join('-');
     const seen = usedUids.get(base) ?? 0;

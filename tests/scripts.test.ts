@@ -4,7 +4,8 @@
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { authHeaderFor, buildHolidayData, parseHolidaysYml } from '../scripts/build-holidays';
+import type { HolidayData } from '../src/types';
+import { authHeaderFor, buildHolidayData, newerOf, parseHolidaysYml } from '../scripts/build-holidays';
 
 describe('parseHolidaysYml', () => {
   it('holidays.yml の1行1レコードを読む', () => {
@@ -95,5 +96,44 @@ describe('authHeaderFor', () => {
     expect(authHeaderFor('https://api.github.com/repos/x/y/commits')).toEqual({});
     process.env['GITHUB_TOKEN'] = '';
     expect(authHeaderFor('https://api.github.com/repos/x/y/commits')).toEqual({});
+  });
+});
+
+describe('newerOf', () => {
+  const at = (fetchedAt: string): HolidayData => ({
+    meta: {
+      source: 'holiday-jp/holiday_jp',
+      sourceUrl: '',
+      sourceSha: null,
+      fetchedAt,
+      range: { from: '2026-01-01', to: '2026-12-31' },
+      count: 0,
+    },
+    holidays: {},
+  });
+
+  it('取得時刻の新しいほうを選ぶ', () => {
+    // リポジトリの版だけに落とすと、週次で更新したぶんを巻き戻してしまう。
+    const older = at('2026-01-01T00:00:00.000Z');
+    const newer = at('2026-09-08T00:00:00.000Z');
+    expect(newerOf(older, newer)).toBe(newer);
+    expect(newerOf(newer, older)).toBe(newer);
+  });
+
+  it('片方しか読めなければ、そちらを使う', () => {
+    const only = at('2026-01-01T00:00:00.000Z');
+    expect(newerOf(only, null)).toBe(only);
+    expect(newerOf(null, only)).toBe(only);
+  });
+
+  it('どちらも読めなければ null', () => {
+    // 初回公開などで公開先が空のときは、リポジトリの版すら無ければ止めるほかない。
+    expect(newerOf(null, null)).toBeNull();
+  });
+
+  it('同じ時刻なら手元の版を保つ（不要な書き換えをしない）', () => {
+    const a = at('2026-09-08T00:00:00.000Z');
+    const b = at('2026-09-08T00:00:00.000Z');
+    expect(newerOf(a, b)).toBe(a);
   });
 });

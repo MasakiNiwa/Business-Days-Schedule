@@ -69,7 +69,8 @@ describe('プレビュー', () => {
     const shifted = [...form.querySelectorAll('.preview-list li.is-shifted')];
     expect(shifted.length).toBeGreaterThan(0);
     expect(shifted[0]?.textContent).toContain('2026-10-25');
-    expect(shifted[0]?.textContent).toContain('← 2026-10-25 から前倒し');
+    // 記号だけでなく「なぜ動いたか」を言葉で添える。
+    expect(shifted[0]?.textContent).toContain('2026-10-25（日）が休業日のため前営業日へ');
   });
 
   it('補正の向きを変えるとプレビューが即座に変わる', () => {
@@ -230,9 +231,11 @@ describe('編集操作', () => {
     const { form, handlers } = open(salary);
     clickText(form, '＋ 準備日を追加（前）');
     form.dispatchEvent(new Event('submit', { cancelable: true }));
-    expect(vi.mocked(handlers.onSave).mock.calls[0]?.[0]?.notices).toEqual([
-      { offset: -3, unit: 'business', label: '準備' },
-    ]);
+    const notices = vi.mocked(handlers.onSave).mock.calls[0]?.[0]?.notices ?? [];
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({ offset: -3, unit: 'business', label: '準備' });
+    // 追加した時点で固定の id を持つ。順番ではなくこれが外部カレンダーの識別子になる。
+    expect(notices[0]?.id).toBeTypeOf('string');
   });
 
   it('除外日を追加できる', () => {
@@ -346,5 +349,35 @@ describe('プレビューの前後の予定', () => {
   it('前後の予定が無ければ何も足さない', () => {
     const { form } = open(makeRule({ ...salary, notices: [] }));
     expect(form.querySelectorAll('.preview-related')).toHaveLength(0);
+  });
+});
+
+describe('直近1組の表示', () => {
+  it('詳細を開かなくても、準備 → 本体 → フォローが見える', () => {
+    // 設定項目だけでは結果が想像しにくく、「次の10回をすべて見る」を
+    // 開かないと確かめられないのは遠い。
+    const rule = makeRule({
+      ...salary,
+      notices: [
+        { offset: -3, unit: 'business', label: '振込データ作成' },
+        { offset: 1, unit: 'business', label: '結果の確認' },
+      ],
+    });
+    const { form } = open(rule);
+    const chain = form.querySelector('.next-dates-chain')?.textContent ?? '';
+
+    expect(chain).toContain('振込データ作成');
+    expect(chain).toContain('給与振込');
+    expect(chain).toContain('結果の確認');
+    // 準備 → 本体 → フォローの順であること。
+    expect(chain.indexOf('振込データ作成')).toBeLessThan(chain.indexOf('給与振込'));
+    expect(chain.indexOf('給与振込')).toBeLessThan(chain.indexOf('結果の確認'));
+  });
+
+  it('前後の予定が無ければ本体だけを出す', () => {
+    const { form } = open(makeRule({ ...salary, notices: [] }));
+    const chain = form.querySelector('.next-dates-chain')?.textContent ?? '';
+    expect(chain).toContain('給与振込');
+    expect(chain).not.toContain('→');
   });
 });

@@ -2107,7 +2107,9 @@ main:focus {
 .editor-review { position: sticky; bottom: -1.5rem; background: var(--bg); border-top: 1px solid var(--border); padding: 0.65rem 0; z-index: 2; }
 .editor-review .editor-actions { margin-top: 0.5rem; }
 .rule-summary, .next-dates { margin: 0.2rem 0; font-size: 0.85rem; overflow-wrap: anywhere; }
-.next-dates { color: var(--fg-muted); }
+.next-dates { color: var(--fg-muted); display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.next-dates-label { font-weight: 600; flex: none; }
+.next-dates-chain { font-variant-numeric: tabular-nums; }
 .editor-review .issues:empty { display: none; }
 .settings-navigation { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.7rem 0 1rem; }
 .settings-navigation [aria-pressed='true'] { background: var(--fg); color: var(--bg); }
