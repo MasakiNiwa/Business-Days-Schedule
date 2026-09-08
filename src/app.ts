@@ -49,6 +49,7 @@ import {
   buildCsv,
   buildIcs,
   exportCalendarFileName,
+  exportWarningPrompt,
   MIME_TYPES,
 } from './core/exportCalendar';
 import { attachHorizontalSwipe } from './ui/swipe';
@@ -378,15 +379,9 @@ export class App {
     );
     // 日付を出せなかった準備日・フォローがあるまま黙って書き出すと、
     // 取り込み先で「設定したのに無い」に気づけない。
-    const unresolved = [...new Set(warnings.map((warning) => warning.message))];
-    if (
-      unresolved.length > 0 &&
-      !globalThis.confirm(
-        `次の予定は日付を決められないため書き出されません。\n\n${unresolved.join(
-          '\n',
-        )}\n\nこのまま書き出しますか？`,
-      )
-    ) {
+    // 出ないものと、出るが確かめてほしいものは分けて伝える。
+    const prompt = exportWarningPrompt(warnings, request);
+    if (prompt !== null && !globalThis.confirm(`${prompt}\n\nこのまま書き出しますか？`)) {
       return;
     }
     const rules = new Map(this.state.rules.map((rule) => [rule.id, rule]));
@@ -982,22 +977,36 @@ export class App {
     return open;
   }
 
-  /** ルールが1件も無いときの導線。カレンダーだけでは何もできないため。 */
+  /**
+   * ルールが1件も無いときの導線。カレンダーだけでは何もできないため。
+   *
+   * 主にするのは「最初のルールを作る」。サンプル一式を先に勧めると、
+   * 自分の業務と関係のない予定がいきなり並び、どれが自分のものか分からなくなる。
+   * まず1件を自分で作ったほうが、何を設定しているのかが分かる。
+   * サンプルは「完成例を見る」として隣に置く。目的が違うので並びも分ける。
+   */
   private renderEmptyPrompt(): HTMLElement {
     return h(
       'div',
       { class: 'empty-prompt' },
-      h('p', {}, 'まだルールがありません。'),
+      h('p', {}, 'まだルールがありません。まずは1件、作ってみてください。'),
       h(
         'div',
         { class: 'empty-prompt-actions' },
-        button('サンプルを読み込む', () => void this.openSamples(), 'button button-primary'),
-        button('ルールを追加', () => this.startAdd(), 'button'),
+        button('最初のルールを作る', () => this.startAdd(), 'button button-primary'),
+        button('完成例を見る', () => void this.openSamples(), 'button'),
       ),
       h(
         'p',
         { class: 'field-hint' },
-        '給与振込・月次締め・第5営業日の請求書発行など、実務でよく使う型から始められます。',
+        '給与振込・支払・締め日・会議のひな型から選べます。' +
+          '営業日補正や決算月の設定は、作りながら決められます。',
+      ),
+      h(
+        'p',
+        { class: 'field-hint' },
+        '「完成例を見る」は、実務でよく使う予定を束ごと取り込む入口です。' +
+          '中身を見てから、必要なものだけ選んで追加できます。',
       ),
     );
   }

@@ -10,7 +10,7 @@ import { expect, test } from '@playwright/test';
 test.describe('Service Worker', () => {
   test('登録され、オフラインでも開ける', async ({ page, context }) => {
     await page.goto('');
-    await page.getByRole('button', { name: 'サンプルを読み込む' }).click();
+    await page.getByRole('button', { name: '完成例を見る' }).click();
     await page
       .locator('.sample-item')
       .filter({ hasText: '基本セット' })

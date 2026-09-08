@@ -5,7 +5,13 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import type { HolidayData } from '../src/types';
-import { authHeaderFor, buildHolidayData, newerOf, parseHolidaysYml } from '../scripts/build-holidays';
+import {
+  authHeaderFor,
+  buildHolidayData,
+  chooseFallback,
+  newerOf,
+  parseHolidaysYml,
+} from '../scripts/build-holidays';
 
 describe('parseHolidaysYml', () => {
   it('holidays.yml の1行1レコードを読む', () => {
@@ -135,5 +141,63 @@ describe('newerOf', () => {
     const a = at('2026-09-08T00:00:00.000Z');
     const b = at('2026-09-08T00:00:00.000Z');
     expect(newerOf(a, b)).toBe(a);
+  });
+});
+
+describe('chooseFallback', () => {
+  const at = (fetchedAt: string): HolidayData => ({
+    meta: {
+      source: 'x',
+      sourceUrl: 'x',
+      sourceSha: null,
+      fetchedAt,
+      range: { from: '2026-01-01', to: '2026-12-31' },
+      count: 1,
+    },
+    holidays: { '2026-01-01': '元日' },
+  });
+
+  it('公開中の版を確認できないなら公開しない', () => {
+    // リポジトリの版が古ければ、そのまま公開中のデータを巻き戻してしまう。
+    // 止めれば、いま公開されているものがそのまま残る。
+    const result = chooseFallback(at('2026-01-01T00:00:00Z'), {
+      status: 'unknown',
+      reason: 'fetch failed',
+    });
+    expect(result.action).toBe('stop');
+  });
+
+  it('リポジトリの版しか無くても、確認できないなら止める', () => {
+    expect(chooseFallback(at('2099-01-01T00:00:00Z'), { status: 'unknown', reason: 'x' }).action).toBe(
+      'stop',
+    );
+  });
+
+  it('まだ何も公開していない（404）なら、リポジトリの版で続ける', () => {
+    // 巻き戻す先が無いので、代替は安全。
+    const result = chooseFallback(at('2026-01-01T00:00:00Z'), { status: 'absent' });
+    expect(result).toMatchObject({ action: 'use', from: 'local' });
+  });
+
+  it('公開中の版が新しければそちらを使う', () => {
+    const local = at('2026-01-01T00:00:00Z');
+    const published = at('2026-06-01T00:00:00Z');
+    expect(chooseFallback(local, { status: 'ok', data: published })).toMatchObject({
+      action: 'use',
+      from: 'published',
+      data: published,
+    });
+  });
+
+  it('リポジトリの版が新しければそちらを使う', () => {
+    const local = at('2026-06-01T00:00:00Z');
+    expect(chooseFallback(local, { status: 'ok', data: at('2026-01-01T00:00:00Z') })).toMatchObject({
+      action: 'use',
+      from: 'local',
+    });
+  });
+
+  it('どちらも無ければ止める', () => {
+    expect(chooseFallback(null, { status: 'absent' }).action).toBe('stop');
   });
 });

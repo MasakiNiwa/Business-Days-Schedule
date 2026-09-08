@@ -27,7 +27,7 @@ async function analyze(page: Page, context?: string): Promise<void> {
 async function seedSamples(page: Page): Promise<void> {
   await page.goto('');
   await expect(page.locator('.empty-prompt')).toBeVisible();
-  await page.getByRole('button', { name: 'サンプルを読み込む' }).click();
+  await page.getByRole('button', { name: '完成例を見る' }).click();
   await expect(page.locator('dialog .samples')).toBeVisible();
   await page
     .locator('.sample-item')

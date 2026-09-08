@@ -336,9 +336,8 @@ export function validateRule(rule: Rule): ValidationIssue[] {
             // 前後の日数に上限を置く。営業日換算の巨大な値は、数えるだけで固まるため。
             Math.abs(offset) > LIMITS.noticeOffset
           ) {
-            bad(
-              `準備日・フォローは 0 を除く -${LIMITS.noticeOffset} 〜 ${LIMITS.noticeOffset} の整数で指定してください`,
-            );
+            // 画面では日数と「前か後か」に分けている。符号は出さない。
+            bad(`本体からの日数は 1 〜 ${LIMITS.noticeOffset} の整数で指定してください`);
           }
           if (timing['unit'] !== 'business' && timing['unit'] !== 'calendar') {
             bad('単位が不正です');
@@ -366,7 +365,9 @@ export function validateRule(rule: Rule): ValidationIssue[] {
             bad(`月は -${LIMITS.noticeMonths} 〜 ${LIMITS.noticeMonths} の整数で指定してください`);
           }
           if (typeof nth !== 'number' || !Number.isInteger(nth) || nth === 0 || Math.abs(nth) > LIMITS.noticeNth) {
-            bad(`第N営業日は 0 を除く -${LIMITS.noticeNth} 〜 ${LIMITS.noticeNth} の整数で指定してください`);
+            // 画面では「月初から／月末から」＋営業日数に分けているので、
+            // 符号ではなく入力欄の言い回しで伝える。
+            bad(`営業日数は 1 〜 ${LIMITS.noticeNth} の整数で指定してください`);
           }
           break;
         }

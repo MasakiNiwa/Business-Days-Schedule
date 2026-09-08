@@ -10,7 +10,14 @@ import type { Page } from '@playwright/test';
 
 const STORAGE_KEY = 'bds.v1.rules';
 
-/** ヘッダーの「ルール」ボタン。空状態の「ルールを追加」と紛れないよう厳密に選ぶ。 */
+/**
+ * 前後の予定の欄を開く。使わない人のほうが多いので既定では畳んである。
+ */
+async function openNotices(page: Page): Promise<void> {
+  await page.getByText('準備や確認の予定を付ける（任意）').click();
+}
+
+/** ヘッダーの「ルール」ボタン。空状態の導線と紛れないよう厳密に選ぶ。 */
 async function openRulePanel(page: Page): Promise<void> {
   await page.locator('.header-actions').getByRole('button', { name: 'ルール', exact: true }).click();
 }
@@ -43,7 +50,7 @@ test.describe('初回起動と永続化', () => {
     await page.goto('');
     await expect(page.locator('.empty-prompt')).toBeVisible();
 
-    await page.getByRole('button', { name: 'サンプルを読み込む' }).click();
+    await page.getByRole('button', { name: '完成例を見る' }).click();
     await page
       .locator('.sample-item')
       .filter({ hasText: '基本セット' })
@@ -260,7 +267,7 @@ test.describe('表示', () => {
 
 test('給与のひな型から1件保存できる', async ({ page }) => {
   await page.goto('');
-  await page.getByRole('button', { name: 'ルールを追加', exact: true }).click();
+  await page.getByRole('button', { name: '最初のルールを作る', exact: true }).click();
   await page.getByRole('button', { name: '給与', exact: true }).click();
   await expect(page.getByLabel('タイトル')).toHaveValue('給与振込');
   await expect(page.getByLabel('営業日カレンダー')).toHaveValue('bank');
@@ -276,7 +283,7 @@ test('給与のひな型から1件保存できる', async ({ page }) => {
 
 test('サンプルから1件だけ選んで追加できる', async ({ page }) => {
   await page.goto('');
-  await page.getByRole('button', { name: 'サンプルを読み込む' }).click();
+  await page.getByRole('button', { name: '完成例を見る' }).click();
   const pack = page.locator('.sample-item').filter({ hasText: '基本セット' });
   await pack.getByRole('button', { name: '内容を選ぶ' }).click();
   await pack.getByRole('checkbox', { name: /給与振込/ }).check();
@@ -445,6 +452,8 @@ test.describe('フォロー予定', () => {
     await page.getByRole('button', { name: '＋ 新規ルール' }).click();
     await page.getByRole('button', { name: '自由入力' }).click();
 
+    await openNotices(page);
+
     await page.getByRole('button', { name: '＋ フォローを追加（後）' }).click();
     const direction = page.getByLabel('1 件目: 本体の前か後か');
     await expect(direction).toHaveValue('after');
@@ -460,6 +469,7 @@ test.describe('フォロー予定', () => {
     await page.getByRole('button', { name: '＋ 新規ルール' }).click();
     await page.getByRole('button', { name: '自由入力' }).click();
 
+    await openNotices(page);
     await page.getByRole('button', { name: '＋ フォローを追加（後）' }).click();
     await page.getByLabel('1 件目: 日付の決め方').selectOption('weekday');
 
@@ -479,11 +489,100 @@ test.describe('フォロー予定', () => {
     await page.getByRole('button', { name: '＋ 新規ルール' }).click();
     await page.getByRole('button', { name: '自由入力' }).click();
 
+    await openNotices(page);
     await page.getByRole('button', { name: '＋ フォローを追加（後）' }).click();
     await page.getByLabel('1 件目: 日付の決め方').selectOption('monthlyBusinessDay');
     await page.getByLabel('1 件目: どの月か').selectOption('1');
 
     await expect(page.locator('.notice-item .field-hint')).toContainText('翌月の第5営業日');
+  });
+});
+
+test.describe('入力と保存の一致', () => {
+  test('営業日数に 0 を入れても前の値に戻らず、保存が止まる', async ({ page }) => {
+    // 以前はその場で無視して前の値を残していた。画面には 0 が出たまま、
+    // 説明もプレビューも保存値も古い値のままになる。
+    await page.goto('');
+    await openRulePanel(page);
+    await page.getByRole('button', { name: '＋ 新規ルール' }).click();
+    await page.getByRole('button', { name: '自由入力' }).click();
+    await page.getByLabel('タイトル').fill('月次締め');
+
+    await openNotices(page);
+    await page.getByRole('button', { name: '＋ フォローを追加（後）' }).click();
+    await page.getByLabel('1 件目: 日付の決め方').selectOption('monthlyBusinessDay');
+
+    const days = page.getByLabel('1 件目: 営業日数');
+    await days.fill('0');
+    await expect(days).toHaveValue('0');
+    await expect(page.locator('.issue-error')).toContainText('営業日数');
+
+    // 直せば保存できる。
+    await days.fill('5');
+    await expect(page.locator('.issue-error')).toHaveCount(0);
+    await expect(page.locator('.notice-summary')).toContainText('第5営業日');
+  });
+
+  test('数字を続けて打てる（1文字ごとに欄が作り直されない）', async ({ page }) => {
+    await page.goto('');
+    await openRulePanel(page);
+    await page.getByRole('button', { name: '＋ 新規ルール' }).click();
+    await page.getByRole('button', { name: '自由入力' }).click();
+
+    await openNotices(page);
+    await page.getByRole('button', { name: '＋ 準備日を追加（前）' }).click();
+    const days = page.getByLabel('1 件目: 本体から何日か');
+    await days.fill('');
+    await days.type('12');
+
+    await expect(days).toHaveValue('12');
+    await expect(page.locator('.notice-summary')).toContainText('12営業日前');
+  });
+});
+
+test.describe('計算できない前後予定', () => {
+  test('黙って消さず、該当月と理由をプレビューに残す', async ({ page }) => {
+    await page.goto('');
+    await openRulePanel(page);
+    await page.getByRole('button', { name: '＋ 新規ルール' }).click();
+    await page.getByRole('button', { name: '締め日' }).click();
+
+    await openNotices(page);
+    await page.getByRole('button', { name: '＋ フォローを追加（後）' }).click();
+    await page.getByLabel('1 件目: 日付の決め方').selectOption('monthlyBusinessDay');
+    await page.getByLabel('1 件目: 営業日数').fill('25');
+
+    await expect(page.locator('.preview-body')).toContainText('日付を決められません');
+    await expect(page.locator('.preview-body')).toContainText('営業日目がありません');
+  });
+});
+
+test.describe('月末からの指定', () => {
+  test('負の数を使わずに最終営業日を選べる', async ({ page }) => {
+    await page.goto('');
+    await openRulePanel(page);
+    await page.getByRole('button', { name: '＋ 新規ルール' }).click();
+    await page.getByRole('button', { name: '自由入力' }).click();
+
+    await openNotices(page);
+    await page.getByRole('button', { name: '＋ フォローを追加（後）' }).click();
+    await page.getByLabel('1 件目: 日付の決め方').selectOption('monthlyBusinessDay');
+    await page.getByLabel('1 件目: 月初から数えるか月末から数えるか').selectOption('end');
+    await page.getByLabel('1 件目: 営業日数').fill('1');
+
+    await expect(page.locator('.notice-summary')).toContainText('最終営業日');
+  });
+});
+
+test.describe('最初の導線', () => {
+  test('空の画面では「最初のルールを作る」を主に案内する', async ({ page }) => {
+    await page.goto('');
+    const prompt = page.locator('.empty-prompt');
+    await expect(prompt.getByRole('button', { name: '最初のルールを作る' })).toBeVisible();
+    await expect(prompt.getByRole('button', { name: '完成例を見る' })).toBeVisible();
+
+    await prompt.getByRole('button', { name: '最初のルールを作る' }).click();
+    await expect(page.locator('.editor-title')).toHaveText('ルールを追加');
   });
 });
 

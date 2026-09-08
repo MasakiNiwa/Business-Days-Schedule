@@ -1002,6 +1002,75 @@ button {
   overflow-wrap: anywhere;
 }
 
+/*
+ * 日付を決められなかった前後予定。消さずに、その回ごとに理由を残す。
+ * 消えるだけだと「設定したのに出ない」に保存前は気づけない。
+ */
+.preview-related-item.is-unresolved {
+  color: var(--notice-fg);
+}
+
+.preview-related-item.is-unresolved .preview-date {
+  font-weight: 600;
+}
+
+.preview-related-item.is-unresolved .preview-related-mark {
+  border-style: dashed;
+}
+
+/* --- 前後の予定の編集欄 ------------------------------------------------ */
+
+/*
+ * 1件を1枚の枠にまとめる。欄が横に並ぶだけだと、どこからどこまでが
+ * 1件なのかが分からなかった。
+ */
+.notice-item {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem 0.7rem;
+  margin-bottom: 0.55rem;
+  background: var(--bg-sunken);
+}
+
+.notice-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.notice-head,
+.notice-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.notice-head .field-compact:first-child {
+  flex: 1 1 12rem;
+}
+
+.notice-remove {
+  flex: none;
+  margin-bottom: 0.1rem;
+}
+
+/* 欄ごとに見えるラベルを置く。読み上げ用の名前だけでは目で見て分からない。 */
+.field-compact {
+  gap: 0.2rem;
+}
+
+.field-compact > .field-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.notice-summary {
+  margin: 0;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
 /* --- 検証メッセージ ---------------------------------------------------- */
 
 .issues {
@@ -2299,4 +2368,22 @@ main:focus {
   .list-title-button {
     cursor: auto;
   }
+}
+
+/*
+ * 書き出し前の説明。押す前に知っておくことだけ常に出し、手順は畳む。
+ * 長い説明が先に立つと、肝心の期間や形式の設定まで遠くなる。
+ */
+.callout-lead {
+  font-weight: 600;
+}
+
+.export-howto > summary {
+  cursor: pointer;
+  padding: 0.35rem 0;
+  font-weight: 600;
+}
+
+.export-howto p {
+  margin: 0.35rem 0 0;
 }

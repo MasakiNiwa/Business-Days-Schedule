@@ -286,6 +286,12 @@ export type Occurrence = {
   noticeIndex?: number;
   /** 対応する Notice.id。UID はこれを使う（順番に依存させないため）。 */
   noticeId?: string;
+  /**
+   * 設定から決まる「本体の前・後どちらのつもりか」。実際に出た日付ではなく
+   * 設定で決まる。UID はこちらを使う。kind を使うと、休業日の設定を変えて
+   * 前後が入れ替わるたびに同じ予定が別の予定になってしまう。
+   */
+  noticeRole?: NoticeRole;
 };
 
 export type DateRange = { start: DateStr; end: DateStr };

@@ -27,6 +27,12 @@ const SOURCE_URL =
 const COMMITS_API =
   'https://api.github.com/repos/holiday-jp/holiday_jp/commits?path=holidays.yml&per_page=1';
 
+/** 公開中のデータを読むときの試行回数。一時的な失敗で公開を止めないため。 */
+const PUBLISHED_READ_ATTEMPTS = 3;
+
+const delay = (ms: number): Promise<void> =>
+  new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OUTPUT_PATH = resolve(ROOT, 'src/data/holidays.json');
 
@@ -163,21 +169,81 @@ async function readLocal(year: number): Promise<HolidayData | null> {
 }
 
 /**
+ * いま公開されているデータを読んだ結果。
+ *
+ *   ok      … 読めた。代替の候補として使える
+ *   absent  … まだ何も公開されていない（404）。巻き戻す先が無いので代替は安全
+ *   unknown … 読めなかった。公開中の版が新しいかどうか判断できない
+ *
+ * unknown と absent を混ぜてはいけない。混ぜると「読めなかった」を
+ * 「無かった」として扱い、リポジトリの古い版で公開中の版を上書きしうる。
+ */
+export type PublishedState =
+  | { status: 'ok'; data: HolidayData }
+  | { status: 'absent' }
+  | { status: 'unknown'; reason: string };
+
+/**
  * いま公開されているデータ。ビルドのたびに公開成果物へ同じ JSON を置いてあるので、
  * そこから読み戻せる（アプリは実行時に読まない。§3.5）。
  *
  * これが無いと、代替に使えるのはリポジトリの版だけになる。週次で新しい祝日を
  * 公開したあとリポジトリを更新していないと、次のコード公開で古い版へ巻き戻る。
+ *
+ * 一時的な失敗で「読めなかった」に落ちると、そのぶん公開が止まる。
+ * 自分のサイトを読むだけなので、諦める前に数回やり直す。
  */
-async function readPublished(url: string, year: number): Promise<HolidayData | null> {
-  try {
-    const data = JSON.parse(await fetchText(url)) as HolidayData;
-    validatePublishedHolidays(data, year);
-    return data;
-  } catch (error: unknown) {
-    console.error(`公開中の祝日データを読めませんでした: ${String(error)}`);
-    return null;
+async function readPublished(url: string, year: number): Promise<PublishedState> {
+  let lastReason = '';
+  for (let attempt = 0; attempt < PUBLISHED_READ_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        headers: { 'user-agent': 'business-days-schedule-build-script' },
+        signal: AbortSignal.timeout(15_000),
+      });
+      // まだ一度も公開していなければ 404。巻き戻す先が無いので、代替は安全。
+      if (response.status === 404) return { status: 'absent' };
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      const data = JSON.parse(await response.text()) as HolidayData;
+      validatePublishedHolidays(data, year);
+      return { status: 'ok', data };
+    } catch (error: unknown) {
+      lastReason = String(error);
+      console.error(
+        `公開中の祝日データを読めませんでした（${attempt + 1}/${PUBLISHED_READ_ATTEMPTS}）: ${lastReason}`,
+      );
+      if (attempt + 1 < PUBLISHED_READ_ATTEMPTS) await delay(2_000 * 2 ** attempt);
+    }
   }
+  return { status: 'unknown', reason: lastReason };
+}
+
+/**
+ * 取得に失敗したとき、何で公開するかを決める。
+ *
+ *   use  … このデータで公開する
+ *   stop … 公開しない
+ *
+ * 公開中の版を確認できない（unknown）なら止める。リポジトリの版が古ければ、
+ * そのまま公開中のデータを巻き戻してしまうため。止めれば、いま公開されている
+ * ものがそのまま残る（GitHub Pages は失敗したデプロイでは差し替わらない）。
+ */
+export function chooseFallback(
+  local: HolidayData | null,
+  published: PublishedState,
+): { action: 'use'; data: HolidayData; from: 'local' | 'published' } | { action: 'stop'; reason: string } {
+  if (published.status === 'unknown') {
+    return {
+      action: 'stop',
+      reason: '公開中の祝日データを確認できないため、既存データでの公開はしません。いま公開されているものがそのまま残ります。',
+    };
+  }
+  const publishedData = published.status === 'ok' ? published.data : null;
+  const chosen = newerOf(local, publishedData);
+  if (chosen === null) {
+    return { action: 'stop', reason: '手元にも公開先にも使える祝日データがありません。' };
+  }
+  return { action: 'use', data: chosen, from: chosen === publishedData ? 'published' : 'local' };
 }
 
 /** 取得時刻の新しいほうを選ぶ。読めなかったものは候補から外す。 */
@@ -226,14 +292,18 @@ async function main(): Promise<void> {
     // リポジトリの版だけに落とすと、週次で更新したぶんを巻き戻してしまう。
     const local = await readLocal(year);
     const published =
-      publishedUrl === undefined ? null : await readPublished(publishedUrl, year);
-    const fallback = newerOf(local, published);
-    if (fallback === null) {
-      // 手元にも公開先にも使えるデータが無いなら、ここで止めるほかない。
+      publishedUrl === undefined
+        ? ({ status: 'absent' } as PublishedState)
+        : await readPublished(publishedUrl, year);
+
+    const choice = chooseFallback(local, published);
+    if (choice.action === 'stop') {
+      console.error(choice.reason);
       throw error;
     }
 
-    const source = fallback === published ? '公開中の版' : `リポジトリの版（${OUTPUT_PATH}）`;
+    const fallback = choice.data;
+    const source = choice.from === 'published' ? '公開中の版' : `リポジトリの版（${OUTPUT_PATH}）`;
     if (fallback !== local) {
       await mkdir(dirname(OUTPUT_PATH), { recursive: true });
       await writeFile(OUTPUT_PATH, `${JSON.stringify(fallback, null, 2)}\n`, 'utf-8');

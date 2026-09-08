@@ -106,9 +106,19 @@ export function renderRuleList(
       h(
         'div',
         { class: 'empty' },
-        h('p', {}, 'まだルールがありません。'),
-        h('p', { class: 'empty-hint' }, '実務でよく使う型をまとめたサンプルから始められます。'),
-        button('サンプルを読み込む', () => handlers.onLoadSamples()),
+        h('p', {}, 'まだルールがありません。まずは1件、作ってみてください。'),
+        h(
+          'p',
+          { class: 'empty-hint' },
+          '給与振込・支払・締め日・会議のひな型から選べます。' +
+            '実務でよく使う予定をまとめて見たいときは「完成例を見る」から。',
+        ),
+        h(
+          'div',
+          { class: 'empty-prompt-actions' },
+          button('最初のルールを作る', () => handlers.onAdd(), 'button button-primary'),
+          button('完成例を見る', () => handlers.onLoadSamples()),
+        ),
       ),
       h(
         'div',
