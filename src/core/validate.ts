@@ -17,6 +17,12 @@ export const LIMITS = {
   notices: 20,
   /** 準備日・フォローの前後日数。1年より外に置いても意味がない。 */
   noticeOffset: 365,
+  /** 週で数えるときの週数。前後2か月ぶんもあれば足りる。 */
+  noticeWeeks: 8,
+  /** 月で数えるときの月数。 */
+  noticeMonths: 12,
+  /** 第N営業日。1か月の営業日数を超える指定は意味がない。 */
+  noticeNth: 25,
   skipDates: 1000,
   arrayItems: 40,
   interval: 120,
@@ -308,23 +314,69 @@ export function validateRule(rule: Rule): ValidationIssue[] {
         issues.push({ path: `notices[${index}]`, message: '準備日・フォローの形式が不正です', severity: 'error' });
         return;
       }
-      const offset = notice['offset'];
-      if (
-        typeof offset !== 'number' ||
-        !Number.isInteger(offset) ||
-        // 0 は本体と同じ日で意味がない。
-        offset === 0 ||
-        // 前後の日数に上限を置く。営業日換算の巨大な値は、数えるだけで固まるため。
-        Math.abs(offset) > LIMITS.noticeOffset
-      ) {
-        issues.push({
-          path: `notices[${index}].offset`,
-          message: `準備日・フォローは 0 を除く -${LIMITS.noticeOffset} 〜 ${LIMITS.noticeOffset} の整数で指定してください`,
-          severity: 'error',
-        });
+      // 決め方は timing に持つ。古いデータは offset/unit を直に持っているので、
+      // どちらの形も受け付ける（読み込み時に timing へ均す）。
+      const timing = isRecord(notice['timing'])
+        ? notice['timing']
+        : { kind: 'offset', offset: notice['offset'], unit: notice['unit'] };
+      const path = `notices[${index}].timing`;
+
+      const bad = (message: string): void => {
+        issues.push({ path, message, severity: 'error' });
+      };
+
+      switch (timing['kind']) {
+        case 'offset': {
+          const offset = timing['offset'];
+          if (
+            typeof offset !== 'number' ||
+            !Number.isInteger(offset) ||
+            // 0 は本体と同じ日で意味がない。
+            offset === 0 ||
+            // 前後の日数に上限を置く。営業日換算の巨大な値は、数えるだけで固まるため。
+            Math.abs(offset) > LIMITS.noticeOffset
+          ) {
+            bad(
+              `準備日・フォローは 0 を除く -${LIMITS.noticeOffset} 〜 ${LIMITS.noticeOffset} の整数で指定してください`,
+            );
+          }
+          if (timing['unit'] !== 'business' && timing['unit'] !== 'calendar') {
+            bad('単位が不正です');
+          }
+          break;
+        }
+        case 'weekday': {
+          const weeks = timing['weeks'];
+          const weekday = timing['weekday'];
+          if (typeof weeks !== 'number' || !Number.isInteger(weeks) || Math.abs(weeks) > LIMITS.noticeWeeks) {
+            bad(`週は -${LIMITS.noticeWeeks} 〜 ${LIMITS.noticeWeeks} の整数で指定してください`);
+          }
+          if (typeof weekday !== 'number' || !Number.isInteger(weekday) || weekday < 0 || weekday > 6) {
+            bad('曜日が不正です');
+          }
+          if (!['next', 'prev', 'none'].includes(String(timing['onClosed']))) {
+            bad('休業日のときの扱いが不正です');
+          }
+          break;
+        }
+        case 'monthlyBusinessDay': {
+          const months = timing['months'];
+          const nth = timing['nth'];
+          if (typeof months !== 'number' || !Number.isInteger(months) || Math.abs(months) > LIMITS.noticeMonths) {
+            bad(`月は -${LIMITS.noticeMonths} 〜 ${LIMITS.noticeMonths} の整数で指定してください`);
+          }
+          if (typeof nth !== 'number' || !Number.isInteger(nth) || nth === 0 || Math.abs(nth) > LIMITS.noticeNth) {
+            bad(`第N営業日は 0 を除く -${LIMITS.noticeNth} 〜 ${LIMITS.noticeNth} の整数で指定してください`);
+          }
+          break;
+        }
+        default:
+          bad('日付の決め方が不正です');
       }
-      if (notice['unit'] !== 'business' && notice['unit'] !== 'calendar') {
-        issues.push({ path: `notices[${index}].unit`, message: '単位が不正です', severity: 'error' });
+
+      const role = notice['role'];
+      if (role !== undefined && role !== 'before' && role !== 'after') {
+        issues.push({ path: `notices[${index}].role`, message: '前後の指定が不正です', severity: 'error' });
       }
       if (!isStringValue(notice['label']) || String(notice['label']).length > LIMITS.titleLength) {
         issues.push({ path: `notices[${index}].label`, message: 'ラベルが不正です', severity: 'error' });

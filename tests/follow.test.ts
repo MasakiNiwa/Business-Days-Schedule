@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { expandRules, followRangeStart, noticeDateOf, previewSeries } from '../src/core/schedule';
+import { expandBoundsFor, expandRules, noticeDateOf, previewSeries } from '../src/core/schedule';
 import { describeNotice } from '../src/core/describe';
 import { companyCalendar, makeCalendar, makeRule, scheduleContext } from './helpers';
 import type { Occurrence } from '../src/types';
@@ -52,19 +52,39 @@ describe('noticeDateOf', () => {
   });
 });
 
-describe('followRangeStart', () => {
-  it('フォローの日数だけ探索の先頭を戻す', () => {
+describe('expandBoundsFor', () => {
+  const range = { start: '2026-09-01', end: '2026-09-30' };
+
+  it('フォローのぶんだけ探索の先頭を戻す', () => {
     // これが無いと、本体が範囲より前にあるフォローが生成されない。
-    const start = followRangeStart(invoice, '2026-09-01', companyCalendar);
-    expect(start < '2026-09-01').toBe(true);
+    expect(expandBoundsFor(invoice, range, companyCalendar).start < range.start).toBe(true);
   });
 
-  it('準備日しか無いルールでは戻さない', () => {
+  it('準備日のぶんだけ探索の末尾を延ばす', () => {
     const rule = makeRule({
       id: 'p',
-      notices: [{ offset: -3, unit: 'business', label: '準備' }],
+      notices: [{ timing: { kind: 'offset', offset: -3, unit: 'business' }, label: '準備' }],
     });
-    expect(followRangeStart(rule, '2026-09-01', companyCalendar)).toBe('2026-09-01');
+    const bounds = expandBoundsFor(rule, range, companyCalendar);
+    expect(bounds.end > range.end).toBe(true);
+    expect(bounds.start).toBe(range.start);
+  });
+
+  it('週や月で決めるものは前後どちらへも広げる', () => {
+    // 向きが設定から決まらないので、片側だけだと取りこぼす。
+    const rule = makeRule({
+      id: 'w',
+      notices: [
+        { timing: { kind: 'weekday', weeks: 1, weekday: 3, onClosed: 'next' }, label: '報告' },
+      ],
+    });
+    const bounds = expandBoundsFor(rule, range, companyCalendar);
+    expect(bounds.start < range.start).toBe(true);
+    expect(bounds.end > range.end).toBe(true);
+  });
+
+  it('前後の予定が無ければ広げない', () => {
+    expect(expandBoundsFor(makeRule({ id: 'none', notices: [] }), range, companyCalendar)).toEqual(range);
   });
 });
 

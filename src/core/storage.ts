@@ -8,7 +8,7 @@
 import type { BusinessCalendar, Rule } from '../types';
 import { createDefaultCalendars, COMPANY_CALENDAR_ID } from './businessDay';
 import { todayInTokyo } from './dateUtil';
-import { ruleWithNoticeIds } from './notice';
+import { normalizeRule } from './notice';
 import { LIMITS, hasError, validateCalendar, validateRule } from './validate';
 
 export const SCHEMA_VERSION = 1;
@@ -145,7 +145,7 @@ export function loadState(store: KeyValueStore): LoadResult {
 
   // 読み込んだ時点で前後予定の id を補う。以後は順番が変わっても識別子が動かない。
   const ruleResult = keepValid<Rule>(rules, validateRule);
-  ruleResult.kept = ruleResult.kept.map(ruleWithNoticeIds);
+  ruleResult.kept = ruleResult.kept.map(normalizeRule);
   const calendarResult = keepValid<BusinessCalendar>(calendars, validateCalendar);
 
   return {
@@ -255,8 +255,8 @@ export function importState(raw: unknown, current: AppState, mode: ImportMode): 
 
   // 取り込んだルールにも、その場で前後予定の id を補う。
   const validRules = (file.rules ?? [])
-    .filter((rule) => !hasError(validateRule(rule)))
-    .map(ruleWithNoticeIds);
+    .filter((rule): rule is Rule => !hasError(validateRule(rule)))
+    .map(normalizeRule);
   const validCalendars = (file.calendars ?? []).filter(
     (calendar) => !hasError(validateCalendar(calendar)),
   );

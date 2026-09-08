@@ -169,7 +169,7 @@ describe('壊れた入力でも例外にしない', () => {
       notices: [{ offset: -1_000_000_000, unit: 'business', label: 'y' }],
     });
     const issues = validateRule(rule);
-    expect(issues.map((i) => i.path)).toContain('notices[0].offset');
+    expect(issues.map((i) => i.path)).toContain('notices[0].timing');
     expect(LIMITS.noticeOffset).toBeLessThanOrEqual(365);
   });
 

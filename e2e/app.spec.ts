@@ -452,6 +452,39 @@ test.describe('フォロー予定', () => {
     await page.getByRole('button', { name: '＋ 準備日を追加（前）' }).click();
     await expect(page.getByLabel('2 件目: 本体の前か後か')).toHaveValue('before');
   });
+
+  test('週と曜日で決められる', async ({ page }) => {
+    // 「翌週の水曜、水曜が休みなら木曜」を日数へ言い換えさせない。
+    await page.goto('');
+    await openRulePanel(page);
+    await page.getByRole('button', { name: '＋ 新規ルール' }).click();
+    await page.getByRole('button', { name: '自由入力' }).click();
+
+    await page.getByRole('button', { name: '＋ フォローを追加（後）' }).click();
+    await page.getByLabel('1 件目: 日付の決め方').selectOption('weekday');
+
+    await page.getByLabel('1 件目: どの週か').selectOption('1');
+    await page.getByLabel('1 件目: 曜日', { exact: true }).selectOption('3');
+    await page.getByLabel('1 件目: 曜日が休業日のとき').selectOption('next');
+
+    // 決まった内容を文章でも出す。設定欄だけでは読み取りにくいため。
+    await expect(page.locator('.notice-item .field-hint')).toContainText(
+      '翌週の水曜 / 休業日なら翌営業日へ',
+    );
+  });
+
+  test('月と第N営業日で決められる', async ({ page }) => {
+    await page.goto('');
+    await openRulePanel(page);
+    await page.getByRole('button', { name: '＋ 新規ルール' }).click();
+    await page.getByRole('button', { name: '自由入力' }).click();
+
+    await page.getByRole('button', { name: '＋ フォローを追加（後）' }).click();
+    await page.getByLabel('1 件目: 日付の決め方').selectOption('monthlyBusinessDay');
+    await page.getByLabel('1 件目: どの月か').selectOption('1');
+
+    await expect(page.locator('.notice-item .field-hint')).toContainText('翌月の第5営業日');
+  });
 });
 
 test.describe('グループの気づきやすさ', () => {

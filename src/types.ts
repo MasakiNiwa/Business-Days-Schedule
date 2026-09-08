@@ -155,12 +155,50 @@ export type Adjustment = {
 
 /** 事前通知（準備日）。offset は負値のみ。 */
 /**
+ * 前後予定の「日付の決め方」（docs/SPEC.md §5.4）。
+ *
+ * 決め方だけを差し替えられるよう、識別子（id）・名称（label）とは分けて持つ。
+ * 決め方を変えても同じ予定でいられるようにするため。
+ */
+export type NoticeTiming =
+  /** 本体から何日か。負なら前、正なら後。0 は本体と同じ日なので認めない。 */
+  | { kind: 'offset'; offset: number; unit: 'business' | 'calendar' }
+  /**
+   * 本体の属する週から数えた、指定の曜日。
+   * 「金曜締め → 翌週水曜に報告書提出」のような、暦の週で回る仕事のため。
+   */
+  | {
+      kind: 'weekday';
+      /** -1 = 前週、0 = 同じ週、1 = 翌週。週は月曜始まり。 */
+      weeks: number;
+      weekday: Weekday;
+      /** その曜日が休業日だったとき。'none' はそのままの日に置く。 */
+      onClosed: 'next' | 'prev' | 'none';
+    }
+  /**
+   * 本体の属する月から数えた、第N営業日。
+   * 「月末締め → 翌月第5営業日に請求書発行」のような、月で回る仕事のため。
+   */
+  | {
+      kind: 'monthlyBusinessDay';
+      /** 0 = 同じ月、1 = 翌月。 */
+      months: number;
+      /** 正 = 月初から（1 が第1営業日）、負 = 月末から（-1 が最終営業日）。 */
+      nth: number;
+    };
+
+/** 本体より前に置くつもりか、後ろに置くつもりか。 */
+export type NoticeRole = 'before' | 'after';
+
+/**
  * 本体の予定に紐づく、前後の予定（docs/SPEC.md §5.4）。
  *
- * 符号が向きを決める。負なら本体より前（準備日）、正なら本体より後（フォロー）。
  * 「振込データは3営業日前に作る」も「入金は5営業日後に消し込む」も、
  * 同じ1つのルールにぶら下げられる。別のルールとして作らせると、
  * 本体の日付が動いたときに片方だけ取り残される。
+ *
+ * `timing` が日付の決め方。古いデータは `offset`/`unit` を直に持っているので、
+ * 読み込みの時点で `{ kind: 'offset' }` へ均す（src/core/notice.ts）。
  */
 export type Notice = {
   /**
@@ -173,10 +211,18 @@ export type Notice = {
    * こうすると、既に書き出したぶんの UID が変わらない。
    */
   id?: string;
-  /** 負 = 前（準備日）、正 = 後（フォロー）。0 は本体と同じ日なので認めない。 */
-  offset: number;
-  unit: 'business' | 'calendar';
   label: string;
+  timing?: NoticeTiming;
+  /**
+   * 本体の前・後どちらのつもりか。日数指定では符号から決まるので省略できる。
+   * 週や月で決めると前後が入れ替わりうるので、そのときは意図として持ち、
+   * 実際の日付が食い違ったら警告に出す。
+   */
+  role?: NoticeRole;
+  /** @deprecated 旧形式。読み込み時に timing へ均す。 */
+  offset?: number;
+  /** @deprecated 旧形式。読み込み時に timing へ均す。 */
+  unit?: 'business' | 'calendar';
 };
 
 export type Rule = {

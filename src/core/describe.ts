@@ -5,7 +5,7 @@
  * 表示ロジックだが DOM に依存しないため core に置き、テストで固定する。
  */
 
-import type { Adjustment, Month, Recurrence, Rule } from '../types';
+import type { Adjustment, Month, NoticeTiming, Recurrence, Rule } from '../types';
 
 const WEEKDAY_NAMES = ['日', '月', '火', '水', '木', '金', '土'] as const;
 
@@ -132,6 +132,62 @@ export function describeNotice(offset: number, unit: 'business' | 'calendar'): s
   const amount = Math.abs(offset);
   const direction = offset < 0 ? '前' : '後';
   return unit === 'business' ? `${amount}営業日${direction}` : `${amount}日${direction}`;
+}
+
+const WEEK_LABELS: Record<string, string> = {
+  '-2': '前々週',
+  '-1': '前週',
+  '0': '同じ週',
+  '1': '翌週',
+  '2': '翌々週',
+};
+
+const MONTH_LABELS: Record<string, string> = {
+  '-2': '前々月',
+  '-1': '前月',
+  '0': '同じ月',
+  '1': '翌月',
+  '2': '翌々月',
+};
+
+const WEEKDAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'] as const;
+
+/**
+ * 前後予定の日付の決め方を、そのまま読める文章にする。
+ * 「本体の翌週水曜。休業日なら翌営業日へ」のように、保存前に確かめられるようにする。
+ */
+export function describeTiming(timing: NoticeTiming): string {
+  switch (timing.kind) {
+    case 'offset':
+      return describeNotice(timing.offset, timing.unit);
+    case 'weekday': {
+      const week =
+        WEEK_LABELS[String(timing.weeks)] ??
+        (timing.weeks > 0 ? `${timing.weeks}週後` : `${Math.abs(timing.weeks)}週前`);
+      const weekday = `${WEEKDAY_LABELS[timing.weekday] ?? '?'}曜`;
+      // 休業日でも動かさない設定は、わざわざ言わない。既定の読み方だと分かればよい。
+      const closed =
+        timing.onClosed === 'none'
+          ? ''
+          : timing.onClosed === 'next'
+            ? ' / 休業日なら翌営業日へ'
+            : ' / 休業日なら前営業日へ';
+      return `${week}の${weekday}${closed}`;
+    }
+    case 'monthlyBusinessDay': {
+      const month =
+        MONTH_LABELS[String(timing.months)] ??
+        (timing.months > 0 ? `${timing.months}か月後` : `${Math.abs(timing.months)}か月前`);
+      // -1 は「月末から1営業日目」だが、実務では最終営業日と呼ぶ。
+      const nth =
+        timing.nth > 0
+          ? `第${timing.nth}営業日`
+          : timing.nth === -1
+            ? '最終営業日'
+            : `月末から${Math.abs(timing.nth)}営業日目`;
+      return `${month}の${nth}`;
+    }
+  }
 }
 
 /** 有効期間の説明。無期限なら空文字。 */

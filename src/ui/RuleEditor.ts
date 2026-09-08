@@ -5,8 +5,8 @@
  * 頭の中で追いにくいため、入力するそばから実際の日付を見せることで誤設定を防ぐ。
  */
 
-import { describeRule } from '../core/describe';
-import { createNotice } from '../core/notice';
+import { describeRule, describeTiming } from '../core/describe';
+import { createNotice, roleOf, timingOf } from '../core/notice';
 import { createRule } from '../core/storage';
 import { todayInTokyo, weekdayOf } from '../core/dateUtil';
 import { previewSeries } from '../core/schedule';
@@ -18,6 +18,7 @@ import type {
   DateStr,
   Month,
   NthWeekday,
+  NoticeTiming,
   Recurrence,
   Rule,
   Weekday,
@@ -80,6 +81,36 @@ export type RuleEditorHandlers = {
 
 /** グループ名の入力候補。id は datalist と結ぶために使う。 */
 const GROUP_LIST_ID = 'rule-group-options';
+
+/** 「どの週か」の選択肢。実務で使う範囲に絞る。 */
+const WEEK_OPTIONS = [
+  { value: '-2', label: '前々週の' },
+  { value: '-1', label: '前週の' },
+  { value: '0', label: '同じ週の' },
+  { value: '1', label: '翌週の' },
+  { value: '2', label: '翌々週の' },
+];
+
+/** 「どの月か」の選択肢。 */
+const MONTH_OPTIONS = [
+  { value: '-1', label: '前月の' },
+  { value: '0', label: '同じ月の' },
+  { value: '1', label: '翌月の' },
+  { value: '2', label: '2か月後の' },
+  { value: '3', label: '3か月後の' },
+];
+
+/** 決め方を切り替えたときの初期値。役割（前・後）に近い形から始める。 */
+function defaultTimingFor(kind: NoticeTiming['kind'], role: 'before' | 'after'): NoticeTiming {
+  switch (kind) {
+    case 'offset':
+      return { kind: 'offset', offset: role === 'before' ? -3 : 3, unit: 'business' };
+    case 'weekday':
+      return { kind: 'weekday', weeks: role === 'before' ? -1 : 1, weekday: 3, onClosed: 'next' };
+    case 'monthlyBusinessDay':
+      return { kind: 'monthlyBusinessDay', months: role === 'before' ? 0 : 1, nth: 5 };
+  }
+}
 
 export class RuleEditor {
   readonly element: HTMLFormElement;
@@ -739,61 +770,46 @@ export class RuleEditor {
   private buildNotices(): HTMLElement {
     const list = h('div', { class: 'rows' });
 
+    /** 決め方を差し替える。id・名称・役割はそのまま持ち越す。 */
+    const setTiming = (index: number, timing: NoticeTiming): void => {
+      const notice = this.draft.notices[index];
+      if (notice === undefined) return;
+      this.draft.notices[index] = { ...notice, timing };
+      render();
+      this.refresh();
+    };
+
     const render = (): void => {
       clear(list);
       this.draft.notices.forEach((notice, index) => {
-        // 向きは offset の符号で持つ。画面では「前／後」の選択として見せる。
-        const isFollow = notice.offset > 0;
-        const applyOffset = (amount: number, follow: boolean): void => {
-          const size = Math.max(1, Math.floor(Math.abs(amount)));
-          notice.offset = follow ? size : -size;
-        };
+        const timing = timingOf(notice);
+        const label = `${index + 1} 件目`;
 
-        list.append(
+        const rows = h('div', { class: 'notice-rows' });
+
+        // 決め方そのものの選択。ここを変えると下の入力欄が入れ替わる。
+        rows.append(
           h(
             'div',
             { class: 'row' },
             named(
-              numberInput(Math.abs(notice.offset), (value) => {
-                applyOffset(value, notice.offset > 0);
-                this.refresh();
-              }, { min: 1, max: 365 }),
-              `${index + 1} 件目: 本体から何日か`,
-            ),
-            named(
               select(
                 [
-                  { value: 'business', label: '営業日' },
-                  { value: 'calendar', label: '暦日' },
+                  { value: 'offset', label: '日数で指定' },
+                  { value: 'weekday', label: '週と曜日で指定' },
+                  { value: 'monthlyBusinessDay', label: '月と第N営業日で指定' },
                 ],
-                notice.unit,
-                (value) => {
-                  notice.unit = value;
-                  this.refresh();
-                },
+                timing.kind,
+                (value) => setTiming(index, defaultTimingFor(value, roleOf(notice))),
               ),
-              `${index + 1} 件目: 単位`,
-            ),
-            named(
-              select(
-                [
-                  { value: 'before', label: '前（準備）' },
-                  { value: 'after', label: '後（フォロー）' },
-                ],
-                isFollow ? 'after' : 'before',
-                (value) => {
-                  applyOffset(notice.offset, value === 'after');
-                  render();
-                  this.refresh();
-                },
-              ),
-              `${index + 1} 件目: 本体の前か後か`,
+              `${label}: 日付の決め方`,
             ),
             named(
               textInput(notice.label, (value) => {
-                notice.label = value;
-              }, isFollow ? '例: 入金消込' : '例: 振込データ作成'),
-              `${index + 1} 件目: 表示名`,
+                const current = this.draft.notices[index];
+                if (current !== undefined) current.label = value;
+              }, '例: 振込データ作成'),
+              `${label}: 表示名`,
             ),
             button('削除', () => {
               this.draft.notices.splice(index, 1);
@@ -802,7 +818,116 @@ export class RuleEditor {
             }, 'button button-sm button-quiet'),
           ),
         );
+
+        if (timing.kind === 'offset') {
+          const isFollow = timing.offset > 0;
+          rows.append(
+            h(
+              'div',
+              { class: 'row' },
+              named(
+                numberInput(Math.abs(timing.offset), (value) => {
+                  const size = Math.max(1, Math.floor(Math.abs(value)));
+                  setTiming(index, { ...timing, offset: isFollow ? size : -size });
+                }, { min: 1, max: 365 }),
+                `${label}: 本体から何日か`,
+              ),
+              named(
+                select(
+                  [
+                    { value: 'business', label: '営業日' },
+                    { value: 'calendar', label: '暦日' },
+                  ],
+                  timing.unit,
+                  (value) => setTiming(index, { ...timing, unit: value }),
+                ),
+                `${label}: 単位`,
+              ),
+              named(
+                select(
+                  [
+                    { value: 'before', label: '前（準備）' },
+                    { value: 'after', label: '後（フォロー）' },
+                  ],
+                  isFollow ? 'after' : 'before',
+                  (value) => {
+                    const size = Math.abs(timing.offset);
+                    setTiming(index, { ...timing, offset: value === 'after' ? size : -size });
+                  },
+                ),
+                `${label}: 本体の前か後か`,
+              ),
+            ),
+          );
+        } else if (timing.kind === 'weekday') {
+          rows.append(
+            h(
+              'div',
+              { class: 'row' },
+              named(
+                select(
+                  WEEK_OPTIONS,
+                  String(timing.weeks),
+                  (value) => setTiming(index, { ...timing, weeks: Number(value) }),
+                ),
+                `${label}: どの週か`,
+              ),
+              named(
+                select(
+                  WEEKDAY_NAMES.map((name, weekday) => ({
+                    value: String(weekday),
+                    label: `${name}曜`,
+                  })),
+                  String(timing.weekday),
+                  (value) => setTiming(index, { ...timing, weekday: Number(value) as Weekday }),
+                ),
+                `${label}: 曜日`,
+              ),
+              named(
+                select(
+                  [
+                    { value: 'next', label: '休業日なら翌営業日へ' },
+                    { value: 'prev', label: '休業日なら前営業日へ' },
+                    { value: 'none', label: '休業日でもその日' },
+                  ],
+                  timing.onClosed,
+                  (value) => setTiming(index, { ...timing, onClosed: value }),
+                ),
+                `${label}: 曜日が休業日のとき`,
+              ),
+            ),
+          );
+        } else {
+          rows.append(
+            h(
+              'div',
+              { class: 'row' },
+              named(
+                select(
+                  MONTH_OPTIONS,
+                  String(timing.months),
+                  (value) => setTiming(index, { ...timing, months: Number(value) }),
+                ),
+                `${label}: どの月か`,
+              ),
+              named(
+                numberInput(timing.nth, (value) => {
+                  const nth = Math.trunc(value);
+                  if (nth === 0) return;
+                  setTiming(index, { ...timing, nth });
+                }, { min: -25, max: 25 }),
+                `${label}: 第N営業日（負は月末から）`,
+              ),
+              h('span', { class: 'unit' }, timing.nth > 0 ? '営業日（月初から）' : '営業日（月末から）'),
+            ),
+          );
+        }
+
+        // 何が起きるかを文章でも出す。設定欄だけでは読み取りにくいため。
+        rows.append(h('p', { class: 'field-hint' }, `→ 本体の${describeTiming(timing)}`));
+        list.append(h('div', { class: 'notice-item' }, rows));
       });
+
       list.append(
         h(
           'div',
@@ -810,14 +935,20 @@ export class RuleEditor {
           button('＋ 準備日を追加（前）', () => {
             // id を先に決める。順番ではなくこれが外部カレンダーの識別子になる。
             this.draft.notices.push(
-              createNotice({ offset: -3, unit: 'business', label: '準備' }, this.draft.notices),
+              createNotice(
+                { label: '準備', timing: { kind: 'offset', offset: -3, unit: 'business' }, role: 'before' },
+                this.draft.notices,
+              ),
             );
             render();
             this.refresh();
           }, 'button button-sm'),
           button('＋ フォローを追加（後）', () => {
             this.draft.notices.push(
-              createNotice({ offset: 3, unit: 'business', label: 'フォロー' }, this.draft.notices),
+              createNotice(
+                { label: 'フォロー', timing: { kind: 'offset', offset: 3, unit: 'business' }, role: 'after' },
+                this.draft.notices,
+              ),
             );
             render();
             this.refresh();
@@ -841,7 +972,8 @@ export class RuleEditor {
       h(
         'p',
         { class: 'field-hint' },
-        '例: 給与振込の「3営業日前に振込データ作成」、請求書発行の「5営業日後に入金消込」。',
+        '日付の決め方は3通り。日数（3営業日前）、週と曜日（翌週水曜）、' +
+          '月と第N営業日（翌月第5営業日）。実際の日付は下のプレビューで確かめられます。',
       ),
       list,
     );
