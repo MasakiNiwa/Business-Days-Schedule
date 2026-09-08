@@ -110,6 +110,7 @@ describe('renderCalendarExport', () => {
       to: '2026-09-30',
       format: 'csv',
       includeNotices: true,
+      includeFollows: true,
       group: null,
     });
   });
@@ -122,13 +123,48 @@ describe('renderCalendarExport', () => {
     expect(element.textContent).toContain('Outlook.com では CSV の取り込みができない');
   });
 
-  it('事前通知を外せる', () => {
-    const { element, handlers } = open();
-    const checkbox = element.querySelector<HTMLInputElement>('.checkbox input');
-    checkbox!.checked = false;
-    checkbox?.dispatchEvent(new Event('change'));
-    clickText(element, '書き出す');
-    expect(vi.mocked(handlers.onExport).mock.calls[0]?.[0]?.includeNotices).toBe(false);
+  it('準備日とフォローを別々に外せる', () => {
+    // 片方だけ要ることがあるので、まとめて1つにしない。
+    const boxes = (root: ParentNode): HTMLInputElement[] =>
+      [...root.querySelectorAll<HTMLInputElement>('.checkbox input')];
+
+    const first = open();
+    const [notice] = boxes(first.element);
+    notice!.checked = false;
+    notice?.dispatchEvent(new Event('change'));
+    clickText(first.element, '書き出す');
+    const a = vi.mocked(first.handlers.onExport).mock.calls[0]?.[0];
+    expect(a?.includeNotices).toBe(false);
+    expect(a?.includeFollows).toBe(true);
+
+    const second = open();
+    const [, follow] = boxes(second.element);
+    follow!.checked = false;
+    follow?.dispatchEvent(new Event('change'));
+    clickText(second.element, '書き出す');
+    const b = vi.mocked(second.handlers.onExport).mock.calls[0]?.[0];
+    expect(b?.includeNotices).toBe(true);
+    expect(b?.includeFollows).toBe(false);
+  });
+
+  it('日付欄を空にすると書き出せない', () => {
+    // 欄が空なのに前の値で書き出せると、画面に出ていない期間を渡してしまう。
+    const { element } = open();
+    const [from] = dateInputs(element);
+    from!.value = '';
+    from?.dispatchEvent(new Event('change'));
+
+    expect(element.querySelector('.issue-error')?.textContent).toContain('両方を入力してください');
+    const exportButton = [...element.querySelectorAll('button')].find((b) => b.textContent === '書き出す');
+    expect(exportButton?.disabled).toBe(true);
+    expect(element.querySelector('.export-summary')?.textContent).toBe('');
+  });
+
+  it('期間の開始日・終了日に名前が付いている', () => {
+    const { element } = open();
+    const [from, to] = dateInputs(element);
+    expect(from?.getAttribute('aria-label')).toBe('書き出す期間の開始日');
+    expect(to?.getAttribute('aria-label')).toBe('書き出す期間の終了日');
   });
 
   it('閉じるを呼べる', () => {

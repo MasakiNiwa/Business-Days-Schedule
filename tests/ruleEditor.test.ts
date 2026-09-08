@@ -299,3 +299,52 @@ describe('グループ', () => {
     expect(groupInput(form).value).toBe('税務');
   });
 });
+
+describe('プレビューの前後の予定', () => {
+  it('本体だけでなく準備日・フォローも実際の日付で並べる', () => {
+    // 本体の日付しか出していなかったため、「3営業日前」と「3営業日後」を
+    // 取り違えていても保存前に気づけなかった。
+    const rule = makeRule({
+      ...salary,
+      notices: [
+        { offset: -3, unit: 'business', label: '振込データ作成' },
+        { offset: 1, unit: 'business', label: '結果の確認' },
+      ],
+    });
+    const { form } = open(rule);
+
+    const first = form.querySelector('.preview-list > li');
+    const related = [...(first?.querySelectorAll('.preview-related-item') ?? [])];
+    expect(related).toHaveLength(2);
+
+    const text = related.map((node) => node.textContent ?? '');
+    expect(text[0]).toContain('↑前');
+    expect(text[0]).toContain('振込データ作成');
+    expect(text[1]).toContain('↓後');
+    expect(text[1]).toContain('結果の確認');
+  });
+
+  it('前後の予定は日付順に並ぶ（前 → 本体 → 後）', () => {
+    const rule = makeRule({
+      ...salary,
+      notices: [
+        { offset: 1, unit: 'business', label: 'あと' },
+        { offset: -3, unit: 'business', label: 'まえ' },
+      ],
+    });
+    const { form } = open(rule);
+    const first = form.querySelector('.preview-list > li');
+    const dates = [...(first?.querySelectorAll('.preview-related-item .preview-date') ?? [])].map(
+      (node) => node.textContent ?? '',
+    );
+    const mainDate = first?.querySelector('.preview-date')?.textContent ?? '';
+    expect(dates).toHaveLength(2);
+    expect(dates[0]! < mainDate, `${dates[0]} < ${mainDate}`).toBe(true);
+    expect(dates[1]! > mainDate, `${dates[1]} > ${mainDate}`).toBe(true);
+  });
+
+  it('前後の予定が無ければ何も足さない', () => {
+    const { form } = open(makeRule({ ...salary, notices: [] }));
+    expect(form.querySelectorAll('.preview-related')).toHaveLength(0);
+  });
+});

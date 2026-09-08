@@ -21,14 +21,17 @@ import {
 import type { CalendarExportFormat } from '../core/exportCalendar';
 import { UNGROUPED, groupLabel } from '../core/group';
 import type { DateStr } from '../types';
-import { button, checkbox, dateInput, field, select } from './controls';
+import { button, checkbox, dateInput, field, named, select } from './controls';
 import { clear, h } from './dom';
 
 export type CalendarExportRequest = {
   from: DateStr;
   to: DateStr;
   format: CalendarExportFormat;
+  /** 準備日（本体より前）も書き出すか。 */
   includeNotices: boolean;
+  /** フォロー（本体より後）も書き出すか。 */
+  includeFollows: boolean;
   /** 書き出す対象のグループ。null は「すべて」。 */
   group: string | null;
 };
@@ -83,33 +86,58 @@ export function renderCalendarExport(
   options: CalendarExportOptionsInput = { groups: [], hasUngrouped: true, activeGroup: null },
 ): HTMLElement {
   const initial = monthRange(today, 0);
-  const request: CalendarExportRequest = {
+  // 日付は「未入力」を持てるようにする。欄を空にしたのに前の値で書き出せると、
+  // 画面に出ていない期間を渡してしまう。
+  const draft: {
+    from: DateStr | null;
+    to: DateStr | null;
+    format: CalendarExportFormat;
+    includeNotices: boolean;
+    includeFollows: boolean;
+    group: string | null;
+  } = {
     from: initial.from,
     to: initial.to,
     format: 'ics',
     includeNotices: true,
+    includeFollows: true,
     // 絞り込んで見ていたなら、その束を渡したいはず。見ているものと渡すものが
     // 食い違うと、画面に無い予定が取り込み先へ紛れ込む。
     group: options.activeGroup,
   };
 
+  /** 入力がそろっているときだけ、実際の書き出し内容になる。 */
+  const requestOf = (): CalendarExportRequest | null =>
+    draft.from === null || draft.to === null || draft.from > draft.to
+      ? null
+      : { ...draft, from: draft.from, to: draft.to };
+
   const summary = h('p', { class: 'export-summary' });
   const issues = h('div', { class: 'issues' });
-  const fromInput = dateInput(request.from, (value) => {
-    if (value !== null) request.from = value;
-    refresh();
-  });
-  const toInput = dateInput(request.to, (value) => {
-    if (value !== null) request.to = value;
-    refresh();
-  });
+  const fromInput = named(
+    dateInput(draft.from, (value) => {
+      draft.from = value;
+      refresh();
+    }),
+    '書き出す期間の開始日',
+  );
+  const toInput = named(
+    dateInput(draft.to, (value) => {
+      draft.to = value;
+      refresh();
+    }),
+    '書き出す期間の終了日',
+  );
 
   const exportButton = h(
     'button',
     { type: 'button', class: 'button button-primary' },
     '書き出す',
   );
-  exportButton.addEventListener('click', () => handlers.onExport({ ...request }));
+  exportButton.addEventListener('click', () => {
+    const request = requestOf();
+    if (request !== null) handlers.onExport(request);
+  });
 
   const presets = h('div', { class: 'presets', role: 'group', 'aria-label': 'よく使う期間' });
   const presetButtons = PRESETS.map((preset) => {
@@ -117,8 +145,8 @@ export function renderCalendarExport(
       preset.label,
       () => {
         const range = preset.range(today);
-        request.from = range.from;
-        request.to = range.to;
+        draft.from = range.from;
+        draft.to = range.to;
         fromInput.value = range.from;
         toInput.value = range.to;
         refresh();
@@ -133,18 +161,24 @@ export function renderCalendarExport(
     clear(issues);
     for (const { preset, item } of presetButtons) {
       const range = preset.range(today);
-      const selected = range.from === request.from && range.to === request.to;
+      const selected = range.from === draft.from && range.to === draft.to;
       item.setAttribute('aria-pressed', selected ? 'true' : 'false');
     }
 
-    const valid = request.from <= request.to;
-    exportButton.disabled = !valid;
-    if (!valid) {
-      issues.append(h('p', { class: 'issue issue-error' }, '開始日が終了日より後になっています'));
+    const request = requestOf();
+    exportButton.disabled = request === null;
+    if (request === null) {
       summary.textContent = '';
+      if (draft.from === null || draft.to === null) {
+        issues.append(
+          h('p', { class: 'issue issue-error' }, '開始日と終了日の両方を入力してください'),
+        );
+      } else {
+        issues.append(h('p', { class: 'issue issue-error' }, '開始日が終了日より後になっています'));
+      }
       return;
     }
-    const count = handlers.countOccurrences({ ...request });
+    const count = handlers.countOccurrences(request);
     summary.textContent = `${request.from} 〜 ${request.to} の ${count} 件を書き出します。`;
     if (count === 0) {
       issues.append(
@@ -164,7 +198,7 @@ export function renderCalendarExport(
   const formatHint = h('p', { class: 'field-hint' });
   const setFormatHint = (): void => {
     formatHint.textContent =
-      request.format === 'ics'
+      draft.format === 'ics'
         ? 'iCalendar 形式。Google カレンダー・Outlook・Apple カレンダーのいずれでも取り込めます。迷ったらこちら。'
         : 'CSV 形式。Google カレンダーの取り込みと、表計算ソフトで中身を確かめたいとき向けです。Outlook.com では CSV の取り込みができないため、その場合は iCalendar を使ってください。';
   };
@@ -177,7 +211,7 @@ export function renderCalendarExport(
     h(
       'p',
       { class: 'field-hint' },
-      '指定した期間の予定を、営業日補正を適用した日付で書き出します。繰り返しの設定そのものは渡らないため、期間が過ぎたら書き出し直してください。',
+      '指定した期間の予定を、営業日補正を適用した日付で書き出します。繰り返しの設定そのものは渡らないため、期間が過ぎたら書き出し直してください。書き出したあとに自動で同期はされません。',
     ),
     // 取り込みは「元に戻す」が効かない操作なので、押す前に必ず目に入る位置へ置く。
     h(
@@ -202,9 +236,9 @@ export function renderCalendarExport(
                 ? [{ value: UNGROUPED, label: groupLabel(UNGROUPED) }]
                 : []),
             ],
-            request.group === null ? ALL_GROUPS : request.group,
+            draft.group === null ? ALL_GROUPS : draft.group,
             (value) => {
-              request.group = value === ALL_GROUPS ? null : value;
+              draft.group = value === ALL_GROUPS ? null : value;
               refresh();
             },
           ),
@@ -217,17 +251,27 @@ export function renderCalendarExport(
         { value: 'ics', label: 'iCalendar (.ics) — 推奨' },
         { value: 'csv', label: 'CSV (.csv) — Google カレンダー / 表計算' },
       ],
-      request.format,
+      draft.format,
       (value) => {
-        request.format = value;
+        draft.format = value;
         setFormatHint();
       },
     )),
     formatHint,
-    checkbox('準備日も書き出す', request.includeNotices, (value) => {
-      request.includeNotices = value;
-      refresh();
-    }),
+    // 前と後で要否が分かれることがあるので、まとめて1つにしない。
+    h(
+      'div',
+      { class: 'field', role: 'group', 'aria-label': '本体に紐づく前後の予定' },
+      h('span', { class: 'field-label' }, '前後の予定'),
+      checkbox('準備日（本体より前）も書き出す', draft.includeNotices, (value) => {
+        draft.includeNotices = value;
+        refresh();
+      }),
+      checkbox('フォロー（本体より後）も書き出す', draft.includeFollows, (value) => {
+        draft.includeFollows = value;
+        refresh();
+      }),
+    ),
     summary,
     issues,
     h(

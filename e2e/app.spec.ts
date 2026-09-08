@@ -219,6 +219,43 @@ test.describe('表示', () => {
     await expect(page.locator('.brand-bar')).toBeHidden();
     await expect(page.locator('.footer-version')).toBeHidden();
   });
+
+  test('印刷に画面用の操作を出さない', async ({ page }) => {
+    await page.goto('');
+    await loadSamplePack(page, '税務');
+    await closeDialog(page);
+    await page.emulateMedia({ media: 'print' });
+
+    // 紙の上では押せないので出さない。
+    await expect(page.locator('.toolbar-right')).toBeHidden();
+    await expect(page.locator('.toolbar-left .field')).toBeHidden();
+    // 営業日数と決算月は紙に残る情報として意味があるので出す。
+    await expect(page.locator('.month-summary')).toBeVisible();
+  });
+
+  test('点表示のままでも印刷には予定名が出る', async ({ page }) => {
+    // 紙には色の点しか残らず何も読めなくなるため。
+    await page.goto('');
+    await loadSamplePack(page, '税務');
+    await closeDialog(page);
+    await page.getByRole('button', { name: '点', exact: true }).click();
+    await expect(page.locator('.chips .chip-label').first()).toBeHidden();
+
+    await page.emulateMedia({ media: 'print' });
+    await expect(page.locator('.chips .chip-label').first()).toBeVisible();
+  });
+
+  test('絞り込んだグループを紙にも残す', async ({ page }) => {
+    // 絞り込んだ結果だけを渡されると、全部だと誤解される。
+    await page.goto('');
+    await loadSamplePack(page, '税務');
+    await closeDialog(page);
+    await page.locator('.toolbar-left select').selectOption('税務');
+
+    await expect(page.locator('.print-group')).toBeHidden();
+    await page.emulateMedia({ media: 'print' });
+    await expect(page.locator('.print-group')).toHaveText('グループ: 税務');
+  });
 });
 
 test('給与のひな型から1件保存できる', async ({ page }) => {
@@ -451,5 +488,24 @@ test.describe('ヘルプ', () => {
 
     await page.getByRole('link', { name: '決算月から逆算する' }).click();
     await expect(page.locator('#help-fiscal')).toBeInViewport();
+  });
+});
+
+test.describe('ひな型とグループ', () => {
+  test('絞り込み中にひな型を選んでもグループが残る', async ({ page }) => {
+    // グループが消えると、保存した直後に絞り込み中の画面から消えて戸惑わせる。
+    await page.goto('');
+    await loadSamplePack(page, '基本セット');
+    await closeDialog(page);
+    await page.locator('.toolbar-left select').selectOption('基本');
+
+    await openRulePanel(page);
+    await page.getByRole('button', { name: '＋ 新規ルール' }).click();
+    // 画面上部の絞り込みにも「グループ」があるので、編集画面の欄に絞る。
+    const groupField = page.locator('dialog').getByLabel('グループ');
+    await expect(groupField).toHaveValue('基本');
+
+    await page.getByRole('button', { name: '給与', exact: true }).click();
+    await expect(groupField).toHaveValue('基本');
   });
 });

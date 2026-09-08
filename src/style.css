@@ -965,6 +965,43 @@ button {
   font-weight: 600;
 }
 
+/*
+ * 本体にぶら下がる準備日・フォロー。順番（前 → 本体 → 後）が目に入るよう、
+ * 本体より一段下げて日付順に並べる。
+ */
+.preview-related {
+  list-style: none;
+  margin: 0.15rem 0 0.3rem;
+  padding: 0 0 0 0.9rem;
+  border-left: 2px solid var(--border);
+}
+
+.preview-related-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--fg-muted);
+}
+
+.preview-related-mark {
+  flex: none;
+  font-size: 0.7rem;
+  padding: 0 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.preview-related-item.is-follow .preview-related-mark {
+  color: var(--blue);
+  border-color: var(--blue);
+}
+
+.preview-related-label {
+  overflow-wrap: anywhere;
+}
+
 /* --- 検証メッセージ ---------------------------------------------------- */
 
 .issues {
@@ -1468,6 +1505,12 @@ button {
 .toolbar-label {
   font-size: 0.78rem;
   color: var(--fg-muted);
+}
+
+/* 印刷のときだけ出す見出し。画面では絞り込み欄そのものが見えている。 */
+.print-group {
+  display: none;
+  margin: 0;
 }
 
 .month-summary {
@@ -2117,48 +2160,71 @@ main:focus {
   .update-banner,
   .brand-bar,
   .footer-version,
-  .footer-link {
+  .footer-link,
+  /* 画面の見え方を変える操作は、紙の上では押せないので出さない。 */
+  .toolbar-right,
+  .view-toolbar .field,
+  .rules,
+  .rule-panel {
     display: none;
   }
 
+  /* 何で絞ったかは紙にも残す。絞り込んだ結果だけ渡されると誤解を招く。 */
+  .view-toolbar {
+    display: block;
+    margin: 0 0 0.4em;
+  }
+
+  .print-group {
+    display: block;
+    font-size: 0.9em;
+    font-weight: 600;
+  }
+
+  /*
+   * 点表示のまま印刷すると、紙には色の点しか残らず何も読めない。
+   * 印刷では必ず予定名を出す（画面の設定に関わらず）。
+   */
+  .is-dots .chips {
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .is-dots .chip {
+    width: auto;
+    height: auto;
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--chip) 16%, transparent);
+  }
+
+  .is-dots .chip.is-notice {
+    background: transparent;
+    border: 1px dashed color-mix(in srgb, var(--chip) 55%, transparent);
+  }
+
+  .is-dots .chip-label,
+  .is-dots .chip-mark {
+    display: inline;
+  }
+
   /* 営業日数と祝日データの出典は、紙に残る情報として意味があるので印刷する。 */
-  /* --- 表示の絞り込み ------------------------------------------------------ */
-
-/*
- * カレンダー・一覧のすぐ上に置く操作の帯。「いま見ているものの見え方」を決める
- * ものだけを入れる。ヘッダーへ混ぜると、どれが対象への操作なのか読めなくなる。
- */
-.view-toolbar {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-  margin-bottom: 0.6rem;
-}
-
-.toolbar-left,
-.toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.toolbar-left .field {
-  flex-direction: row;
-  align-items: center;
-  gap: 0.4rem;
-  margin: 0;
-}
-
-.toolbar-label {
-  font-size: 0.78rem;
-  color: var(--fg-muted);
-}
-
-.month-summary {
+  .month-summary {
     margin: 0 0 0.6em;
     color: #333;
+  }
+
+  /* 押しても何も起きない紙の上で、ボタンらしい見た目は邪魔になる。 */
+  .month-summary.is-link {
+    display: block;
+    padding: 0;
+    margin-left: 0;
+    border: none;
+    background: none;
+  }
+
+  .month-summary.is-link::after {
+    content: '';
   }
 
   .app-footer {
