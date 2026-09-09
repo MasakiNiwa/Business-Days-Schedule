@@ -652,6 +652,62 @@ test.describe('最初の導線', () => {
   });
 });
 
+test.describe('やりたいことから探す', () => {
+  test('ヘルプの先頭に置き、開くと手順が出る', async ({ page }) => {
+    await page.goto('');
+    await page.locator('.header-actions').getByRole('button', { name: '使い方・ヘルプ' }).click();
+
+    const tasks = page.locator('.help-task');
+    await expect(tasks.first()).toBeVisible();
+    // 畳んであるので、答えはまだ見えない。
+    await expect(tasks.first().locator('.help-task-body')).toBeHidden();
+
+    await tasks.first().locator('summary').click();
+    await expect(tasks.first().locator('.help-task-body')).toContainText('前営業日');
+  });
+
+  test('その場からルール作成へ進める', async ({ page }) => {
+    await page.goto('');
+    await page.locator('.header-actions').getByRole('button', { name: '使い方・ヘルプ' }).click();
+
+    const salary = page.locator('.help-task').first();
+    await salary.locator('summary').click();
+    await salary.getByRole('button', { name: 'ルールを作る' }).click();
+
+    await expect(page.locator('.editor-title')).toHaveText('ルールを追加');
+  });
+
+  test('書き出しの項目からは書き出し画面へ進める', async ({ page }) => {
+    await page.goto('');
+    await page.locator('.header-actions').getByRole('button', { name: '使い方・ヘルプ' }).click();
+
+    const task = page.locator('.help-task', {
+      hasText: '作った予定を Outlook / Google カレンダーで見たい',
+    });
+    await task.locator('summary').click();
+    await task.getByRole('button', { name: '書き出しを開く' }).click();
+
+    await expect(page.locator('.export')).toBeVisible();
+  });
+
+  test('空の画面からも使い方へ入れる', async ({ page }) => {
+    await page.goto('');
+    await page.locator('.empty-prompt').getByRole('button', { name: '使い方を見る' }).click();
+    await expect(page.locator('.help-task').first()).toBeVisible();
+  });
+
+  test('ヘルプを開いても横スクロールが出ない', async ({ page }) => {
+    await page.goto('');
+    await page.locator('.header-actions').getByRole('button', { name: '使い方・ヘルプ' }).click();
+    await page.locator('.help-task').first().locator('summary').click();
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(0);
+  });
+});
+
 test.describe('グループの気づきやすさ', () => {
   test('グループを使っていない人にも案内を出す', async ({ page }) => {
     // 絞り込み欄そのものが出ないため、機能があること自体に気づけない。

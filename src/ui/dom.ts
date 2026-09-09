@@ -29,3 +29,14 @@ export function h<K extends keyof HTMLElementTagNameMap>(
 export function clear(element: Element): void {
   element.replaceChildren();
 }
+
+/**
+ * 見える位置まで運ぶ。jsdom には実装が無いので、無ければ黙って諦める。
+ * 画面上の親切なので、無くても機能は損なわれない。
+ */
+export function scrollIntoView(
+  element: Element | null | undefined,
+  block: ScrollLogicalPosition = 'start',
+): void {
+  element?.scrollIntoView?.({ block });
+}

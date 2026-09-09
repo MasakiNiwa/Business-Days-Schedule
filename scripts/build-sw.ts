@@ -70,8 +70,19 @@ self.addEventListener('activate', (event) => {
 });
 
 // 利用者が「今すぐ更新」を選んだとき、待機中の版へ切り替える。
+//
+// PRECACHE_MANIFEST は「いま画面に出ている版が、この新しい版と同じかどうか」を
+// アプリ側が判断するためのもの。画面遷移はネットワーク優先で、資産名には
+// 内容のハッシュが入っているので、オンラインで開いた時点の画面は既に最新版。
+// そこで「新しい版があります」と出しても、押しても何も変わらない。
 self.addEventListener('message', (event) => {
-  if (event.data === 'SKIP_WAITING') void self.skipWaiting();
+  if (event.data === 'SKIP_WAITING') {
+    void self.skipWaiting();
+    return;
+  }
+  if (event.data === 'PRECACHE_MANIFEST') {
+    event.ports[0]?.postMessage(PRECACHE);
+  }
 });
 
 self.addEventListener('fetch', (event) => {

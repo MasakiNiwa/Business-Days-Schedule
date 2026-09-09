@@ -8,9 +8,152 @@
 
 import { APP_NAME } from '../core/buildInfo';
 import { button } from './controls';
-import { h } from './dom';
+import { h, scrollIntoView } from './dom';
 
 type Row = { term: string; body: string };
+
+/**
+ * 「やりたいこと」から引く索引。
+ *
+ * 節見出しは覚えたあとなら探せるが、初めての人は自分の業務を
+ * どの項目に置き換えればよいかから悩む。やりたいことの言葉のまま並べ、
+ * 答えと、そこへ行くための操作を1つずつ添える。
+ */
+type Task = {
+  /** やりたいことを、業務の言葉のまま書く。 */
+  goal: string;
+  /** どうすればよいか。読んだだけで手が動く長さにする。 */
+  answer: string;
+  /** 詳しく読む先の節。 */
+  section: string;
+  /** その場から始められるなら、行き先の名前。 */
+  action?: HelpAction;
+};
+
+/** ヘルプから直接始められる操作。読むだけで終わらせないため。 */
+export type HelpAction = 'newRule' | 'samples' | 'settings' | 'export' | 'rules';
+
+const ACTION_LABELS: Record<HelpAction, string> = {
+  newRule: 'ルールを作る',
+  samples: '完成例を見る',
+  settings: '営業日・決算月の設定を開く',
+  export: '書き出しを開く',
+  rules: 'ルール一覧を開く',
+};
+
+const TASKS: Task[] = [
+  {
+    goal: '毎月25日の給与振込を作りたい。25日が休みなら前営業日にしたい',
+    answer:
+      'ルールを作る →〈給与〉のひな型 → 繰り返しは「毎月N日」で 25 → 「休業日にあたったとき」を〈前営業日へ〉。保存欄に直近の日付が出るので、そこで確かめられます。',
+    section: 'adjust',
+    action: 'newRule',
+  },
+  {
+    goal: '月末締めにしたい。月末が休みでも月末のままにしたい',
+    answer:
+      '繰り返しは「毎月N日」で〈末日〉を選び、「休業日にあたったとき」を〈補正なし〉にします。締め日そのものは動かさず、作業だけ前営業日に置きたいときは、前後の予定を足してください。',
+    section: 'adjust',
+    action: 'newRule',
+  },
+  {
+    goal: '毎月第5営業日に請求書を出したい',
+    answer:
+      '繰り返しを「第N営業日」にして 5 を指定します。はじめから休業日を数えずに数えるので、休業日の補正は要りません（欄も出ません）。',
+    section: 'recurrence',
+    action: 'newRule',
+  },
+  {
+    goal: '月末から2営業日前に支払処理をしたい',
+    answer:
+      '繰り返しを「第N営業日」にして、〈月末から〉＋〈2営業日目〉を選びます。負の数を入れる必要はありません。',
+    section: 'recurrence',
+    action: 'newRule',
+  },
+  {
+    goal: '決算期に合わせた予定（申告期限・期首・中間申告）を作りたい',
+    answer:
+      'まず〈自社カレンダー〉の決算月を自社に合わせます。そのうえで繰り返しを「決算月基準」にすると、「決算月の2か月後の末日」のように書けます。決算月を変えれば、ぶら下がる予定がまとめて動きます。',
+    section: 'fiscal',
+    action: 'settings',
+  },
+  {
+    goal: '振込の3営業日前に「データ作成」を出したい',
+    answer:
+      'そのルールを編集し、「3. 準備や確認の予定を付ける（任意）」を開いて〈＋ 準備日を追加（前）〉。日数を 3、単位を〈営業日〉にします。本体が休業日で動けば、準備日も一緒に動きます。',
+    section: 'notices',
+    action: 'rules',
+  },
+  {
+    goal: '請求書を出したあと、翌週の水曜に確認したい',
+    answer:
+      '前後の予定を足し、日付の決め方を〈週と曜日で指定〉に。〈翌週〉〈水曜〉を選び、水曜が休みのときの扱い（翌営業日へ送る／前営業日へ戻す／その日のまま）も選べます。',
+    section: 'notices',
+    action: 'rules',
+  },
+  {
+    goal: '締めたあと、翌月の第5営業日に処理したい',
+    answer:
+      '前後の予定を足し、日付の決め方を〈月と第N営業日で指定〉に。〈翌月〉〈月初から〉〈5営業日目〉を選びます。',
+    section: 'notices',
+    action: 'rules',
+  },
+  {
+    goal: '会社の休業日（年末年始・創立記念日）を反映したい',
+    answer:
+      'カレンダーの上にある〈自社カレンダー: 営業日◯日 …〉を押すと設定が開きます。週の休業日、毎年の休業期間、臨時の休業日、休業日だが営業する日を指定できます。',
+    section: 'calendar',
+    action: 'settings',
+  },
+  {
+    goal: '振込は銀行の営業日で数えたい',
+    answer:
+      'ルール編集の〈営業日カレンダー〉で〈銀行カレンダー〉を選びます。社内の締めは自社、振込は銀行、と使い分けられます。',
+    section: 'calendar',
+    action: 'rules',
+  },
+  {
+    goal: '作った予定を Outlook / Google カレンダーで見たい',
+    answer:
+      '書き出しを開き、期間（既定は今月の1日〜末日）と形式（迷ったら iCalendar）を選んで書き出します。取り込み先には専用のカレンダーを作ってからにしてください。あとで丸ごと消せます。',
+    section: 'export',
+    action: 'export',
+  },
+  {
+    goal: '税務だけ、入金だけ、と分けて渡したい',
+    answer:
+      'ルールに〈グループ〉名を付けると、カレンダー上部で絞り込めるようになり、書き出しもグループ単位でできます。取り込み先で分けておくと、束ごと消せます。',
+    section: 'group',
+    action: 'rules',
+  },
+  {
+    goal: '予定が多くて1か月を見渡せない',
+    answer:
+      'カレンダーの上の〈表示〉で「点」に切り替えると、名前を隠して1か月の混み具合だけを見られます。日を押せばその日の詳細が開きます。印刷には予定名が出ます。',
+    section: 'marks',
+  },
+  {
+    goal: 'まず全体像を見てから決めたい',
+    answer:
+      '実務でよく使う予定をまとめた完成例があります。中身を見てから、必要なものだけ選んで追加できます。追加しても既にあるルールは消えません。',
+    section: 'samples',
+    action: 'samples',
+  },
+  {
+    goal: '別の端末でも同じ設定を使いたい',
+    answer:
+      '設定の〈エクスポート〉で JSON を書き出し、移った先で〈インポート〉します。データは端末ごとに保存されるので、自動では同期しません。',
+    section: 'data',
+    action: 'settings',
+  },
+  {
+    goal: '設定したのに予定が出ない',
+    answer:
+      'まず保存欄のそばに注意書きが出ていないか確かめてください。「◯件の回で日付を決められません」と出ていれば、その月に営業日が足りていません。ルールが無効になっていないか、有効期間や除外日に入っていないかも確かめてください。',
+    section: 'trouble',
+    action: 'rules',
+  },
+];
 
 /** 節。見出しに id を振り、先頭の目次から飛べるようにする。 */
 type Section = {
@@ -336,28 +479,97 @@ function renderSection(section: Section): HTMLElement {
   return element;
 }
 
-export function renderHelp(onClose: () => void): HTMLElement {
+export type HelpHandlers = {
+  onClose: () => void;
+  /** ヘルプから直接始める。読むだけで終わらせないため。 */
+  onAction?: (action: HelpAction) => void;
+};
+
+export function renderHelp(handlers: HelpHandlers | (() => void)): HTMLElement {
+  const { onClose, onAction } =
+    typeof handlers === 'function' ? { onClose: handlers, onAction: undefined } : handlers;
+
   const root = h(
     'section',
     { class: 'help' },
     h('h2', { class: 'editor-title' }, 'ヘルプ'),
   );
 
-  // 長いので、まず行き先を並べる。読みたいところへ直接飛べるようにする。
+  const goTo = (id: string): void => {
+    scrollIntoView(root.querySelector(`#help-${id}`));
+  };
+
+  root.append(renderTasks(goTo, onAction));
+
+  // 長いので、行き先も並べる。読みたいところへ直接飛べるようにする。
   const toc = h('nav', { class: 'help-toc', 'aria-label': 'ヘルプの目次' });
   for (const section of SECTIONS) {
     const link = h('a', { href: `#help-${section.id}`, class: 'help-toc-link' }, section.title);
     link.addEventListener('click', (event) => {
       // モーダルの中では通常のアンカー移動が効かないため、自分で送る。
       event.preventDefault();
-      root.querySelector(`#help-${section.id}`)?.scrollIntoView({ block: 'start' });
+      goTo(section.id);
     });
     toc.append(link);
   }
-  root.append(toc);
+  root.append(h('h3', { class: 'help-heading' }, '項目から探す'), toc);
 
   for (const section of SECTIONS) root.append(renderSection(section));
 
   root.append(h('div', { class: 'editor-actions' }, button('閉じる', onClose, 'button button-primary')));
   return root;
+}
+
+/**
+ * 「やりたいこと」から引く索引。
+ *
+ * 節見出しは覚えたあとなら探せるが、初めての人は自分の業務をどの項目に
+ * 置き換えればよいかから悩む。やりたいことの言葉のまま並べ、開けば答えが出て、
+ * そのまま始められるようにする。
+ *
+ * 一覧はすべて畳んでおく。開いた状態で並べると縦に長くなりすぎて、
+ * 目当てのものを探すのがかえって大変になる。
+ */
+function renderTasks(
+  goTo: (id: string) => void,
+  onAction: ((action: HelpAction) => void) | undefined,
+): HTMLElement {
+  const list = h('div', { class: 'help-tasks' });
+  for (const task of TASKS) {
+    const body = h('div', { class: 'help-task-body' }, h('p', {}, task.answer));
+
+    const links = h('div', { class: 'help-task-actions' });
+    if (task.action !== undefined && onAction !== undefined) {
+      const action = task.action;
+      links.append(
+        button(ACTION_LABELS[action], () => onAction(action), 'button button-sm button-primary'),
+      );
+    }
+    links.append(
+      button('詳しく読む', () => goTo(task.section), 'button button-sm button-quiet'),
+    );
+    body.append(links);
+
+    list.append(
+      h(
+        'details',
+        { class: 'help-task' },
+        h('summary', {}, task.goal),
+        body,
+      ),
+    );
+  }
+
+  return h(
+    'section',
+    { class: 'help-section', id: 'help-tasks' },
+    h('h3', { class: 'help-heading' }, 'やりたいことから探す'),
+    h(
+      'p',
+      { class: 'field-hint' },
+      '近いものを開くと、手順とその場から始める入口が出ます。' +
+        '当てはまるものが無ければ、下の「項目から探す」からどうぞ。',
+    ),
+    list,
+  );
 }

@@ -43,6 +43,11 @@ jobs:
       - name: E2E
         run: npm run e2e
 
+      # 更新案内の検査だけは dist を作り直しながら確かめるので、
+      # 並行して走る側とは分けて最後に単独で走らせる。
+      - name: E2E（更新案内）
+        run: npm run e2e:update
+
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

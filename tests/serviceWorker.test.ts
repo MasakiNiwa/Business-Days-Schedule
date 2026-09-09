@@ -82,3 +82,20 @@ it('他のオリジンには手を出さない', async () => {
   });
   expect(touched).toBe(false);
 });
+
+it('資産一覧を尋ねられたら答える', async () => {
+  // アプリ側が「いま画面に出ている版と同じか」を判断するために使う。
+  const w = worker();
+  const replies: unknown[] = [];
+  w.listeners.get('message')!({
+    data: 'PRECACHE_MANIFEST',
+    ports: [{ postMessage: (value: unknown) => replies.push(value) }],
+  });
+  expect(replies).toHaveLength(1);
+  expect(Array.isArray(replies[0])).toBe(true);
+});
+
+it('答え先が無くても落ちない', () => {
+  const w = worker();
+  expect(() => w.listeners.get('message')!({ data: 'PRECACHE_MANIFEST', ports: [] })).not.toThrow();
+});
