@@ -133,6 +133,42 @@ export function noticeDate(
   timing: NoticeTiming,
   calendar: BusinessDayCalendar,
 ): DateStr | null {
+  return noticeDateDetail(effectiveDate, timing, calendar).date;
+}
+
+/**
+ * 日付と、休業日を避ける前に指していた日。
+ *
+ * 「翌週水曜」が木曜に出ていると、設定を間違えたのか休業日で動いたのかが
+ * 画面から読み取れない。動いた理由を添えられるよう、避ける前の日も返す。
+ * 動いていなければ `movedFrom` は null。
+ */
+export function noticeDateDetail(
+  effectiveDate: DateStr,
+  timing: NoticeTiming,
+  calendar: BusinessDayCalendar,
+): { date: DateStr | null; movedFrom: DateStr | null } {
+  if (timing.kind === 'weekday') {
+    const start = weekStartOf(effectiveDate);
+    const target = addDays(
+      addDays(start, timing.weeks * 7),
+      ((timing.weekday - WEEK_START) % 7 + 7) % 7,
+    );
+    if (timing.onClosed === 'none' || calendar.isBusinessDay(target)) {
+      return { date: target, movedFrom: null };
+    }
+    const moved =
+      timing.onClosed === 'next' ? calendar.snap(target, 'next') : calendar.snap(target, 'prev');
+    return { date: moved, movedFrom: moved === null ? null : target };
+  }
+  return { date: plainNoticeDate(effectiveDate, timing, calendar), movedFrom: null };
+}
+
+function plainNoticeDate(
+  effectiveDate: DateStr,
+  timing: NoticeTiming,
+  calendar: BusinessDayCalendar,
+): DateStr | null {
   switch (timing.kind) {
     case 'offset': {
       if (timing.offset === 0) return null;
@@ -140,19 +176,9 @@ export function noticeDate(
         ? addDays(effectiveDate, timing.offset)
         : calendar.addBusinessDays(effectiveDate, timing.offset);
     }
-    case 'weekday': {
-      // 本体が属する週を起点に数える。今日ではなく、その回ごとの週。
-      const start = weekStartOf(effectiveDate);
-      const target = addDays(
-        addDays(start, timing.weeks * 7),
-        ((timing.weekday - WEEK_START) % 7 + 7) % 7,
-      );
-      if (timing.onClosed === 'none' || calendar.isBusinessDay(target)) return target;
-      // 水曜が休みなら木曜へ固定、ではなく翌営業日へ進める（木曜も休みなら金曜以降）。
-      return timing.onClosed === 'next'
-        ? calendar.snap(target, 'next')
-        : calendar.snap(target, 'prev');
-    }
+    case 'weekday':
+      // 週と曜日は休業日を避けるかどうかで分かれるので noticeDateDetail が持つ。
+      return noticeDateDetail(effectiveDate, timing, calendar).date;
     case 'monthlyBusinessDay': {
       const target = addMonths(effectiveDate, timing.months);
       return calendar.nthBusinessDayOfMonth(yearOf(target), monthOf(target), timing.nth);

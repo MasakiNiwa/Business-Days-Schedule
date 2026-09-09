@@ -149,6 +149,13 @@ export function exportWarningPrompt(
 ): string | null {
   const includeFollows = options.includeFollows ?? options.includeNotices;
   const relevant = warnings.filter((warning) => {
+    // 日付を作れたものは、実際に出た側で絞る。書き出すかどうかは実際の日付で
+    // 決まるので、設定上の向きで絞ると対象がずれる（休業日補正で本体を
+    // 追い越した予定が、まさにこれ）。
+    if (warning.noticeKind !== undefined) {
+      return warning.noticeKind === 'notice' ? options.includeNotices : includeFollows;
+    }
+    // 作れなかったものには実際の向きが無いので、設定上の向きで絞るほかない。
     if (warning.noticeRole === undefined) return true;
     return warning.noticeRole === 'before' ? options.includeNotices : includeFollows;
   });

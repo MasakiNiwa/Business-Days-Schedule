@@ -515,7 +515,10 @@ test.describe('入力と保存の一致', () => {
     const days = page.getByLabel('1 件目: 営業日数');
     await days.fill('0');
     await expect(days).toHaveValue('0');
-    await expect(page.locator('.issue-error')).toContainText('営業日数');
+    // 直す場所が分かるよう、その予定の欄の直下に出す。
+    await expect(page.locator('.notice-issues')).toContainText('営業日数');
+    // 保存欄側では「何件目か」を示す。
+    await expect(page.locator('.editor-review .issue-error')).toContainText('前後の予定 1 件目');
 
     // 直せば保存できる。
     await days.fill('5');
@@ -540,6 +543,51 @@ test.describe('入力と保存の一致', () => {
   });
 });
 
+test.describe('編集途中の状態が勝手に変わらない', () => {
+  /** 新規ルールを開き、前後の予定の欄まで進める。 */
+  async function openNewNotice(page: Page): Promise<void> {
+    await page.goto('');
+    await openRulePanel(page);
+    await page.getByRole('button', { name: '＋ 新規ルール' }).click();
+    await page.getByRole('button', { name: '自由入力' }).click();
+    await openNotices(page);
+    await page.getByRole('button', { name: '＋ 準備日を追加（前）' }).click();
+  }
+
+  test('決め方を切り替えて戻しても、入れた値のまま', async ({ page }) => {
+    await openNewNotice(page);
+    await page.getByLabel('1 件目: 本体から何日か').fill('10');
+    await page.getByLabel('1 件目: 単位').selectOption('calendar');
+
+    await page.getByLabel('1 件目: 日付の決め方').selectOption('weekday');
+    await page.getByLabel('1 件目: 日付の決め方').selectOption('offset');
+
+    await expect(page.getByLabel('1 件目: 本体から何日か')).toHaveValue('10');
+    await expect(page.getByLabel('1 件目: 単位')).toHaveValue('calendar');
+    await expect(page.locator('.notice-summary')).toContainText('10日前');
+  });
+
+  test('負の日数を入れても「前」のまま、保存が止まる', async ({ page }) => {
+    await openNewNotice(page);
+    await page.getByLabel('1 件目: 本体から何日か').fill('-3');
+
+    await expect(page.getByLabel('1 件目: 本体の前か後か')).toHaveValue('before');
+    await expect(page.locator('.notice-issues')).toContainText('1 以上の整数');
+    // 「3営業日後」にはならない。
+    await expect(page.locator('.notice-summary')).toBeEmpty();
+  });
+
+  test('空欄のまま別の予定を追加しても向きが入れ替わらない', async ({ page }) => {
+    await openNewNotice(page);
+    await page.getByLabel('1 件目: 本体から何日か').fill('');
+    await page.getByRole('button', { name: '＋ フォローを追加（後）' }).click();
+    await page.getByLabel('1 件目: 本体から何日か').fill('3');
+
+    await expect(page.getByLabel('1 件目: 本体の前か後か')).toHaveValue('before');
+    await expect(page.locator('.notice-summary').first()).toContainText('3営業日前');
+  });
+});
+
 test.describe('計算できない前後予定', () => {
   test('黙って消さず、該当月と理由をプレビューに残す', async ({ page }) => {
     await page.goto('');
@@ -552,8 +600,26 @@ test.describe('計算できない前後予定', () => {
     await page.getByLabel('1 件目: 日付の決め方').selectOption('monthlyBusinessDay');
     await page.getByLabel('1 件目: 営業日数').fill('25');
 
-    await expect(page.locator('.preview-body')).toContainText('日付を決められません');
+    // 折りたたみを開かなくても、保存欄のそばで気づける。
+    await expect(page.locator('.editor-alerts')).toContainText('日付を決められません');
+    await expect(page.locator('.editor-alerts')).toContainText('件の回');
+    // 内訳はその回ごとに残っている。
     await expect(page.locator('.preview-body')).toContainText('営業日目がありません');
+  });
+
+  test('内訳を見るで折りたたみが開く', async ({ page }) => {
+    await page.goto('');
+    await openRulePanel(page);
+    await page.getByRole('button', { name: '＋ 新規ルール' }).click();
+    await page.getByRole('button', { name: '締め日' }).click();
+
+    await openNotices(page);
+    await page.getByRole('button', { name: '＋ フォローを追加（後）' }).click();
+    await page.getByLabel('1 件目: 日付の決め方').selectOption('monthlyBusinessDay');
+    await page.getByLabel('1 件目: 営業日数').fill('25');
+
+    await page.getByRole('button', { name: '内訳を見る' }).click();
+    await expect(page.locator('.preview-list')).toBeVisible();
   });
 });
 

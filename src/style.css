@@ -2387,3 +2387,37 @@ main:focus {
 .export-howto p {
   margin: 0.35rem 0 0;
 }
+
+/*
+ * 保存ボタンのそばに常に出す注意書き。折りたたみの中にしか出していなかったため、
+ * 畳んだままだと日付を決められない予定に気づかず保存できてしまっていた。
+ */
+.editor-alerts {
+  margin: 0.35rem 0;
+}
+
+.editor-alerts:empty {
+  display: none;
+}
+
+.editor-alerts .button {
+  align-self: flex-start;
+}
+
+/* エラーは、その予定の欄の直下に出す。直す場所が分かるように。 */
+.notice-issues:empty {
+  display: none;
+}
+
+.notice-issues {
+  margin-top: 0.15rem;
+}
+
+.preview-related-item .preview-note {
+  font-size: 0.72rem;
+  color: var(--fg-faint);
+}
+
+@media print {
+  .editor-alerts .button { display: none; }
+}
