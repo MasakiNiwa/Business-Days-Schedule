@@ -30,9 +30,24 @@ export default defineConfig({
   projects: [
     {
       name: 'desktop',
+      // 更新案内の検査は dist を作り直すので、並行して走る側からは外す
+      // （作り直している最中の dist を他の検査が読むと、あるはずの資産が無い）。
+      testIgnore: /updatePrompt\.spec\.ts/,
       use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 900 }, launchOptions },
     },
-    { name: 'mobile', use: { ...devices['Pixel 5'], launchOptions } },
+    {
+      name: 'mobile',
+      testIgnore: /updatePrompt\.spec\.ts/,
+      use: { ...devices['Pixel 5'], launchOptions },
+    },
+    {
+      // dist を作り直しながら確かめるため、単独で順に走らせる（npm run e2e:update）。
+      // 画面幅に関係しない検査なので、1つの画面幅だけで足りる。
+      name: 'update',
+      testMatch: /updatePrompt\.spec\.ts/,
+      fullyParallel: false,
+      use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 900 }, launchOptions },
+    },
   ],
   webServer: {
     command: 'npm run serve:dist',

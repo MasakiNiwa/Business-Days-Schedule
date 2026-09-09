@@ -38,6 +38,7 @@ import type { BusinessCalendar, DateStr, Month, Rule } from './types';
 import { renderCalendar, renderLegend } from './ui/CalendarView';
 import { renderDayDetail } from './ui/DayDetail';
 import { renderHelp } from './ui/HelpView';
+import type { HelpAction } from './ui/HelpView';
 import { LIST_RANGES, renderList } from './ui/ListView';
 import { renderMonthPicker } from './ui/MonthPicker';
 import { renderCalendarExport } from './ui/CalendarExportView';
@@ -485,9 +486,15 @@ export class App {
     settingsButton.setAttribute('title', '設定');
     if (this.mode.kind === 'settings') settingsButton.setAttribute('aria-pressed', 'true');
 
-    const helpButton = button('?', () => this.openMode('help'), 'nav');
-    helpButton.setAttribute('aria-label', 'ヘルプ');
-    helpButton.setAttribute('title', 'ヘルプ');
+    // 「?」だけだと、やりたいことから引ける索引があることまでは伝わらない。
+    // 広い画面では言葉も出す（狭い画面では記号だけに畳む）。
+    const helpButton = button('', () => this.openMode('help'), 'nav nav-help');
+    helpButton.append(
+      h('span', { class: 'nav-help-mark', 'aria-hidden': 'true' }, '?'),
+      h('span', { class: 'nav-help-text' }, '使い方'),
+    );
+    helpButton.setAttribute('aria-label', '使い方・ヘルプ');
+    helpButton.setAttribute('title', '使い方・ヘルプ（やりたいことから探せます）');
     if (this.mode.kind === 'help') helpButton.setAttribute('aria-pressed', 'true');
 
     const isList = this.state.prefs.defaultView === 'list';
@@ -558,6 +565,35 @@ export class App {
   private openMode(kind: 'settings' | 'help' | 'rules' | 'jump' | 'calendarExport'): void {
     this.mode = this.mode.kind === kind ? { kind: 'calendar' } : { kind };
     this.render();
+  }
+
+  /**
+   * ヘルプの「やりたいこと」から、その場で始める。
+   *
+   * 読んで閉じたあとに操作を探し直させると、そこでまた迷う。
+   * 逆引きの答えから、対応する画面へ直接運ぶ。
+   */
+  private runHelpAction(action: HelpAction): void {
+    switch (action) {
+      case 'newRule':
+        this.startAdd();
+        return;
+      case 'samples':
+        void this.openSamples();
+        return;
+      case 'settings':
+        this.mode = { kind: 'settings' };
+        this.render();
+        return;
+      case 'export':
+        this.mode = { kind: 'calendarExport' };
+        this.render();
+        return;
+      case 'rules':
+        this.mode = { kind: 'rules' };
+        this.render();
+        return;
+    }
   }
 
   private backToCalendar(): void {
@@ -633,7 +669,10 @@ export class App {
     }
 
     if (mode.kind === 'help') {
-      return renderHelp(() => this.backToCalendar());
+      return renderHelp({
+        onClose: () => this.backToCalendar(),
+        onAction: (action) => this.runHelpAction(action),
+      });
     }
 
     if (mode.kind === 'samples') {
@@ -995,6 +1034,8 @@ export class App {
         { class: 'empty-prompt-actions' },
         button('最初のルールを作る', () => this.startAdd(), 'button button-primary'),
         button('完成例を見る', () => void this.openSamples(), 'button'),
+        // やりたいことから引ける索引があることを、最初の画面で見せる。
+        button('使い方を見る', () => this.openMode('help'), 'button button-quiet'),
       ),
       h(
         'p',
@@ -1006,7 +1047,9 @@ export class App {
         'p',
         { class: 'field-hint' },
         '「完成例を見る」は、実務でよく使う予定を束ごと取り込む入口です。' +
-          '中身を見てから、必要なものだけ選んで追加できます。',
+          '中身を見てから、必要なものだけ選んで追加できます。' +
+          '「使い方を見る」では、「毎月25日の給与振込を作りたい」のように' +
+          'やりたいことから引けます。',
       ),
     );
   }

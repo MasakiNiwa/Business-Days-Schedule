@@ -71,6 +71,11 @@ jobs:
       - name: 公開成果物をブラウザで検査
         run: npm run e2e
 
+      # dist を作り直しながら確かめるため、単独で走らせる。
+      # 走らせたあとの dist は元の内容に戻る（検査の中で作り直している）。
+      - name: 更新案内の検査
+        run: npm run e2e:update
+
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3

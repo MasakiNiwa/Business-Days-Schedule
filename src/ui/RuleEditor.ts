@@ -36,7 +36,7 @@ import {
   textInput,
   toggleGroup,
 } from './controls';
-import { clear, h } from './dom';
+import { clear, h, scrollIntoView } from './dom';
 
 const PREVIEW_COUNT = 10;
 
@@ -92,11 +92,6 @@ const WEEK_OPTIONS = [
   { value: '1', label: '翌週' },
   { value: '2', label: '翌々週' },
 ];
-
-/** jsdom には scrollIntoView が無い。画面上の親切なので、無ければ黙って諦める。 */
-function scrollIntoView(element: HTMLElement, block: ScrollLogicalPosition = 'center'): void {
-  element.scrollIntoView?.({ block });
-}
 
 /** 前後予定の小さな入力欄。画面に見えるラベルを必ず付ける。 */
 function subField(labelText: string, control: HTMLElement): HTMLElement {
@@ -1485,7 +1480,7 @@ export class RuleEditor {
         button('内訳を見る', () => {
           // その回ごとの説明は下の一覧にある。開いてそこまで運ぶ。
           this.previewDetails.open = true;
-          scrollIntoView(this.previewDetails, 'start');
+          scrollIntoView(this.previewDetails);
         }, 'button button-sm button-quiet'),
       );
     }
@@ -1580,7 +1575,7 @@ export class RuleEditor {
       if (target !== null && target !== undefined) {
         target.closest('details')?.setAttribute('open', '');
         target.focus();
-        scrollIntoView(target);
+        scrollIntoView(target, 'center');
         return;
       }
     }
