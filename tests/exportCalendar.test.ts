@@ -329,3 +329,50 @@ describe('exportWarningPrompt', () => {
     expect(prompt.split('確定処理')).toHaveLength(2);
   });
 });
+
+describe('exportWarningPrompt と実際に書き出す予定の一致', () => {
+  /**
+   * 休業日補正でフォローが本体より前へ移動した場合。
+   * 書き出す／書き出さないは実際の日付（kind）で決まるので、警告の絞り込みも
+   * そちらに合わせないと、対象がずれる。
+   */
+  const movedBefore = {
+    ruleId: 'r',
+    rawDate: '2026-09-20',
+    reason: 'notice-role-mismatch' as const,
+    noticeRole: 'after' as const,
+    noticeKind: 'notice' as const,
+    message: '「週次報告」の翌週の月曜（提出）は、本体より後のつもりの設定ですが 2026-09-18 に出ます',
+  };
+
+  it('準備日だけ書き出すとき、実際に準備日として出るものは警告する', () => {
+    // 対象の予定は出力されるのに、警告が出ていなかった。
+    expect(
+      exportWarningPrompt([movedBefore], { includeNotices: true, includeFollows: false }),
+    ).toContain('本体より後');
+  });
+
+  it('フォローだけ書き出すとき、準備日として出るものは警告しない', () => {
+    // 対象の予定は出力されないのに、「書き出します」と言っていた。
+    expect(
+      exportWarningPrompt([movedBefore], { includeNotices: false, includeFollows: true }),
+    ).toBeNull();
+  });
+
+  it('日付を作れなかったものは、設定上の向きで絞る', () => {
+    // 実際の向きが無いので、これで判断するほかない。
+    const unresolved = {
+      ruleId: 'r',
+      rawDate: '2026-09-10',
+      reason: 'notice-unresolved' as const,
+      noticeRole: 'after' as const,
+      message: '「月次締め」の翌月の第25営業日（確定処理）は日付を決められませんでした',
+    };
+    expect(
+      exportWarningPrompt([unresolved], { includeNotices: false, includeFollows: true }),
+    ).toContain('確定処理');
+    expect(
+      exportWarningPrompt([unresolved], { includeNotices: true, includeFollows: false }),
+    ).toBeNull();
+  });
+});

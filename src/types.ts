@@ -292,6 +292,11 @@ export type Occurrence = {
    * 前後が入れ替わるたびに同じ予定が別の予定になってしまう。
    */
   noticeRole?: NoticeRole;
+  /**
+   * 休業日を避ける前に指していた日。避けていなければ未設定。
+   * 「水曜が休業日のため木曜へ」と、動いた理由を添えるために持つ。
+   */
+  noticeMovedFrom?: DateStr;
 };
 
 export type DateRange = { start: DateStr; end: DateStr };

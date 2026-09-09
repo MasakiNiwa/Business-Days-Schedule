@@ -1086,14 +1086,17 @@ export class App {
       banners.append(h('p', { class: 'banner' }, message));
     }
 
+    // ルールが1件も無いうちは、案内をカレンダーより先に置く。
+    // 空のカレンダーの下にあると、何をすればよいかが目に入らない。
+    const empty = this.state.rules.length === 0;
     const main = h(
       'main',
       { id: 'main', tabindex: '-1' },
+      ...(empty ? [this.renderEmptyPrompt()] : []),
       this.renderViewToolbar(),
       this.state.prefs.defaultView === 'list'
         ? this.buildListPane()
         : this.buildCalendarPane(occurrencesByDate),
-      ...(this.state.rules.length === 0 ? [this.renderEmptyPrompt()] : []),
     );
 
     // 予定の出し方は画面全体に効く。画面幅では決めず、選ばれたものに従う。

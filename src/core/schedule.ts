@@ -29,6 +29,7 @@ import {
   legacyNoticeId,
   roleOf,
   noticeDate,
+  noticeDateDetail,
   noticeSpanDays,
   timingOf,
 } from './notice';
@@ -83,8 +84,18 @@ export type ExpandWarning = {
    *
    * 書き出しでは準備日・フォローを別々に含める／含めないと選べる。
    * 含めないほうの警告まで出すと、書き出されるものと関係のない話になる。
+   *
+   * 日付を作れなかったものには実際の向きが無いので、これで判断するほかない。
    */
   noticeRole?: NoticeRole;
+  /**
+   * 日付を作れた前後予定なら、実際に出た側。
+   *
+   * 書き出す／書き出さないは実際の日付で決まる（`Occurrence.kind`）ので、
+   * 警告の絞り込みもこちらに合わせる。設定上の向きで絞ると、
+   * 「書き出されるのに警告が出ない」「書き出されないのに警告が出る」が起きる。
+   */
+  noticeKind?: 'notice' | 'follow';
 };
 
 export type ExpandResult = {
@@ -154,7 +165,7 @@ function buildRelated(
   noticeIndex: number,
   calendar: BusinessDayCalendar,
 ): { occurrence: Occurrence; warning: ExpandWarning | null } | null {
-  const date = noticeDateOf(main.date, notice, calendar);
+  const { date, movedFrom } = noticeDateDetail(main.date, timingOf(notice), calendar);
   if (date === null) return null;
 
   // 前後の別は、意図ではなく実際の日付で決める。週や月で決めると、
@@ -172,6 +183,7 @@ function buildRelated(
           rawDate: main.date,
           reason: 'notice-role-mismatch',
           noticeRole: intended,
+          noticeKind: kind,
           message: `「${rule.title}」の${describeTiming(timingOf(notice))}（${notice.label}）は、${
             intended === 'before' ? '本体より前' : '本体より後'
           }のつもりの設定ですが ${date} に出ます（本体は ${main.date}）`,
@@ -198,6 +210,8 @@ function buildRelated(
       // UID をこちらから作れば、休業日の設定を変えて前後が入れ替わっても
       // 同じ予定として扱われる。
       noticeRole: roleOf(notice),
+      // 休業日を避けて動いたなら、避ける前の日。理由を添えるために持つ。
+      ...(movedFrom === null ? {} : { noticeMovedFrom: movedFrom }),
     },
     warning,
   };
@@ -373,7 +387,7 @@ export type PreviewSeries = {
    * 落として黙るとプレビューから消えるだけになり、保存する前に気づけない。
    * 「10月には第25営業日がありません」と、消えた場所に理由を残す。
    */
-  unresolved: { notice: Notice; reason: string }[];
+  unresolved: { notice: Notice; reason: string; detail: string }[];
   /** 日付は決まったが確かめてほしいもの（前後が意図と逆になった、など）。 */
   warnings: ExpandWarning[];
 };
@@ -427,13 +441,13 @@ function relatedOf(
 ): Omit<PreviewSeries, 'main'> {
   if (calendar === undefined) return { related: [], unresolved: [], warnings: [] };
   const related: Occurrence[] = [];
-  const unresolved: { notice: Notice; reason: string }[] = [];
+  const unresolved: { notice: Notice; reason: string; detail: string }[] = [];
   const warnings: ExpandWarning[] = [];
   rule.notices.forEach((notice, noticeIndex) => {
     // 展開と同じ組み立てを使う。別々に書くと画面と書き出しが食い違う。
     const built = buildRelated(rule, main, notice, noticeIndex, calendar);
     if (built === null) {
-      unresolved.push({ notice, reason: unresolvedReason(notice, main.date) });
+      unresolved.push({ notice, ...unresolvedReason(notice, main.date) });
       return;
     }
     related.push(built.occurrence);
@@ -445,20 +459,31 @@ function relatedOf(
 
 /**
  * なぜ日付を決められなかったか。原因が分からないと直しようがない。
- * 決め方ごとに、いちばんありがちな理由を名指しする。
+ *
+ * `reason` は回によらない言い方、`detail` はその回の具体。
+ * 何か月ぶんも同じ理由が続くことがあるので、まとめて数えられるよう分けておく。
  */
-function unresolvedReason(notice: Notice, mainDate: DateStr): string {
+function unresolvedReason(notice: Notice, mainDate: DateStr): { reason: string; detail: string } {
   const timing = timingOf(notice);
   switch (timing.kind) {
     case 'monthlyBusinessDay': {
       const target = addMonths(mainDate, timing.months);
       const size = Math.abs(timing.nth);
       const where = timing.nth < 0 ? '月末から' : '月初から';
-      return `${yearOf(target)}年${monthOf(target)}月には${where}${size}営業日目がありません（営業日が足りません）`;
+      return {
+        reason: 'その月には営業日が足りません',
+        detail: `${yearOf(target)}年${monthOf(target)}月には${where}${size}営業日目がありません`,
+      };
     }
     case 'offset':
-      return '休業日が続いていて、その日数ぶんの営業日を数えきれません';
+      return {
+        reason: '休業日が続いていて、その日数ぶんの営業日を数えきれません',
+        detail: `${mainDate} を起点に数えきれませんでした`,
+      };
     case 'weekday':
-      return '休業日が続いていて、ずらす先の営業日が見つかりません';
+      return {
+        reason: '休業日が続いていて、ずらす先の営業日が見つかりません',
+        detail: `${mainDate} の回で見つかりませんでした`,
+      };
   }
 }

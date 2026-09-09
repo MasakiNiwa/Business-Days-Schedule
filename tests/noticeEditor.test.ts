@@ -43,6 +43,12 @@ const save = (form: HTMLFormElement, handlers: RuleEditorHandlers): Rule | undef
   return vi.mocked(handlers.onSave).mock.calls[0]?.[0];
 };
 
+const clickText = (root: ParentNode, text: string): void => {
+  const target = [...root.querySelectorAll('button')].find((b) => b.textContent === text);
+  if (target === undefined) throw new Error(`ボタンが見つかりません: ${text}`);
+  target.dispatchEvent(new MouseEvent('click'));
+};
+
 const issues = (form: HTMLFormElement): string[] =>
   [...form.querySelectorAll('.issue')].map((node) => node.textContent ?? '');
 
@@ -184,7 +190,7 @@ describe('計算できない前後予定', () => {
     ],
   });
 
-  it('黙って消さず、該当月と理由をプレビューに残す', () => {
+  it('黙って消さず、その回ごとに理由を残す', () => {
     const { form } = open(impossible);
     const text = form.querySelector('.preview-body')?.textContent ?? '';
     expect(text).toContain('計算できません');
@@ -196,6 +202,31 @@ describe('計算できない前後予定', () => {
     const { form } = open(impossible);
     // 本体は毎月20日。最初の回の翌月が名指しされる。
     expect(form.querySelector('.preview-body')?.textContent ?? '').toMatch(/\d+年\d+月には/);
+  });
+
+  it('折りたたみを開かなくても、保存欄のそばに件数が出る', () => {
+    // 畳んだままだと直近プレビューから消えるだけで、気づかず保存できていた。
+    const { form } = open(impossible);
+    const alerts = form.querySelector('.editor-alerts')?.textContent ?? '';
+    expect(alerts).toContain('確定処理');
+    expect(alerts).toContain('日付を決められません');
+    expect(alerts).toMatch(/\d+ 件の回/);
+  });
+
+  it('同じ理由をまとめて数える（何か月ぶんも並べない）', () => {
+    const { form } = open(impossible);
+    // 10回ぶん探しても、注意書きは1行にまとまる。
+    expect(form.querySelectorAll('.editor-alerts .issue')).toHaveLength(1);
+  });
+
+  it('内訳へ移動する手がある', () => {
+    const { form } = open(impossible);
+    const link = [...form.querySelectorAll('.editor-alerts button')].find(
+      (node) => node.textContent === '内訳を見る',
+    );
+    expect(link).toBeDefined();
+    link?.dispatchEvent(new MouseEvent('click'));
+    expect(form.querySelector<HTMLDetailsElement>('.advanced-options')?.open).toBeDefined();
   });
 
   it('保存は止めない（設定として不正ではない）', () => {
@@ -218,9 +249,12 @@ describe('前後が逆転したとき', () => {
       ],
     });
     const { form } = open(overtaking);
-    const text = form.querySelector('.preview-body')?.textContent ?? '';
-    expect(text).toContain('本体より後');
-    expect(text).toContain('2026-09-18');
+    // 折りたたみの外、保存欄のそばに出す。
+    const alerts = form.querySelector('.editor-alerts')?.textContent ?? '';
+    expect(alerts).toContain('本体より後');
+    expect(alerts).toContain('2026-09-18');
+    // 日付そのものはプレビューに並ぶ（消さない）。
+    expect(form.querySelector('.preview-body')?.textContent ?? '').toContain('2026-09-18');
   });
 });
 
@@ -293,5 +327,163 @@ describe('打ち直しても向きが変わらない', () => {
     type(days, '7');
 
     expect(save(form, handlers)?.notices[0]?.timing).toMatchObject({ offset: 7 });
+  });
+});
+
+describe('編集途中の状態が勝手に変わらない', () => {
+  /**
+   * どれも根は同じで、「大きさ」と「向き」を符号ひとつに畳んで持っていたこと。
+   * 畳むと情報が落ちる（`-0 < 0` は false、`-(-3)` は 3）。
+   */
+
+  it('決め方を切り替えて戻しても、開いたときの値のまま', () => {
+    // 編集開始時の値を登録していなかったため、往復すると既定値へ落ちていた。
+    // 「10暦日前」が「3営業日前」になっていた。
+    const rule = makeRule({
+      id: 'r',
+      title: 'x',
+      notices: [{ id: 'n0', label: '準備', timing: { kind: 'offset', offset: -10, unit: 'calendar' } }],
+    });
+    const { form, handlers } = open(rule);
+    choose(at(form, '1 件目: 日付の決め方'), 'weekday');
+    choose(at(form, '1 件目: 日付の決め方'), 'offset');
+
+    expect((at(form, '1 件目: 本体から何日か') as HTMLInputElement).value).toBe('10');
+    expect(at(form, '1 件目: 単位').value).toBe('calendar');
+    expect(at(form, '1 件目: 本体の前か後か').value).toBe('before');
+    expect(save(form, handlers)?.notices[0]?.timing).toEqual({
+      kind: 'offset',
+      offset: -10,
+      unit: 'calendar',
+    });
+  });
+
+  it('月と第N営業日でも、切り替えて戻せば元の値', () => {
+    const { form } = open(monthly(-2));
+    choose(at(form, '1 件目: 日付の決め方'), 'offset');
+    choose(at(form, '1 件目: 日付の決め方'), 'monthlyBusinessDay');
+
+    expect(at(form, '1 件目: 月初から数えるか月末から数えるか').value).toBe('end');
+    expect((at(form, '1 件目: 営業日数') as HTMLInputElement).value).toBe('2');
+  });
+
+  it('負の日数を入れても「前」のまま。後ろの日付にはならない', () => {
+    // 符号を付けた結果が +3 になり、画面は「前」なのに「3営業日後」で
+    // 保存できてしまっていた。
+    const { form, handlers } = open(byDays(-3));
+    type(at(form, '1 件目: 本体から何日か'), '-3');
+
+    expect(at(form, '1 件目: 本体の前か後か').value).toBe('before');
+    expect(issues(form).join('\n')).toContain('1 以上の整数');
+    expect(save(form, handlers)).toBeUndefined();
+  });
+
+  it('負の営業日数でも「月初から」が裏返らない', () => {
+    const { form, handlers } = open(monthly(5));
+    type(at(form, '1 件目: 営業日数'), '-5');
+
+    expect(at(form, '1 件目: 月初から数えるか月末から数えるか').value).toBe('start');
+    expect(save(form, handlers)).toBeUndefined();
+  });
+
+  it('空欄のまま別の予定を追加しても、向きが入れ替わらない', () => {
+    // 向きを覚えている変数が、欄の作り直しで初期化されていた。
+    const { form, handlers } = open(byDays(-3));
+    type(at(form, '1 件目: 本体から何日か'), '');
+    clickText(form, '＋ フォローを追加（後）');
+    type(at(form, '1 件目: 本体から何日か'), '3');
+
+    expect(at(form, '1 件目: 本体の前か後か').value).toBe('before');
+    expect(save(form, handlers)?.notices[0]?.timing).toMatchObject({ offset: -3 });
+  });
+
+  it('空欄のまま1件目を消しても、2件目の向きが残る', () => {
+    const rule = makeRule({
+      id: 'r',
+      title: 'x',
+      notices: [
+        { id: 'n0', label: '準備', timing: { kind: 'offset', offset: -3, unit: 'business' } },
+        { id: 'n1', label: '確認', timing: { kind: 'offset', offset: 5, unit: 'business' } },
+      ],
+    });
+    const { form, handlers } = open(rule);
+    type(at(form, '2 件目: 本体から何日か'), '');
+    clickText(form, '削除');
+    type(at(form, '1 件目: 本体から何日か'), '5');
+
+    expect(at(form, '1 件目: 本体の前か後か').value).toBe('after');
+    expect(save(form, handlers)?.notices[0]?.timing).toMatchObject({ offset: 5 });
+  });
+});
+
+describe('エラーの出し場所', () => {
+  it('その予定の欄の直下に出す', () => {
+    const { form } = open(monthly(5));
+    type(at(form, '1 件目: 営業日数'), '0');
+    expect(form.querySelector('.notice-item .notice-issues')?.textContent).toContain(
+      '1 以上の整数',
+    );
+  });
+
+  it('保存欄側では「何件目か」を示す', () => {
+    const { form } = open(monthly(5));
+    type(at(form, '1 件目: 営業日数'), '0');
+    expect(issues(form).join('\n')).toContain('前後の予定 1 件目');
+  });
+
+  it('保存しようとすると、その欄へ移動する', () => {
+    const rule = makeRule({
+      id: 'r',
+      title: 'x',
+      notices: [
+        { id: 'n0', label: '準備', timing: { kind: 'offset', offset: -3, unit: 'business' } },
+        { id: 'n1', label: '確認', timing: { kind: 'monthlyBusinessDay', months: 1, nth: 5 } },
+      ],
+    });
+    const { form } = open(rule);
+    document.body.append(form);
+    type(at(form, '2 件目: 営業日数'), '0');
+    form.dispatchEvent(new Event('submit', { cancelable: true }));
+
+    // フォーム先頭ではなく、悪いほうの欄へ運ぶ。
+    expect(document.activeElement).toBe(at(form, '2 件目: どの月か'));
+    form.remove();
+  });
+});
+
+describe('動いた理由を添える', () => {
+  it('前後の予定が休業日で動いたら、その理由を出す', () => {
+    // 「翌週水曜」が木曜に出ていると、設定を間違えたのか休業日で動いたのかが
+    // 画面から読み取れない。
+    const rule = makeRule({
+      id: 'r',
+      title: '月次報告',
+      recurrence: { type: 'monthlyByDay', interval: 1, days: [16], overflow: 'clamp' },
+      adjust: { mode: 'none', keepInMonth: false },
+      notices: [
+        { id: 'n0', label: '報告会', timing: { kind: 'weekday', weeks: 1, weekday: 3, onClosed: 'next' } },
+      ],
+    });
+    const { form } = open(rule);
+    // 本体 2026-09-16(水) の翌週水曜は 09-23（秋分の日）。翌営業日 09-24(木) へ。
+    const text = form.querySelector('.preview-body')?.textContent ?? '';
+    expect(text).toContain('2026-09-24（木）');
+    expect(text).toContain('2026-09-23（水）が休業日のため');
+  });
+
+  it('動いていない回には理由を付けない', () => {
+    const rule = makeRule({
+      id: 'r',
+      title: '月次報告',
+      recurrence: { type: 'monthlyByDay', interval: 1, days: [10], overflow: 'clamp' },
+      adjust: { mode: 'none', keepInMonth: false },
+      notices: [
+        { id: 'n0', label: '報告会', timing: { kind: 'weekday', weeks: 1, weekday: 3, onClosed: 'next' } },
+      ],
+    });
+    const { form } = open(rule);
+    const first = form.querySelector('.preview-related-item');
+    expect(first?.textContent).toContain('2026-09-16（水）');
+    expect(first?.querySelector('.preview-note')).toBeNull();
   });
 });
