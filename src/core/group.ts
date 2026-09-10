@@ -76,18 +76,41 @@ export function rulesInGroup(rules: readonly Rule[], group: string): Rule[] {
   return rules.filter((rule) => groupOf(rule) === group);
 }
 
+/** グループ名の上限。読み込み側の検証（LIMITS.groupLength）と必ず揃える。 */
+export const GROUP_NAME_MAX = 40;
+
+export type RenameGroupResult =
+  | { ok: true; rules: Rule[] }
+  | { ok: false; reason: string };
+
 /**
  * グループ名をまとめて付け替える。
  *
  * グループは実体ではなくルールが持つ文字列なので、付け替えは
  * 「その名前を持つルールを全部書き換える」ことになる。1件ずつ編集させると
  * 取りこぼす。`to` を空にすると未分類へ移す。
+ *
+ * **長さは必ずここで確かめる。** 読み込み側は上限を超えるグループ名を持つ
+ * ルールを不正として捨てるため、検証せずに保存すると、その束のルールが
+ * 再読込で丸ごと消える。さらにその状態で保存し直すと、消えたまま上書きされる。
+ * 実際に「支払」の2件が消える状態になっていた。
+ *
+ * 弾くときは1件も書き換えない。一部だけ変えると、同じ束が2つの名前に割れる。
  */
-export function renameGroup(rules: readonly Rule[], from: string, to: string): Rule[] {
+export function renameGroup(rules: readonly Rule[], from: string, to: string): RenameGroupResult {
   const target = to.trim();
-  return rules.map((rule) =>
-    groupOf(rule) === from ? { ...rule, group: target, updatedAt: rule.updatedAt } : rule,
-  );
+  if (target.length > GROUP_NAME_MAX) {
+    return {
+      ok: false,
+      reason: `グループ名は ${GROUP_NAME_MAX} 文字までにしてください（${target.length} 文字）。`,
+    };
+  }
+  return {
+    ok: true,
+    rules: rules.map((rule) =>
+      groupOf(rule) === from ? { ...rule, group: target, updatedAt: rule.updatedAt } : rule,
+    ),
+  };
 }
 
 /**

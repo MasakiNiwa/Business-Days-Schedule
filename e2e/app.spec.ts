@@ -10,6 +10,18 @@ import type { Page } from '@playwright/test';
 
 const STORAGE_KEY = 'bds.v1.rules';
 
+/** グループの一括操作は1か所にまとめて畳んである。既に開いていれば何もしない。 */
+async function openGroupActions(page: Page): Promise<void> {
+  const box = page.locator('details.advanced-options', {
+    has: page.getByText('グループ操作（名前の変更・まとめて削除）'),
+  });
+  if (await box.evaluate((node: HTMLDetailsElement) => node.open)) return;
+  await page.getByText('グループ操作（名前の変更・まとめて削除）').click();
+}
+
+const groupActionRow = (page: Page, name: string) =>
+  page.locator('.group-action-row').filter({ has: page.getByText(name, { exact: true }) });
+
 /** グループの絞り込みチップを押す。複数選べる。 */
 async function selectGroup(page: Page, label: string): Promise<void> {
   await page.locator('.toolbar-left .group-chip', { hasText: label }).first().click();
@@ -682,11 +694,9 @@ test.describe('グループの一括操作', () => {
     await closeDialog(page);
     await openRulePanel(page);
 
+    await openGroupActions(page);
     page.once('dialog', (dialog) => void dialog.accept('税金'));
-    await page
-      .locator('.rule-group-title', { hasText: '税務' })
-      .getByRole('button', { name: '名前を変更' })
-      .click();
+    await groupActionRow(page, '税務').getByRole('button', { name: '名前を変更' }).click();
 
     await expect(page.locator('.rule-group-title', { hasText: '税金' })).toBeVisible();
     await expect(page.locator('.rule-group-title', { hasText: '税務' })).toHaveCount(0);
@@ -699,27 +709,47 @@ test.describe('グループの一括操作', () => {
     await openRulePanel(page);
     const before = await page.locator('li.rule').count();
 
+    await openGroupActions(page);
     let message = '';
     page.once('dialog', (dialog) => {
       message = dialog.message();
       void dialog.dismiss();
     });
-    await page
-      .locator('.rule-group-title', { hasText: '税務' })
-      .getByRole('button', { name: 'まとめて削除' })
-      .click();
+    await groupActionRow(page, '税務').getByRole('button', { name: 'まとめて削除' }).click();
 
     // 取り消せば1件も減らない。
     expect(message).toContain('件のルールをすべて削除します');
     expect(message).toContain('元に戻せません');
     await expect(page.locator('li.rule')).toHaveCount(before);
 
+    await openGroupActions(page);
     page.once('dialog', (dialog) => void dialog.accept());
-    await page
-      .locator('.rule-group-title', { hasText: '税務' })
-      .getByRole('button', { name: 'まとめて削除' })
-      .click();
+    await groupActionRow(page, '税務').getByRole('button', { name: 'まとめて削除' }).click();
     await expect(page.locator('li.rule')).toHaveCount(0);
+  });
+});
+
+test.describe('グループ名の長さ', () => {
+  test('長すぎる名前は弾き、ルールを消さない', async ({ page }) => {
+    // 読み込み側は上限を超えるグループ名のルールを捨てる。検証せずに保存すると、
+    // その束のルールが再読込で丸ごと消える。
+    await page.goto('');
+    await loadSamplePack(page, '税務');
+    await closeDialog(page);
+    await openRulePanel(page);
+    const before = await page.locator('li.rule').count();
+
+    await openGroupActions(page);
+    page.once('dialog', (dialog) => void dialog.accept('あ'.repeat(41)));
+    await groupActionRow(page, '税務').getByRole('button', { name: '名前を変更' }).click();
+
+    await expect(page.locator('.banner, .flash')).toContainText('40 文字');
+    await expect(page.locator('li.rule')).toHaveCount(before);
+
+    // 読み直しても消えていない。
+    await page.reload();
+    await openRulePanel(page);
+    await expect(page.locator('li.rule')).toHaveCount(before);
   });
 });
 

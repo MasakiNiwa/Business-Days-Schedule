@@ -581,3 +581,42 @@ describe('ひな型を選び直しても画面が二重にならない', () => {
     expect(form.querySelectorAll('.preview-body')).toHaveLength(1);
   });
 });
+
+describe('年をまたぐ直近1組', () => {
+  it('本体と違う年の予定には年を付ける', () => {
+    // 「12/31（木） 年末締め → 1/8（金） 翌月確認」だと、翌年の1月8日が
+    // 同じ年に見えてしまう。年末年始の前後予定では年が曖昧になる。
+    const yearEnd = makeRule({
+      id: 'r',
+      title: '年末締め',
+      recurrence: { type: 'monthlyByDay', interval: 1, days: ['last'], overflow: 'clamp' },
+      adjust: { mode: 'none', keepInMonth: false },
+      period: { start: '2026-12-01', end: null },
+      notices: [
+        { id: 'n0', label: '翌月確認', timing: { kind: 'monthlyBusinessDay', months: 1, nth: 5 } },
+      ],
+    });
+    const { form } = open(yearEnd);
+    const chain = form.querySelector('.next-dates-chain')?.textContent ?? '';
+
+    expect(form.querySelector('.next-dates-label')?.textContent).toBe('直近（2026年）:');
+    // 本体は年を出さず、翌年へ回るフォローだけ年を付ける。
+    expect(chain).toContain('12/31（木） 年末締め');
+    expect(chain).toContain('2027/1/');
+  });
+
+  it('同じ年のうちは短いまま', () => {
+    const rule = makeRule({
+      id: 'r',
+      title: '月次締め',
+      recurrence: { type: 'monthlyByDay', interval: 1, days: [10], overflow: 'clamp' },
+      adjust: { mode: 'none', keepInMonth: false },
+      notices: [
+        { id: 'n0', label: '報告会', timing: { kind: 'weekday', weeks: 1, weekday: 3, onClosed: 'next' } },
+      ],
+    });
+    const chain = open(rule).form.querySelector('.next-dates-chain')?.textContent ?? '';
+    expect(chain).toContain('9/16（水）');
+    expect(chain).not.toContain('2026/9/16');
+  });
+});

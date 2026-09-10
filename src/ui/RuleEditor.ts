@@ -1449,14 +1449,23 @@ export class RuleEditor {
     const dayLabel = (date: string): string =>
       `${date}（${WEEKDAY_NAMES[weekdayOf(date)] ?? ''}）`;
 
+    const first = series[0];
+
     /**
      * 直近の1組で使う短い書き方。「2026-09-25（金）」を4回並べると、
      * 年が繰り返されるだけで肝心の日が読み取りにくい。年は先に1度だけ出す。
+     *
+     * ただし本体と違う年のものには年を付ける。年末年始の準備・フォローは
+     * 年をまたぐので、「12/31 → 1/8」だと翌年の1月8日が同じ年に見えてしまう。
      */
-    const shortDay = (date: string): string =>
-      `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}（${WEEKDAY_NAMES[weekdayOf(date)] ?? ''}）`;
+    const baseYear = first?.main.date.slice(0, 4);
+    const shortDay = (date: string): string => {
+      const weekday = WEEKDAY_NAMES[weekdayOf(date)] ?? '';
+      const md = `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
+      const year = date.slice(0, 4);
+      return `${year === baseYear ? md : `${year}/${md}`}（${weekday}）`;
+    };
 
-    const first = series[0];
     if (first !== undefined) {
       // 曜日まで出す。「翌週水曜」のように曜日で決めた設定は、日付だけでは
       // 合っているか確かめられない。

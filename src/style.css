@@ -2563,7 +2563,6 @@ main:focus {
   outline-offset: 2px;
 }
 
-/* グループごとの一括操作。見出しの右に寄せ、日常の操作より控えめに置く。 */
 .rule-group-title {
   display: flex;
   flex-wrap: wrap;
@@ -2571,15 +2570,45 @@ main:focus {
   gap: 0.4rem;
 }
 
-.rule-group-actions {
-  display: inline-flex;
-  gap: 0.3rem;
+/*
+ * グループごとの一括操作。見出しの横に常時置くと、予定を読むだけのときにも
+ * 目に入り続ける。たまにしか使わないので1か所へまとめて畳む。
+ */
+.group-actions {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.group-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.group-action-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.group-action-row .button {
   margin-left: auto;
+}
+
+.group-action-row .button + .button {
+  margin-left: 0;
 }
 
 @media print {
   .group-choices,
-  .rule-group-actions {
+  .group-actions {
     display: none;
   }
 }

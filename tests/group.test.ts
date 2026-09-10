@@ -14,7 +14,9 @@ import {
   renameGroup,
   rulesInGroup,
   groupsLabel,
+  GROUP_NAME_MAX,
 } from '../src/core/group';
+import { LIMITS } from '../src/core/validate';
 import type { Rule } from '../src/types';
 import { makeRule } from './helpers';
 
@@ -107,27 +109,51 @@ describe('resolveActiveGroups', () => {
 });
 
 describe('renameGroup', () => {
+  /** 成功した前提で書き換え後のルールを取り出す。 */
+  const renamed = (from: string, to: string): Rule[] => {
+    const result = renameGroup(rules, from, to);
+    if (!result.ok) throw new Error(`弾かれました: ${result.reason}`);
+    return result.rules;
+  };
+
   it('その名前を持つルールをまとめて付け替える', () => {
     // 1件ずつ編集させると取りこぼす。
-    const renamed = renameGroup(rules, '税務', '税金');
-    expect(renamed.filter((rule: Rule) => rule.group === '税金').map((rule: Rule) => rule.id)).toEqual([
+    expect(renamed('税務', '税金').filter((rule) => rule.group === '税金').map((rule) => rule.id)).toEqual([
       'a',
       'b',
     ]);
   });
 
   it('他の束は触らない', () => {
-    const renamed = renameGroup(rules, '税務', '税金');
-    expect(renamed.find((rule: Rule) => rule.id === 'c')?.group).toBe('売上・入金');
+    expect(renamed('税務', '税金').find((rule) => rule.id === 'c')?.group).toBe('売上・入金');
   });
 
   it('空にすると未分類へ移す', () => {
-    const renamed = renameGroup(rules, '税務', '');
-    expect(renamed.filter((rule: Rule) => groupOf(rule) === UNGROUPED)).toHaveLength(3);
+    expect(renamed('税務', '').filter((rule) => groupOf(rule) === UNGROUPED)).toHaveLength(3);
   });
 
   it('前後の空白は落とす', () => {
-    expect(renameGroup(rules, '税務', '  税金  ')[0]?.group).toBe('税金');
+    expect(renamed('税務', '  税金  ')[0]?.group).toBe('税金');
+  });
+
+  it('上限ちょうどは通す', () => {
+    const name = 'あ'.repeat(GROUP_NAME_MAX);
+    expect(renamed('税務', name)[0]?.group).toBe(name);
+  });
+
+  it('上限を超えたら1件も書き換えない', () => {
+    // 読み込み側は上限を超えるグループ名のルールを捨てる。検証せずに保存すると、
+    // その束のルールが再読込で丸ごと消える。
+    const result = renameGroup(rules, '税務', 'あ'.repeat(GROUP_NAME_MAX + 1));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain(`${GROUP_NAME_MAX} 文字`);
+  });
+
+  it('弾いたときは元のルールをそのまま残す', () => {
+    // 一部だけ変えると、同じ束が2つの名前に割れる。
+    const result = renameGroup(rules, '税務', 'あ'.repeat(GROUP_NAME_MAX + 1));
+    expect(result.ok).toBe(false);
+    expect(rules.filter((rule) => groupOf(rule) === '税務')).toHaveLength(2);
   });
 });
 
@@ -161,5 +187,12 @@ describe('groupLabel', () => {
   it('未分類には呼び名を与える', () => {
     expect(groupLabel(UNGROUPED)).toBe('未分類');
     expect(groupLabel('税務')).toBe('税務');
+  });
+});
+
+describe('グループ名の上限', () => {
+  it('読み込み側の検証と必ず揃える', () => {
+    // ここがずれると、保存はできるのに再読込で消える名前ができてしまう。
+    expect(GROUP_NAME_MAX).toBe(LIMITS.groupLength);
   });
 });

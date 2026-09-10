@@ -12,6 +12,8 @@ import {
   saveState,
   SCHEMA_VERSION,
 } from '../src/core/storage';
+import { GROUP_NAME_MAX, renameGroup } from '../src/core/group';
+import type { Rule } from '../src/types';
 import { makeRule } from './helpers';
 
 describe('load / save', () => {
@@ -201,5 +203,44 @@ describe('createRule', () => {
   it('ID が重複しない', () => {
     const ids = new Set(Array.from({ length: 100 }, () => createRule().id));
     expect(ids.size).toBe(100);
+  });
+});
+
+describe('グループ名の一括変更と保存の往復', () => {
+  /**
+   * 読み込み側は上限を超えるグループ名を持つルールを不正として捨てる。
+   * 一括変更が長さを確かめずに保存すると、その束のルールが再読込で丸ごと消え、
+   * さらにその状態で保存し直すと消えたまま上書きされる。
+   */
+  const threeRules = (): Rule[] => [
+    makeRule({ id: 'a', title: '家賃', group: '支払' }),
+    makeRule({ id: 'b', title: '外注費', group: '支払' }),
+    makeRule({ id: 'c', title: '朝会', group: '社内' }),
+  ];
+
+  const roundTrip = (rules: Rule[]): ReturnType<typeof loadState> => {
+    const store = createMemoryStore();
+    saveState(store, { rules, calendars: [], prefs: DEFAULT_PREFERENCES });
+    return loadState(store);
+  };
+
+  it('上限ちょうどの名前は保存して読み戻せる', () => {
+    const result = renameGroup(threeRules(), '支払', 'あ'.repeat(GROUP_NAME_MAX));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const loaded = roundTrip(result.rules);
+    expect(loaded.rules).toHaveLength(3);
+    expect(loaded.droppedRules).toBe(0);
+  });
+
+  it('上限を超える名前は弾き、元の状態を保つ', () => {
+    const rules = threeRules();
+    const result = renameGroup(rules, '支払', 'あ'.repeat(GROUP_NAME_MAX + 1));
+    expect(result.ok).toBe(false);
+
+    // 弾いた以上、保存されるのは元のまま。読み戻しても1件も欠けない。
+    const loaded = roundTrip(rules);
+    expect(loaded.rules).toHaveLength(3);
+    expect(loaded.droppedRules).toBe(0);
   });
 });

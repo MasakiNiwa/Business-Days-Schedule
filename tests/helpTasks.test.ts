@@ -134,3 +134,79 @@ describe('やりたいことから探す', () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 });
+
+describe('タブのキーボード操作', () => {
+  const tabButtons = (root: HTMLElement): HTMLElement[] => [
+    ...root.querySelectorAll<HTMLElement>('.help-tab'),
+  ];
+
+  const press = (element: HTMLElement, key: string): void => {
+    element.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+  };
+
+  const selected = (root: HTMLElement): string =>
+    root.querySelector('.help-tab[aria-selected="true"]')?.textContent ?? '';
+
+  it('選ばれていないタブは Tab キーの順路から外す', () => {
+    const root = open();
+    const [first, second] = tabButtons(root);
+    expect(first?.getAttribute('tabindex')).toBe('0');
+    expect(second?.getAttribute('tabindex')).toBe('-1');
+  });
+
+  it('右矢印で次のタブへ移る', () => {
+    // Tab キーでは1つぶんしか入らないので、矢印で移れないと
+    // キーボードだけでは切り替えられない。
+    const root = open();
+    document.body.append(root);
+    const [first, second] = tabButtons(root);
+    first?.focus();
+    press(first as HTMLElement, 'ArrowRight');
+
+    expect(selected(root)).toBe('項目から探す');
+    expect(document.activeElement).toBe(second);
+    root.remove();
+  });
+
+  it('左矢印で前のタブへ戻る', () => {
+    const root = open();
+    document.body.append(root);
+    const [first, second] = tabButtons(root);
+    second?.focus();
+    press(second as HTMLElement, 'ArrowLeft');
+
+    expect(selected(root)).toBe('やりたいことから探す');
+    expect(document.activeElement).toBe(first);
+    root.remove();
+  });
+
+  it('端では回り込む', () => {
+    const root = open();
+    document.body.append(root);
+    const [first] = tabButtons(root);
+    first?.focus();
+    press(first as HTMLElement, 'ArrowLeft');
+    expect(selected(root)).toBe('項目から探す');
+    root.remove();
+  });
+
+  it('Home と End で両端へ飛ぶ', () => {
+    const root = open();
+    document.body.append(root);
+    const [first, second] = tabButtons(root);
+    first?.focus();
+    press(first as HTMLElement, 'End');
+    expect(selected(root)).toBe('項目から探す');
+
+    press(second as HTMLElement, 'Home');
+    expect(selected(root)).toBe('やりたいことから探す');
+    root.remove();
+  });
+
+  it('関係のないキーには反応しない', () => {
+    const root = open();
+    const [first] = tabButtons(root);
+    press(first as HTMLElement, 'a');
+    expect(selected(root)).toBe('やりたいことから探す');
+  });
+});

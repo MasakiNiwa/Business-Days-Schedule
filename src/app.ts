@@ -919,7 +919,14 @@ export class App {
   private renameGroupTo(from: string, to: string): void {
     const target = to.trim();
     if (target === from) return;
-    this.state.rules = renameGroup(this.state.rules, from, target);
+    const result = renameGroup(this.state.rules, from, target);
+    if (!result.ok) {
+      // 保存してから気づくと、その束のルールが再読込で消える。手前で止める。
+      this.notify(result.reason, 'error');
+      this.render();
+      return;
+    }
+    this.state.rules = result.rules;
     // 選んでいた名前は消えるので、新しい名前へ付け替える。
     const current = this.state.prefs.activeGroups;
     if (current !== null && current.includes(from)) {
@@ -994,7 +1001,8 @@ export class App {
           ),
         );
       }
-      left.append(field('グループ', choices));
+      // 丸いボタンが並ぶだけでは、複数選べることが初見で伝わらない。
+      left.append(field('グループ（複数選択可）', choices));
     }
 
     const right = h('div', { class: 'toolbar-right' });

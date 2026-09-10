@@ -298,7 +298,7 @@ export function renderCalendarExport(
     options.groups.length === 0
       ? null
       : field(
-          '対象',
+          '対象（複数選択可）',
           buildGroupChoices(options, draft, refresh),
           'グループごとに別々のカレンダーへ取り込めます。取り込み先で分けておくと、あとで束ごと消せます。複数選ぶと1つにまとめて書き出します。',
         ),

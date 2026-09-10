@@ -84,6 +84,57 @@ function renderRule(
   );
 }
 
+/**
+ * グループごとの一括操作。
+ *
+ * 見出しの横に常時置くと、予定を読むだけのときにも目に入り続ける。
+ * たまにしか使わないので、まとめて畳んでおく。
+ */
+function renderGroupActions(
+  names: readonly string[],
+  buckets: ReadonlyMap<string, Rule[]>,
+  handlers: RuleListHandlers,
+): HTMLElement {
+  const rows = h('ul', { class: 'group-actions' });
+  for (const name of names) {
+    const count = buckets.get(name)?.length ?? 0;
+    rows.append(
+      h(
+        'li',
+        { class: 'group-action-row' },
+        h('span', { class: 'group-action-name' }, name),
+        h('span', { class: 'rule-group-count' }, `${count}件`),
+        button(
+          '名前を変更',
+          () => {
+            const next = globalThis.prompt(
+              `「${name}」の新しい名前を入力してください。\n空にすると未分類へ移します。`,
+              name,
+            );
+            if (next === null) return;
+            handlers.onRenameGroup(name, next);
+          },
+          'button button-sm button-quiet',
+        ),
+        button('まとめて削除', () => handlers.onDeleteGroup(name), 'button button-sm button-quiet'),
+      ),
+    );
+  }
+
+  return h(
+    'details',
+    { class: 'advanced-options' },
+    h('summary', {}, 'グループ操作（名前の変更・まとめて削除）'),
+    h(
+      'p',
+      { class: 'field-hint' },
+      '名前を変えると、その束のルールをまとめて付け替えます。' +
+        '削除は何件消えるかを確かめてから実行します（元に戻せません）。',
+    ),
+    rows,
+  );
+}
+
 export function renderRuleList(
   rules: readonly Rule[],
   calendars: ReadonlyMap<string, BusinessCalendar>,
@@ -172,46 +223,26 @@ export function renderRuleList(
 
     for (const name of names) {
       const items = buckets.get(name) ?? [];
-      const title = h(
-        'h3',
-        { class: 'rule-group-title' },
-        groupLabel(name),
-        h('span', { class: 'rule-group-count' }, `${items.length}件`),
-      );
-      // 未分類は名前を持たないので、付け替えも一括削除も出さない。
-      if (name !== UNGROUPED) {
-        title.append(
-          h(
-            'span',
-            { class: 'rule-group-actions' },
-            button(
-              '名前を変更',
-              () => {
-                const next = globalThis.prompt(
-                  `「${name}」の新しい名前を入力してください。\n空にすると未分類へ移します。`,
-                  name,
-                );
-                if (next === null) return;
-                handlers.onRenameGroup(name, next);
-              },
-              'button button-sm button-quiet',
-            ),
-            button(
-              'まとめて削除',
-              () => handlers.onDeleteGroup(name),
-              'button button-sm button-quiet',
-            ),
-          ),
-        );
-      }
       section.append(
         h(
           'div',
           { class: 'rule-group' },
-          title,
+          h(
+            'h3',
+            { class: 'rule-group-title' },
+            groupLabel(name),
+            h('span', { class: 'rule-group-count' }, `${items.length}件`),
+          ),
           h('ul', { class: 'rules' }, ...items.map((rule) => renderRule(rule, calendars, handlers))),
         ),
       );
+    }
+
+    // 束の操作は1か所にまとめて畳む。見出しごとにボタンを常時並べると、
+    // 予定を読むだけのときに目に入り続けて邪魔になる。
+    const named = names.filter((name) => name !== UNGROUPED);
+    if (named.length > 0) {
+      section.append(renderGroupActions(named, buckets, handlers));
     }
   }
 

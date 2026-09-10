@@ -614,7 +614,7 @@ export function renderHelp(handlers: HelpHandlers | (() => void)): HTMLElement {
     }
   }
 
-  for (const [tab, label] of TAB_LABELS) {
+  for (const [index, [tab, label]] of TAB_LABELS.entries()) {
     const node = h(
       'button',
       {
@@ -626,6 +626,24 @@ export function renderHelp(handlers: HelpHandlers | (() => void)): HTMLElement {
       label,
     );
     node.addEventListener('click', () => show(tab));
+    // タブは Tab キーでは1つぶんしか入らない（選ばれていないものは
+    // tabindex="-1"）。矢印で移れないと、キーボードだけでは切り替えられない。
+    node.addEventListener('keydown', (event) => {
+      const step = TAB_KEY_STEPS[event.key];
+      if (step === undefined) return;
+      event.preventDefault();
+      const next =
+        step === 'first'
+          ? 0
+          : step === 'last'
+            ? TAB_LABELS.length - 1
+            : (index + step + TAB_LABELS.length) % TAB_LABELS.length;
+      const target = TAB_LABELS[next]?.[0];
+      if (target === undefined) return;
+      show(target);
+      // 選ぶだけでなく焦点も動かす。押した先が見えていないと迷う。
+      buttons.get(target)?.focus();
+    });
     buttons.set(tab, node);
     tabs.append(node);
   }
@@ -643,6 +661,16 @@ const TAB_LABELS: [HelpTab, string][] = [
   ['tasks', 'やりたいことから探す'],
   ['reading', '項目から探す'],
 ];
+
+/** タブの間を移るキー。端は回り込ませる。 */
+const TAB_KEY_STEPS: Record<string, number | 'first' | 'last' | undefined> = {
+  ArrowRight: 1,
+  ArrowDown: 1,
+  ArrowLeft: -1,
+  ArrowUp: -1,
+  Home: 'first',
+  End: 'last',
+};
 
 /**
  * 「やりたいこと」から引く索引。

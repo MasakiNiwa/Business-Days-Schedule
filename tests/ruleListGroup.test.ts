@@ -78,9 +78,10 @@ describe('グループの一括操作', () => {
     makeRule({ id: 'c', title: 'なんとなくの予定' }),
   ];
 
-  const groupTitled = (root: HTMLElement, name: string): Element | undefined =>
-    [...root.querySelectorAll('.rule-group-title')].find((node) =>
-      (node.textContent ?? '').startsWith(name),
+  /** 一括操作は1か所にまとめて畳んである。 */
+  const actionRow = (root: HTMLElement, name: string): Element | undefined =>
+    [...root.querySelectorAll('.group-action-row')].find(
+      (node) => node.querySelector('.group-action-name')?.textContent === name,
     );
 
   const clickIn = (root: ParentNode, text: string): void => {
@@ -89,24 +90,39 @@ describe('グループの一括操作', () => {
     target.dispatchEvent(new MouseEvent('click'));
   };
 
+  it('一括操作は1か所にまとめて畳む', () => {
+    // 見出しの横に常時置くと、予定を読むだけのときにも目に入り続ける。
+    const element = renderRuleList(rules, calendars, handlers);
+    const box = element.querySelector<HTMLDetailsElement>('.advanced-options');
+    expect(box?.querySelector('summary')?.textContent).toContain('グループ操作');
+    expect(box?.open).toBe(false);
+    // 見出しの中にはボタンを置かない。
+    expect(element.querySelectorAll('.rule-group-title button')).toHaveLength(0);
+  });
+
   it('名前のある束には「名前を変更」と「まとめて削除」を出す', () => {
     const element = renderRuleList(rules, calendars, handlers);
-    const labels = [...(groupTitled(element, '税務')?.querySelectorAll('button') ?? [])].map(
+    const labels = [...(actionRow(element, '税務')?.querySelectorAll('button') ?? [])].map(
       (n) => n.textContent,
     );
     expect(labels).toEqual(['名前を変更', 'まとめて削除']);
   });
 
-  it('未分類には出さない（名前を持たないため）', () => {
+  it('未分類は並べない（名前を持たないため）', () => {
     const element = renderRuleList(rules, calendars, handlers);
-    expect(groupTitled(element, '未分類')?.querySelectorAll('button')).toHaveLength(0);
+    expect(actionRow(element, '未分類')).toBeUndefined();
+  });
+
+  it('何件あるかを添える（消す前に分かるように）', () => {
+    const element = renderRuleList(rules, calendars, handlers);
+    expect(actionRow(element, '税務')?.textContent).toContain('2件');
   });
 
   it('名前を変更すると、新しい名前を渡す', () => {
     const onRenameGroup = vi.fn();
     vi.spyOn(globalThis, 'prompt').mockReturnValue('税金');
     const element = renderRuleList(rules, calendars, { ...handlers, onRenameGroup });
-    clickIn(groupTitled(element, '税務') as ParentNode, '名前を変更');
+    clickIn(actionRow(element, '税務') as ParentNode, '名前を変更');
     expect(onRenameGroup).toHaveBeenCalledWith('税務', '税金');
     vi.restoreAllMocks();
   });
@@ -115,7 +131,7 @@ describe('グループの一括操作', () => {
     const onRenameGroup = vi.fn();
     vi.spyOn(globalThis, 'prompt').mockReturnValue(null);
     const element = renderRuleList(rules, calendars, { ...handlers, onRenameGroup });
-    clickIn(groupTitled(element, '税務') as ParentNode, '名前を変更');
+    clickIn(actionRow(element, '税務') as ParentNode, '名前を変更');
     expect(onRenameGroup).not.toHaveBeenCalled();
     vi.restoreAllMocks();
   });
@@ -123,7 +139,7 @@ describe('グループの一括操作', () => {
   it('まとめて削除は束の名前を渡す', () => {
     const onDeleteGroup = vi.fn();
     const element = renderRuleList(rules, calendars, { ...handlers, onDeleteGroup });
-    clickIn(groupTitled(element, '税務') as ParentNode, 'まとめて削除');
+    clickIn(actionRow(element, '税務') as ParentNode, 'まとめて削除');
     expect(onDeleteGroup).toHaveBeenCalledWith('税務');
   });
 });
