@@ -162,12 +162,24 @@ export function exportWarningPrompt(
   const unique = (reason: (warning: ExpandWarning) => boolean): string[] => [
     ...new Set(relevant.filter(reason).map((warning) => warning.message)),
   ];
-  const missing = unique((warning) => warning.reason !== 'notice-role-mismatch');
+  // 3種類を混ぜない。「書き出されません」と一括で言うと、実際には書き出される
+  // ものまで出ていないと読ませてしまう。
+  //
+  //   出ない            日付を決められなかった
+  //   出るが別カレンダー  参照先が見つからず自社カレンダーで計算した
+  //   出るが要確認       本体との前後が設定と逆になった
+  const missing = unique((warning) => warning.reason === 'notice-unresolved' || warning.reason === 'no-business-day');
+  const substituted = unique((warning) => warning.reason === 'unknown-calendar');
   const crossed = unique((warning) => warning.reason === 'notice-role-mismatch');
 
   const sections: string[] = [];
   if (missing.length > 0) {
     sections.push(`次の予定は日付を決められないため書き出されません。\n${missing.join('\n')}`);
+  }
+  if (substituted.length > 0) {
+    sections.push(
+      `次の予定は書き出しますが、指定の営業日カレンダーが見つからないため別のカレンダーで計算しています。\n${substituted.join('\n')}`,
+    );
   }
   if (crossed.length > 0) {
     sections.push(

@@ -376,3 +376,75 @@ describe('exportWarningPrompt と実際に書き出す予定の一致', () => {
     ).toBeNull();
   });
 });
+
+describe('exportWarningPrompt の分類', () => {
+  const both = { includeNotices: true, includeFollows: true };
+
+  const unresolved = {
+    ruleId: 'r',
+    rawDate: '2026-09-10',
+    reason: 'notice-unresolved' as const,
+    noticeRole: 'after' as const,
+    message: '「月次締め」の翌月の第25営業日（確定処理）は日付を決められませんでした',
+  };
+  const substituted = {
+    ruleId: 'r',
+    rawDate: null,
+    reason: 'unknown-calendar' as const,
+    message: '営業日カレンダー "bank" が見つからないため "自社カレンダー" で計算しました',
+  };
+  const noBusinessDay = {
+    ruleId: 'r',
+    rawDate: '2026-12-31',
+    reason: 'no-business-day' as const,
+    message: '2026-12-31 の周辺に営業日が見つからないため、この発生日を除外しました',
+  };
+  const crossed = {
+    ruleId: 'r',
+    rawDate: '2026-09-20',
+    reason: 'notice-role-mismatch' as const,
+    noticeRole: 'after' as const,
+    noticeKind: 'notice' as const,
+    message: '「週次報告」の翌週の月曜（提出）は、本体より後のつもりの設定ですが 2026-09-18 に出ます',
+  };
+
+  /**
+   * 3種類は結果が違う。まとめて「書き出されません」と言うと、実際には
+   * 書き出される予定まで出ていないと読ませてしまう。
+   */
+  it('代替カレンダーで計算したものは「書き出されません」に混ぜない', () => {
+    const prompt = exportWarningPrompt([substituted], both) ?? '';
+    expect(prompt).toContain('書き出しますが');
+    expect(prompt).toContain('別のカレンダーで計算しています');
+    expect(prompt).not.toContain('書き出されません');
+  });
+
+  it('前後が逆転したものも「書き出されません」に混ぜない', () => {
+    const prompt = exportWarningPrompt([crossed], both) ?? '';
+    expect(prompt).toContain('書き出しますが');
+    expect(prompt).toContain('前後が設定と逆');
+    expect(prompt).not.toContain('書き出されません');
+  });
+
+  it('日付を決められなかったものだけが「書き出されません」に入る', () => {
+    const prompt = exportWarningPrompt([unresolved, noBusinessDay], both) ?? '';
+    expect(prompt).toContain('書き出されません');
+    expect(prompt).toContain('確定処理');
+    expect(prompt).toContain('営業日が見つからない');
+    expect(prompt).not.toContain('書き出しますが');
+  });
+
+  it('3種類が混ざったら、3つの段落に分ける', () => {
+    const prompt = exportWarningPrompt([unresolved, substituted, crossed], both) ?? '';
+    const sections = prompt.split('\n\n');
+    expect(sections).toHaveLength(3);
+    // 見出しの順番も固定する。出ないものを先に読ませたい。
+    expect(sections[0]).toContain('書き出されません');
+    expect(sections[1]).toContain('別のカレンダーで計算しています');
+    expect(sections[2]).toContain('前後が設定と逆');
+    // それぞれの本文が、対応する段落に入っている。
+    expect(sections[0]).toContain('確定処理');
+    expect(sections[1]).toContain('自社カレンダー');
+    expect(sections[2]).toContain('提出');
+  });
+});

@@ -329,10 +329,20 @@ export class RuleEditor {
     return this.snapshot() !== this.baseline;
   }
 
-  /** 比べるための姿。updatedAt は保存時に付け替わるので外す。 */
+  /**
+   * 比べるための姿。updatedAt は保存時に付け替わるので外す。
+   *
+   * 編集中の状態も混ぜる。日数を消して空欄にした状態は、畳めないので
+   * 保存する形へは書き戻していない。保存用データだけを比べると、
+   * 打ち直している最中は「触っていない」ことになり、閉じる確認をすり抜ける。
+   */
   private snapshot(): string {
     const { updatedAt: _updatedAt, ...rest } = this.draft;
-    return JSON.stringify(rest);
+    const editing = this.draft.notices.map((notice) => [
+      notice.id,
+      this.timingStates.get(notice.id ?? ''),
+    ]);
+    return JSON.stringify({ rest, editing });
   }
 
   // -------------------------------------------------------------------------

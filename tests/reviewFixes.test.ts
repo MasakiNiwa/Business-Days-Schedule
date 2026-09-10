@@ -262,3 +262,60 @@ describe('祝日データの収録範囲', () => {
     expect(outOfRangeMessage(holidays, '2020-01-01', '2026-12-31')).not.toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// P3-9: 表示範囲外の月についての欠落警告
+// ---------------------------------------------------------------------------
+
+describe('警告の対象を表示範囲に合わせる', () => {
+  /**
+   * 探索範囲は「表示範囲に出る前後予定を取りこぼさない」ために広げてある。
+   * 警告までその広い範囲で返すと、3月を見ているのに 2月や 5月の話が並び、
+   * 書き出し前の確認で「今から書き出す中身の問題」と読めなくなる。
+   */
+  const monthlyClose = makeRule({
+    id: 'close',
+    title: '月次締め',
+    recurrence: { type: 'monthlyByDay', interval: 1, days: [10], overflow: 'clamp' },
+    adjust: { mode: 'prev', keepInMonth: false },
+    // 第22営業日が無い月がある。そこで日付を決められず、毎月のように警告が出る。
+    notices: [
+      {
+        id: 'n1',
+        label: '確定処理',
+        timing: { kind: 'monthlyBusinessDay', months: 0, nth: 22 },
+        role: 'after',
+      },
+    ],
+  });
+
+  it('1か月ぶんを見たとき、その月の警告だけが返る', () => {
+    const march = expandRules(
+      [monthlyClose],
+      { start: '2026-03-01', end: '2026-03-31' },
+      scheduleContext,
+    );
+    // 探索範囲は前後1か月＋前後予定ぶん広がるので、絞らないと 2月・4月も混ざる。
+    expect(march.warnings.map((w) => w.rawDate)).toEqual(['2026-03-10']);
+  });
+
+  it('広い範囲を見れば、その範囲ぶんの警告が返る', () => {
+    const half = expandRules(
+      [monthlyClose],
+      { start: '2026-01-01', end: '2026-06-30' },
+      scheduleContext,
+    );
+    const dates = half.warnings.map((w) => w.rawDate);
+    expect(dates.length).toBeGreaterThan(1);
+    for (const date of dates) {
+      expect(date === null || (date >= '2026-01-01' && date <= '2026-06-30')).toBe(true);
+    }
+  });
+
+  it('特定の発生日に紐づかない警告は、範囲にかかわらず残す', () => {
+    // 「カレンダーが見つからない」はルール全体の話なので、日付では絞れない。
+    const orphan = makeRule({ id: 'orphan', calendarId: 'missing' });
+    const result = expandRules([orphan], { start: '2026-03-01', end: '2026-03-31' }, scheduleContext);
+    expect(result.warnings.map((w) => w.reason)).toContain('unknown-calendar');
+  });
+});
