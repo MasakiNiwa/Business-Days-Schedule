@@ -22,7 +22,7 @@ describe('load / save', () => {
     expect(state.prefs.listDays).toBe(30);
     // 予定は既定で内容を出す。点にするかは利用者が選ぶ（画面幅では決めない）。
     expect(state.prefs.chipDisplay).toBe('text');
-    expect(state.prefs.activeGroup).toBeNull();
+    expect(state.prefs.activeGroups).toBeNull();
     expect(state.prefs.theme).toBe('auto');
   });
 

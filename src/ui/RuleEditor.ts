@@ -149,6 +149,14 @@ const NTH_ORIGIN_OPTIONS = [
  */
 type TimingState = {
   kind: NoticeTiming['kind'];
+  /**
+   * 設定が向きを言わないとき（同じ週・同じ月）に使う、持ち主の意図。
+   *
+   * ここを毎回「後」で塗り替えていたため、同じ週の準備予定を開いて保存する
+   * だけで役割が変わり、外部カレンダーの識別子まで変わっていた。
+   * 日付の設定を触っていないのに別の予定として扱われる。
+   */
+  role: NoticeRole;
   offset: { size: number; unit: 'business' | 'calendar'; role: NoticeRole };
   weekday: { weeks: number; weekday: Weekday; onClosed: 'next' | 'prev' | 'none' };
   monthlyBusinessDay: { months: number; size: number; fromEnd: boolean };
@@ -158,6 +166,7 @@ type TimingState = {
 function defaultTimingState(role: NoticeRole): TimingState {
   return {
     kind: 'offset',
+    role,
     offset: { size: 3, unit: 'business', role },
     weekday: { weeks: role === 'before' ? -1 : 1, weekday: 3, onClosed: 'next' },
     monthlyBusinessDay: { months: role === 'before' ? 0 : 1, size: 5, fromEnd: false },
@@ -206,15 +215,23 @@ function timingOfState(state: TimingState): NoticeTiming {
   }
 }
 
-/** 設定上の向き。畳む前の状態から決まる。 */
+/**
+ * 設定上の向き。畳む前の状態から決まる。
+ *
+ * ずらす数が 0 のとき（同じ週・同じ月）は設定からは決まらないので、
+ * 持ち主の意図をそのまま残す。ここで「後」に寄せると、既存の準備予定が
+ * 開いて保存するだけでフォローに変わってしまう。
+ */
 function roleOfState(state: TimingState): NoticeRole {
   switch (state.kind) {
     case 'offset':
       return state.offset.role;
     case 'weekday':
-      return state.weekday.weeks < 0 ? 'before' : 'after';
-    case 'monthlyBusinessDay':
-      return state.monthlyBusinessDay.months < 0 ? 'before' : 'after';
+      return state.weekday.weeks === 0 ? state.role : state.weekday.weeks < 0 ? 'before' : 'after';
+    case 'monthlyBusinessDay': {
+      const months = state.monthlyBusinessDay.months;
+      return months === 0 ? state.role : months < 0 ? 'before' : 'after';
+    }
   }
 }
 
@@ -225,21 +242,25 @@ function roleOfState(state: TimingState): NoticeRole {
  * 画面は「前」なのに保存されるのは「3営業日後」になっていた。
  * 大きさは常に正の整数として扱い、向きは選択欄だけが決める。
  */
-function timingStateIssue(state: TimingState): string | null {
+function timingStateIssue(state: TimingState): TimingStateIssue | null {
   const positive = (size: number, name: string, max: number): string | null => {
     if (!Number.isInteger(size) || size < 1) return `${name}は 1 以上の整数で入力してください`;
     if (size > max) return `${name}は ${max} 以下で入力してください`;
     return null;
   };
-  switch (state.kind) {
-    case 'offset':
-      return positive(state.offset.size, '本体からの日数', LIMITS.noticeOffset);
-    case 'weekday':
-      return null;
-    case 'monthlyBusinessDay':
-      return positive(state.monthlyBusinessDay.size, '営業日数', LIMITS.noticeNth);
-  }
+  // いまのところ問題が起きるのは大きさの欄だけ。直す場所へ運べるよう、
+  // 文言だけでなく「どの欄か」も返す（行の先頭の欄へ運んでも直せない）。
+  const message =
+    state.kind === 'offset'
+      ? positive(state.offset.size, '本体からの日数', LIMITS.noticeOffset)
+      : state.kind === 'monthlyBusinessDay'
+        ? positive(state.monthlyBusinessDay.size, '営業日数', LIMITS.noticeNth)
+        : null;
+  return message === null ? null : { field: 'size', message };
 }
+
+/** 画面の状態そのものの問題。`field` は直すべき欄。 */
+type TimingStateIssue = { field: 'size'; message: string };
 
 export class RuleEditor {
   readonly element: HTMLFormElement;
@@ -1042,25 +1063,34 @@ export class RuleEditor {
     return h(
       'section',
       { class: 'editor-section' },
-      h('h3', { class: 'editor-heading' }, '前後の予定（準備日・フォロー）'),
+      // 見出しは折りたたみの summary（3. 準備や確認の予定を付ける）が担う。
+      // ここにもう1つ置くと、同じことを二度言うことになる。
       h(
         'p',
         { class: 'field-hint' },
-        '本体の確定日を起点に、前（準備）と後（フォロー）の予定を出せます。' +
-          '本体が営業日補正で動けば、前後の予定も一緒に動きます。' +
-          'メールやプッシュ通知は送信しません。',
+        'この予定の確定日を起点に、前（準備）と後（フォロー）を出せます。本体が動けば一緒に動きます。',
       ),
       h(
-        'p',
-        { class: 'field-hint' },
-        '日付の決め方は3通り。日数（3営業日前）、週と曜日（翌週水曜）、' +
-          '月と第N営業日（翌月第5営業日）。実際の日付は下のプレビューで確かめられます。',
+        'details',
+        { class: 'advanced-options' },
+        h('summary', {}, '設定例を見る'),
+        h(
+          'ul',
+          { class: 'help-examples' },
+          h('li', {}, '給与振込の3営業日前に「振込データ作成」（日数で指定）'),
+          h('li', {}, '月次締めの翌週水曜に「報告会」（週と曜日で指定）'),
+          h('li', {}, '締めのあと翌月の第5営業日に「請求書発行」（月と第N営業日で指定）'),
+          h('li', {}, 'メールやプッシュ通知は送りません。カレンダーに予定として出るだけです。'),
+        ),
       ),
       list,
     );
   }
 
   private buildPreviewDetails(): HTMLElement {
+    // 使い回している要素なので、足す前に中身を空にする。
+    // ひな型を選ぶと build() がもう一度走り、見出しとプレビューが二重に並んでいた。
+    clear(this.previewDetails);
     this.previewDetails.append(h('summary', {}, '次の10回をすべて見る'), this.buildPreview());
     return this.previewDetails;
   }
@@ -1106,7 +1136,7 @@ export class RuleEditor {
             numberInput(offset.size, (value) => {
               offset.size = value;
               onChange();
-            }, { min: 1, max: 365 }),
+            }, { min: 1, max: 365, field: 'size' }),
             `${ordinal}: 本体から何日か`,
           ),
         ),
@@ -1210,7 +1240,7 @@ export class RuleEditor {
             numberInput(monthly.size, (value) => {
               monthly.size = value;
               onChange();
-            }, { min: 1, max: 25 }),
+            }, { min: 1, max: 25, field: 'size' }),
             `${ordinal}: 営業日数`,
           ),
           h('span', { class: 'unit' }, '営業日目'),
@@ -1234,7 +1264,7 @@ export class RuleEditor {
 
       if (slot !== undefined) {
         clear(slot);
-        if (problem !== null) slot.append(h('p', { class: 'issue issue-error' }, problem));
+        if (problem !== null) slot.append(h('p', { class: 'issue issue-error' }, problem.message));
       }
 
       if (problem !== null) {
@@ -1248,11 +1278,11 @@ export class RuleEditor {
   }
 
   /** 画面の状態そのものの問題。モデルにできない形なので validateRule では拾えない。 */
-  private noticeStateIssues(): { index: number; message: string }[] {
-    const issues: { index: number; message: string }[] = [];
+  private noticeStateIssues(): { index: number; field: 'size'; message: string }[] {
+    const issues: { index: number; field: 'size'; message: string }[] = [];
     this.draft.notices.forEach((notice, index) => {
-      const message = timingStateIssue(this.timingStateFor(notice));
-      if (message !== null) issues.push({ index, message });
+      const problem = timingStateIssue(this.timingStateFor(notice));
+      if (problem !== null) issues.push({ index, ...problem });
     });
     return issues;
   }
@@ -1381,11 +1411,21 @@ export class RuleEditor {
     // 検証結果はまとまりとして読み上げさせる。増減が伝わるよう live region にする。
     this.issuesBody.setAttribute('role', 'status');
     this.issuesBody.setAttribute('aria-live', 'polite');
-    for (const { index, message } of stateIssues) {
+    // 詳しい文言は各欄の直下に出してある。ここで同じ文を繰り返すと、
+    // 保存欄が長くなるだけで直す場所は分からない。件数と場所だけを示す。
+    const errorCount =
+      stateIssues.length + issues.filter((issue) => issue.severity === 'error').length;
+    if (errorCount > 0) {
+      const where = stateIssues.map(({ index }) => `前後の予定 ${index + 1} 件目`);
       this.issuesBody.append(
-        h('p', { class: 'issue issue-error' }, `前後の予定 ${index + 1} 件目: ${message}`),
+        h(
+          'p',
+          { class: 'issue issue-error' },
+          `修正が必要な項目が ${errorCount} 件あります${where.length === 0 ? '' : `（${where.join('、')}）`}。`,
+        ),
       );
     }
+    // 画面の他の場所に出していないものは、そのまま読ませる。
     for (const issue of issues) {
       this.issuesBody.append(
         h('p', { class: `issue issue-${issue.severity}` }, issue.message),
@@ -1409,22 +1449,30 @@ export class RuleEditor {
     const dayLabel = (date: string): string =>
       `${date}（${WEEKDAY_NAMES[weekdayOf(date)] ?? ''}）`;
 
+    /**
+     * 直近の1組で使う短い書き方。「2026-09-25（金）」を4回並べると、
+     * 年が繰り返されるだけで肝心の日が読み取りにくい。年は先に1度だけ出す。
+     */
+    const shortDay = (date: string): string =>
+      `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}（${WEEKDAY_NAMES[weekdayOf(date)] ?? ''}）`;
+
     const first = series[0];
     if (first !== undefined) {
       // 曜日まで出す。「翌週水曜」のように曜日で決めた設定は、日付だけでは
       // 合っているか確かめられない。
       const chain: string[] = [];
       for (const item of first.related) {
-        if (item.date < first.main.date) chain.push(`${dayLabel(item.date)} ${item.noticeLabel ?? '準備'}`);
+        if (item.date < first.main.date) chain.push(`${shortDay(item.date)} ${item.noticeLabel ?? '準備'}`);
       }
       chain.push(
-        `${dayLabel(first.main.date)} ${this.draft.title === '' ? '（この予定）' : this.draft.title}`,
+        `${shortDay(first.main.date)} ${this.draft.title === '' ? '（この予定）' : this.draft.title}`,
       );
       for (const item of first.related) {
-        if (item.date >= first.main.date) chain.push(`${dayLabel(item.date)} ${item.noticeLabel ?? 'フォロー'}`);
+        if (item.date >= first.main.date) chain.push(`${shortDay(item.date)} ${item.noticeLabel ?? 'フォロー'}`);
       }
       this.nextDates.append(
-        h('span', { class: 'next-dates-label' }, '直近:'),
+        // 年は先に1度だけ。日付を4つ並べると、年が繰り返されるだけで読みにくい。
+        h('span', { class: 'next-dates-label' }, `直近（${first.main.date.slice(0, 4)}年）:`),
         h('span', { class: 'next-dates-chain' }, chain.join(' → ')),
       );
       // なぜその日になったのか。記号だけだと設定と結果が結び付かない。
@@ -1433,7 +1481,7 @@ export class RuleEditor {
           h(
             'span',
             { class: 'next-dates-note' },
-            `${dayLabel(first.main.rawDate)}が休業日のため${
+            `${shortDay(first.main.rawDate)}が休業日のため${
               first.main.shiftDirection === 'prev' ? '前営業日へ' : '翌営業日へ'
             }`,
           ),
@@ -1567,11 +1615,12 @@ export class RuleEditor {
    * 「どこがおかしいのか」が分からなかった。悪いのが前後の予定なら、
    * その予定の欄まで運ぶ。畳んであるときは開いてから運ぶ。
    */
-  private focusFirstProblem(stateIssues: readonly { index: number }[]): void {
+  private focusFirstProblem(stateIssues: readonly { index: number; field: 'size' }[]): void {
     const first = stateIssues[0];
     if (first !== undefined) {
       const item = this.element.querySelectorAll('.notice-item')[first.index];
-      const target = item?.querySelector<HTMLElement>('.notice-row input, .notice-row select');
+      // 行の先頭ではなく、悪い値が入っている欄そのものへ運ぶ。
+      const target = item?.querySelector<HTMLElement>(`[data-field="${first.field}"]`);
       if (target !== null && target !== undefined) {
         target.closest('details')?.setAttribute('open', '');
         target.focus();

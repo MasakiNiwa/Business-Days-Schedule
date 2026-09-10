@@ -122,7 +122,8 @@ export function select<T extends string>(
 export function numberInput(
   value: number,
   onChange: (next: number) => void,
-  attributes: { min?: number; max?: number; class?: string } = {},
+  /** `field` は「どの欄か」の印。エラーのときに直す場所へ運ぶのに使う。 */
+  attributes: { min?: number; max?: number; class?: string; field?: string } = {},
 ): HTMLInputElement {
   const input = h('input', {
     type: 'number',
@@ -130,6 +131,7 @@ export function numberInput(
     value: String(value),
     min: attributes.min,
     max: attributes.max,
+    'data-field': attributes.field,
   });
   input.addEventListener('input', () => {
     const parsed = Number(input.value);

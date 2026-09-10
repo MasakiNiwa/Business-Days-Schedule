@@ -24,7 +24,6 @@ export type SamplePickerHandlers = {
 
 export function renderSamplePicker(
   packs: readonly SamplePack[],
-  addedIds: ReadonlySet<string>,
   handlers: SamplePickerHandlers,
   error: string | null = null,
 ): HTMLElement {
@@ -40,7 +39,8 @@ export function renderSamplePicker(
     h(
       'p',
       { class: 'field-hint' },
-      '追加しても既にあるルールは変更しません。編集した内容が消えることはありません。',
+      '「追加」は、既にあるルールを変更しません。編集した内容が消えることはありません。' +
+        '「サンプルの内容で上書き」は、その束のルールをサンプルのとおりに戻します。',
     ),
   );
 
@@ -54,14 +54,14 @@ export function renderSamplePicker(
 
   const list = h('ul', { class: 'sample-list' });
   for (const pack of packs) {
-    const added = addedIds.has(pack.id);
+    // 「追加済み」は出さない。束の一部しか使っていなくても付き、追加した
+    // ルールを消したあとも残るため、実態と合わない印になっていた。
+    // 代わりに、何が起きるかを書いたボタンを常に並べる。
     const actions = h(
       'div',
       { class: 'sample-actions' },
       button('追加', () => handlers.onAdd(pack), 'button button-sm button-primary'),
-      added
-        ? button('元に戻す', () => handlers.onRestore(pack), 'button button-sm button-quiet')
-        : null,
+      button('サンプルの内容で上書き', () => handlers.onRestore(pack), 'button button-sm button-quiet'),
     );
 
     const choices = h('div', { class: 'sample-choices', hidden: true });
@@ -142,16 +142,8 @@ export function renderSamplePicker(
             { class: 'sample-name' },
             pack.name,
             h('span', { class: 'sample-count' }, `${pack.count} 件`),
-            added ? h('span', { class: 'rule-badge' }, '追加済み') : null,
           ),
           h('p', { class: 'sample-desc' }, pack.description),
-          added
-            ? h(
-                'p',
-                { class: 'sample-desc' },
-                '「元に戻す」を選ぶと、この束のルールを編集前の内容へ上書きします。',
-              )
-            : null,
         ),
         actions,
         choices,

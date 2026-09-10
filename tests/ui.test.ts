@@ -268,9 +268,11 @@ describe('renderRuleList', () => {
   const handlers = (): RuleListHandlers => ({
     onLoadSamples: vi.fn(),
     onAdd: vi.fn(),
-    onEdit: vi.fn(),
+    onEdit: vi.fn(), onDuplicate: vi.fn(),
     onToggle: vi.fn(),
     onOpenSettings: vi.fn(),
+    onRenameGroup: vi.fn(),
+    onDeleteGroup: vi.fn(),
     onClose: vi.fn(),
   });
 

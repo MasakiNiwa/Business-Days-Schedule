@@ -16,8 +16,11 @@ const handlers: RuleListHandlers = {
   onLoadSamples: vi.fn(),
   onAdd: vi.fn(),
   onEdit: vi.fn(),
+  onDuplicate: vi.fn(),
   onToggle: vi.fn(),
   onOpenSettings: vi.fn(),
+  onRenameGroup: vi.fn(),
+  onDeleteGroup: vi.fn(),
   onClose: vi.fn(),
 };
 
@@ -65,5 +68,62 @@ describe('renderRuleList のグループ', () => {
     ];
     const element = render(rules);
     expect(element.querySelectorAll('.rule')).toHaveLength(rules.length);
+  });
+});
+
+describe('グループの一括操作', () => {
+  const rules = [
+    makeRule({ id: 'a', title: '源泉所得税', group: '税務' }),
+    makeRule({ id: 'b', title: '住民税', group: '税務' }),
+    makeRule({ id: 'c', title: 'なんとなくの予定' }),
+  ];
+
+  const groupTitled = (root: HTMLElement, name: string): Element | undefined =>
+    [...root.querySelectorAll('.rule-group-title')].find((node) =>
+      (node.textContent ?? '').startsWith(name),
+    );
+
+  const clickIn = (root: ParentNode, text: string): void => {
+    const target = [...root.querySelectorAll('button')].find((n) => n.textContent === text);
+    if (target === undefined) throw new Error(`ボタンが見つかりません: ${text}`);
+    target.dispatchEvent(new MouseEvent('click'));
+  };
+
+  it('名前のある束には「名前を変更」と「まとめて削除」を出す', () => {
+    const element = renderRuleList(rules, calendars, handlers);
+    const labels = [...(groupTitled(element, '税務')?.querySelectorAll('button') ?? [])].map(
+      (n) => n.textContent,
+    );
+    expect(labels).toEqual(['名前を変更', 'まとめて削除']);
+  });
+
+  it('未分類には出さない（名前を持たないため）', () => {
+    const element = renderRuleList(rules, calendars, handlers);
+    expect(groupTitled(element, '未分類')?.querySelectorAll('button')).toHaveLength(0);
+  });
+
+  it('名前を変更すると、新しい名前を渡す', () => {
+    const onRenameGroup = vi.fn();
+    vi.spyOn(globalThis, 'prompt').mockReturnValue('税金');
+    const element = renderRuleList(rules, calendars, { ...handlers, onRenameGroup });
+    clickIn(groupTitled(element, '税務') as ParentNode, '名前を変更');
+    expect(onRenameGroup).toHaveBeenCalledWith('税務', '税金');
+    vi.restoreAllMocks();
+  });
+
+  it('取り消したら何もしない', () => {
+    const onRenameGroup = vi.fn();
+    vi.spyOn(globalThis, 'prompt').mockReturnValue(null);
+    const element = renderRuleList(rules, calendars, { ...handlers, onRenameGroup });
+    clickIn(groupTitled(element, '税務') as ParentNode, '名前を変更');
+    expect(onRenameGroup).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+
+  it('まとめて削除は束の名前を渡す', () => {
+    const onDeleteGroup = vi.fn();
+    const element = renderRuleList(rules, calendars, { ...handlers, onDeleteGroup });
+    clickIn(groupTitled(element, '税務') as ParentNode, 'まとめて削除');
+    expect(onDeleteGroup).toHaveBeenCalledWith('税務');
   });
 });

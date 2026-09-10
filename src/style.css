@@ -2523,3 +2523,137 @@ main:focus {
     white-space: nowrap;
   }
 }
+
+/* --- グループの選択 ---------------------------------------------------- */
+
+/*
+ * 1つずつしか選べないと、「税務と入金だけ見比べたい」のたびに選び直すことに
+ * なる。押して入り切りできる形にして、複数選べるようにする。
+ */
+.group-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.group-chip {
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.group-chip:hover {
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+
+.group-chip[aria-pressed='true'] {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--bg);
+}
+
+.group-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* グループごとの一括操作。見出しの右に寄せ、日常の操作より控えめに置く。 */
+.rule-group-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.rule-group-actions {
+  display: inline-flex;
+  gap: 0.3rem;
+  margin-left: auto;
+}
+
+@media print {
+  .group-choices,
+  .rule-group-actions {
+    display: none;
+  }
+}
+
+/* --- ヘルプのタブ ------------------------------------------------------ */
+
+/*
+ * 引き方が2通りあるので面を分ける。やりたいことの索引と項目ごとの解説を
+ * 1枚に積むと、上から順に読むしかない長さになる。
+ */
+.help-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0.6rem 0 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.help-tab {
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.85rem;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+
+.help-tab:hover {
+  color: var(--fg);
+}
+
+.help-tab[aria-selected='true'] {
+  color: var(--fg);
+  background: var(--bg);
+  border-color: var(--border);
+  border-bottom: 1px solid var(--bg);
+}
+
+.help-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 逆引きのまとまりの見出し。16件を平らに並べると目で追うだけで疲れる。 */
+.help-task-group {
+  margin: 1rem 0 0.4rem;
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+}
+
+.help-tasks > .help-task-group:first-child {
+  margin-top: 0.3rem;
+}
+
+@media print {
+  /* 紙では両方とも出す。切り替えようがないため。 */
+  .help-tabs { display: none; }
+  .help-pane[hidden] { display: block !important; }
+}
+
+.empty-prompt-lead {
+  font-weight: 600;
+}
+
+/* 前後の予定の設定例。読みたい人だけが開く。 */
+.help-examples {
+  margin: 0.3rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.78rem;
+  color: var(--fg-faint);
+  line-height: 1.7;
+}

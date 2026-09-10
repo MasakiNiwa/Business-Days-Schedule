@@ -33,7 +33,8 @@ export type CalendarExportRequest = {
   /** フォロー（本体より後）も書き出すか。 */
   includeFollows: boolean;
   /** 書き出す対象のグループ。null は「すべて」。 */
-  group: string | null;
+  /** 書き出すグループ。null は「すべて」。 */
+  groups: string[] | null;
 };
 
 export type CalendarExportHandlers = {
@@ -44,7 +45,6 @@ export type CalendarExportHandlers = {
 };
 
 /** 選択肢の値として使う「すべて」。グループ名と衝突しない値を使う。 */
-const ALL_GROUPS = '\u0000all';
 
 export type CalendarExportOptionsInput = {
   /** 選べるグループ名。空なら対象の選択欄そのものを出さない。 */
@@ -52,7 +52,7 @@ export type CalendarExportOptionsInput = {
   /** 未分類のルールがあるか。 */
   hasUngrouped: boolean;
   /** 画面で絞り込み中のグループ。初期値にする。 */
-  activeGroup: string | null;
+  activeGroups: string[] | null;
 };
 
 /** これを超えたら「多い」と伝える。取り込みは戻しにくいので、押す前に気づかせる。 */
@@ -80,10 +80,70 @@ const PRESETS: Preset[] = [
   { label: '1年', range: (today) => spanFromThisMonth(today, 12) },
 ];
 
+/**
+ * 書き出す対象のグループ。複数選べる。
+ *
+ * 「税務」と「入金」だけをまとめて渡したい、のような使い方があるため。
+ * 1つずつしか選べないと、そのたびに書き出し直すことになる。
+ */
+function buildGroupChoices(
+  options: CalendarExportOptionsInput,
+  draft: { groups: string[] | null },
+  refresh: () => void,
+): HTMLElement {
+  const box = h('div', { class: 'group-choices', role: 'group', 'aria-label': '書き出すグループ' });
+
+  const render = (): void => {
+    clear(box);
+    const selected = draft.groups;
+    const chip = (label: string, pressed: boolean, onClick: () => void): HTMLElement => {
+      const node = h(
+        'button',
+        { type: 'button', class: 'group-chip', 'aria-pressed': pressed ? 'true' : 'false' },
+        label,
+      );
+      node.addEventListener('click', () => {
+        onClick();
+        render();
+        refresh();
+      });
+      return node;
+    };
+
+    box.append(
+      chip('すべて', selected === null, () => {
+        draft.groups = null;
+      }),
+    );
+    const names = [
+      ...options.groups,
+      ...(options.hasUngrouped ? [UNGROUPED] : []),
+    ];
+    for (const name of names) {
+      box.append(
+        chip(groupLabel(name), selected !== null && selected.includes(name), () => {
+          // 「すべて」から1つ押したら、そのグループだけに絞る。
+          const current = draft.groups;
+          if (current === null) {
+            draft.groups = [name];
+            return;
+          }
+          const next = current.includes(name)
+            ? current.filter((item) => item !== name)
+            : [...current, name];
+          draft.groups = next.length === 0 ? null : next;
+        }),
+      );
+    }
+  };
+  render();
+  return box;
+}
+
 export function renderCalendarExport(
   handlers: CalendarExportHandlers,
   today: DateStr = todayInTokyo(),
-  options: CalendarExportOptionsInput = { groups: [], hasUngrouped: true, activeGroup: null },
+  options: CalendarExportOptionsInput = { groups: [], hasUngrouped: true, activeGroups: null },
 ): HTMLElement {
   const initial = monthRange(today, 0);
   // 日付は「未入力」を持てるようにする。欄を空にしたのに前の値で書き出せると、
@@ -94,7 +154,7 @@ export function renderCalendarExport(
     format: CalendarExportFormat;
     includeNotices: boolean;
     includeFollows: boolean;
-    group: string | null;
+    groups: string[] | null;
   } = {
     from: initial.from,
     to: initial.to,
@@ -103,7 +163,7 @@ export function renderCalendarExport(
     includeFollows: true,
     // 絞り込んで見ていたなら、その束を渡したいはず。見ているものと渡すものが
     // 食い違うと、画面に無い予定が取り込み先へ紛れ込む。
-    group: options.activeGroup,
+    groups: options.activeGroups,
   };
 
   /** 入力がそろっているときだけ、実際の書き出し内容になる。 */
@@ -239,21 +299,8 @@ export function renderCalendarExport(
       ? null
       : field(
           '対象',
-          select(
-            [
-              { value: ALL_GROUPS, label: 'すべてのグループ' },
-              ...options.groups.map((group) => ({ value: group, label: group })),
-              ...(options.hasUngrouped
-                ? [{ value: UNGROUPED, label: groupLabel(UNGROUPED) }]
-                : []),
-            ],
-            draft.group === null ? ALL_GROUPS : draft.group,
-            (value) => {
-              draft.group = value === ALL_GROUPS ? null : value;
-              refresh();
-            },
-          ),
-          'グループごとに別々のカレンダーへ取り込めます。取り込み先で分けておくと、あとで束ごと消せます。',
+          buildGroupChoices(options, draft, refresh),
+          'グループごとに別々のカレンダーへ取り込めます。取り込み先で分けておくと、あとで束ごと消せます。複数選ぶと1つにまとめて書き出します。',
         ),
     field('期間', h('div', { class: 'row' }, fromInput, h('span', { class: 'unit' }, '〜'), toInput)),
     presets,

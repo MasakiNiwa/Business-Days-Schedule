@@ -6,12 +6,16 @@ import { describe, expect, it } from 'vitest';
 import {
   UNGROUPED,
   collectGroups,
-  filterByGroup,
+  filterByGroups,
   groupLabel,
   groupOf,
   hasUngrouped,
-  resolveActiveGroup,
+  resolveActiveGroups,
+  renameGroup,
+  rulesInGroup,
+  groupsLabel,
 } from '../src/core/group';
+import type { Rule } from '../src/types';
 import { makeRule } from './helpers';
 
 const rules = [
@@ -55,37 +59,101 @@ describe('hasUngrouped', () => {
   });
 });
 
-describe('filterByGroup', () => {
+describe('filterByGroups', () => {
   it('null なら絞らない', () => {
-    expect(filterByGroup(rules, null)).toHaveLength(4);
+    expect(filterByGroups(rules, null)).toHaveLength(4);
   });
 
   it('名前を指定するとその束だけ返す', () => {
-    expect(filterByGroup(rules, '税務').map((rule) => rule.id)).toEqual(['a', 'b']);
+    expect(filterByGroups(rules, ['税務']).map((rule: Rule) => rule.id)).toEqual(['a', 'b']);
   });
 
   it('未分類だけを取り出せる', () => {
-    expect(filterByGroup(rules, UNGROUPED).map((rule) => rule.id)).toEqual(['d']);
+    expect(filterByGroups(rules, [UNGROUPED]).map((rule: Rule) => rule.id)).toEqual(['d']);
+  });
+
+  it('複数の束をまとめて取り出せる', () => {
+    // 「税務と入金だけ見比べたい」のたびに選び直させないため。
+    expect(filterByGroups(rules, ['税務', '売上・入金']).map((rule: Rule) => rule.id)).toEqual([
+      'a',
+      'b',
+      'c',
+    ]);
   });
 });
 
-describe('resolveActiveGroup', () => {
+describe('resolveActiveGroups', () => {
   it('存在する束はそのまま', () => {
-    expect(resolveActiveGroup(rules, '税務')).toBe('税務');
+    expect(resolveActiveGroups(rules, ['税務'])).toEqual(['税務']);
   });
 
-  it('消えた束はすべてへ戻す', () => {
+  it('消えた束だけを落とす', () => {
+    expect(resolveActiveGroups(rules, ['税務', '存在しない'])).toEqual(['税務']);
+  });
+
+  it('全部消えたらすべてへ戻す', () => {
     // 名前を変えた・最後の1件を消したときに、何も出ない画面で固まらせない。
-    expect(resolveActiveGroup(rules, '存在しない')).toBeNull();
+    expect(resolveActiveGroups(rules, ['存在しない'])).toBeNull();
   });
 
   it('未分類が1件も無くなったらすべてへ戻す', () => {
-    expect(resolveActiveGroup(rules, UNGROUPED)).toBe(UNGROUPED);
-    expect(resolveActiveGroup(rules.slice(0, 3), UNGROUPED)).toBeNull();
+    expect(resolveActiveGroups(rules, [UNGROUPED])).toEqual([UNGROUPED]);
+    expect(resolveActiveGroups(rules.slice(0, 3), [UNGROUPED])).toBeNull();
   });
 
   it('すべては常にすべて', () => {
-    expect(resolveActiveGroup([], null)).toBeNull();
+    expect(resolveActiveGroups([], null)).toBeNull();
+  });
+});
+
+describe('renameGroup', () => {
+  it('その名前を持つルールをまとめて付け替える', () => {
+    // 1件ずつ編集させると取りこぼす。
+    const renamed = renameGroup(rules, '税務', '税金');
+    expect(renamed.filter((rule: Rule) => rule.group === '税金').map((rule: Rule) => rule.id)).toEqual([
+      'a',
+      'b',
+    ]);
+  });
+
+  it('他の束は触らない', () => {
+    const renamed = renameGroup(rules, '税務', '税金');
+    expect(renamed.find((rule: Rule) => rule.id === 'c')?.group).toBe('売上・入金');
+  });
+
+  it('空にすると未分類へ移す', () => {
+    const renamed = renameGroup(rules, '税務', '');
+    expect(renamed.filter((rule: Rule) => groupOf(rule) === UNGROUPED)).toHaveLength(3);
+  });
+
+  it('前後の空白は落とす', () => {
+    expect(renameGroup(rules, '税務', '  税金  ')[0]?.group).toBe('税金');
+  });
+});
+
+describe('rulesInGroup', () => {
+  it('まとめて消す対象を数えられる', () => {
+    expect(rulesInGroup(rules, '税務')).toHaveLength(2);
+    expect(rulesInGroup(rules, '存在しない')).toHaveLength(0);
+  });
+});
+
+describe('groupsLabel', () => {
+  it('すべてなら名前を持たない', () => {
+    expect(groupsLabel(null)).toBeNull();
+    expect(groupsLabel([])).toBeNull();
+  });
+
+  it('1つならその名前', () => {
+    expect(groupsLabel(['税務'])).toBe('税務');
+  });
+
+  it('複数なら並べる（何を渡したのか後から分かるように）', () => {
+    expect(groupsLabel(['税務', '売上'])).toBe('税務・売上');
+  });
+
+  it('未分類も呼び名で出す', () => {
+    expect(groupsLabel([UNGROUPED])).toBe('未分類');
   });
 });
 

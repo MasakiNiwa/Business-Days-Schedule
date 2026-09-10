@@ -14,8 +14,14 @@ export type RuleListHandlers = {
   onLoadSamples: () => void;
   onAdd: () => void;
   onEdit: (ruleId: string) => void;
+  /** 似た設定を作るとき、一から組み直さずに済むようにする。 */
+  onDuplicate: (ruleId: string) => void;
   onToggle: (ruleId: string, enabled: boolean) => void;
   onOpenSettings: () => void;
+  /** グループ名をまとめて付け替える。1件ずつ編集させると取りこぼすため。 */
+  onRenameGroup: (group: string, next: string) => void;
+  /** グループごとまとめて消す。 */
+  onDeleteGroup: (group: string) => void;
   onClose: () => void;
 };
 
@@ -73,6 +79,7 @@ function renderRule(
         h('span', { class: 'switch-text' }, '有効'),
       ),
       button('編集', () => handlers.onEdit(rule.id), 'button button-sm button-quiet'),
+      button('複製', () => handlers.onDuplicate(rule.id), 'button button-sm button-quiet'),
     ),
   );
 }
@@ -165,16 +172,43 @@ export function renderRuleList(
 
     for (const name of names) {
       const items = buckets.get(name) ?? [];
+      const title = h(
+        'h3',
+        { class: 'rule-group-title' },
+        groupLabel(name),
+        h('span', { class: 'rule-group-count' }, `${items.length}件`),
+      );
+      // 未分類は名前を持たないので、付け替えも一括削除も出さない。
+      if (name !== UNGROUPED) {
+        title.append(
+          h(
+            'span',
+            { class: 'rule-group-actions' },
+            button(
+              '名前を変更',
+              () => {
+                const next = globalThis.prompt(
+                  `「${name}」の新しい名前を入力してください。\n空にすると未分類へ移します。`,
+                  name,
+                );
+                if (next === null) return;
+                handlers.onRenameGroup(name, next);
+              },
+              'button button-sm button-quiet',
+            ),
+            button(
+              'まとめて削除',
+              () => handlers.onDeleteGroup(name),
+              'button button-sm button-quiet',
+            ),
+          ),
+        );
+      }
       section.append(
         h(
           'div',
           { class: 'rule-group' },
-          h(
-            'h3',
-            { class: 'rule-group-title' },
-            groupLabel(name),
-            h('span', { class: 'rule-group-count' }, `${items.length}件`),
-          ),
+          title,
           h('ul', { class: 'rules' }, ...items.map((rule) => renderRule(rule, calendars, handlers))),
         ),
       );
