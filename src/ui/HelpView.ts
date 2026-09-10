@@ -19,7 +19,19 @@ type Row = { term: string; body: string };
  * どの項目に置き換えればよいかから悩む。やりたいことの言葉のまま並べ、
  * 答えと、そこへ行くための操作を1つずつ添える。
  */
+/** 逆引きのまとまり。16件を平らに並べると、目で追うだけで疲れる。 */
+type TaskGroup = 'build' | 'calendar' | 'share' | 'trouble';
+
+const TASK_GROUP_TITLES: Record<TaskGroup, string> = {
+  build: '予定を作る',
+  calendar: '営業日と決算月を設定する',
+  share: '書き出す・見やすくする',
+  trouble: '困ったとき',
+};
+
 type Task = {
+  /** どのまとまりに置くか。 */
+  group: TaskGroup;
   /** やりたいことを、業務の言葉のまま書く。 */
   goal: string;
   /** どうすればよいか。読んだだけで手が動く長さにする。 */
@@ -43,6 +55,7 @@ const ACTION_LABELS: Record<HelpAction, string> = {
 
 const TASKS: Task[] = [
   {
+    group: 'build',
     goal: '毎月25日の給与振込を作りたい。25日が休みなら前営業日にしたい',
     answer:
       'ルールを作る →〈給与〉のひな型 → 繰り返しは「毎月N日」で 25 → 「休業日にあたったとき」を〈前営業日へ〉。保存欄に直近の日付が出るので、そこで確かめられます。',
@@ -50,6 +63,7 @@ const TASKS: Task[] = [
     action: 'newRule',
   },
   {
+    group: 'build',
     goal: '月末締めにしたい。月末が休みでも月末のままにしたい',
     answer:
       '繰り返しは「毎月N日」で〈末日〉を選び、「休業日にあたったとき」を〈補正なし〉にします。締め日そのものは動かさず、作業だけ前営業日に置きたいときは、前後の予定を足してください。',
@@ -57,6 +71,7 @@ const TASKS: Task[] = [
     action: 'newRule',
   },
   {
+    group: 'build',
     goal: '毎月第5営業日に請求書を出したい',
     answer:
       '繰り返しを「第N営業日」にして 5 を指定します。はじめから休業日を数えずに数えるので、休業日の補正は要りません（欄も出ません）。',
@@ -64,6 +79,7 @@ const TASKS: Task[] = [
     action: 'newRule',
   },
   {
+    group: 'build',
     goal: '月末から2営業日前に支払処理をしたい',
     answer:
       '繰り返しを「第N営業日」にして、〈月末から〉＋〈2営業日目〉を選びます。負の数を入れる必要はありません。',
@@ -71,6 +87,7 @@ const TASKS: Task[] = [
     action: 'newRule',
   },
   {
+    group: 'calendar',
     goal: '決算期に合わせた予定（申告期限・期首・中間申告）を作りたい',
     answer:
       'まず〈自社カレンダー〉の決算月を自社に合わせます。そのうえで繰り返しを「決算月基準」にすると、「決算月の2か月後の末日」のように書けます。決算月を変えれば、ぶら下がる予定がまとめて動きます。',
@@ -78,6 +95,18 @@ const TASKS: Task[] = [
     action: 'settings',
   },
   {
+    group: 'build',
+    goal: '毎月10日の振込に、前日までの準備予定を付けたい',
+    answer:
+      'まず「毎月N日」で 10 のルールを作ります。保存したら一覧から「編集」を開き、' +
+      '「3. 準備や確認の予定を付ける（任意）」の〈＋ 準備日を追加（前）〉を押し、' +
+      '日数を 1、単位を〈営業日〉にします。これで「振込の1営業日前に準備」になります。' +
+      '10日が休業日で振込が動けば、準備日も一緒に動きます。前後の予定の練習にちょうどよい形です。',
+    section: 'notices',
+    action: 'newRule',
+  },
+  {
+    group: 'build',
     goal: '振込の3営業日前に「データ作成」を出したい',
     answer:
       'そのルールを編集し、「3. 準備や確認の予定を付ける（任意）」を開いて〈＋ 準備日を追加（前）〉。日数を 3、単位を〈営業日〉にします。本体が休業日で動けば、準備日も一緒に動きます。',
@@ -85,6 +114,7 @@ const TASKS: Task[] = [
     action: 'rules',
   },
   {
+    group: 'build',
     goal: '請求書を出したあと、翌週の水曜に確認したい',
     answer:
       '前後の予定を足し、日付の決め方を〈週と曜日で指定〉に。〈翌週〉〈水曜〉を選び、水曜が休みのときの扱い（翌営業日へ送る／前営業日へ戻す／その日のまま）も選べます。',
@@ -92,6 +122,7 @@ const TASKS: Task[] = [
     action: 'rules',
   },
   {
+    group: 'build',
     goal: '締めたあと、翌月の第5営業日に処理したい',
     answer:
       '前後の予定を足し、日付の決め方を〈月と第N営業日で指定〉に。〈翌月〉〈月初から〉〈5営業日目〉を選びます。',
@@ -99,6 +130,7 @@ const TASKS: Task[] = [
     action: 'rules',
   },
   {
+    group: 'calendar',
     goal: '会社の休業日（年末年始・創立記念日）を反映したい',
     answer:
       'カレンダーの上にある〈自社カレンダー: 営業日◯日 …〉を押すと設定が開きます。週の休業日、毎年の休業期間、臨時の休業日、休業日だが営業する日を指定できます。',
@@ -106,6 +138,7 @@ const TASKS: Task[] = [
     action: 'settings',
   },
   {
+    group: 'calendar',
     goal: '振込は銀行の営業日で数えたい',
     answer:
       'ルール編集の〈営業日カレンダー〉で〈銀行カレンダー〉を選びます。社内の締めは自社、振込は銀行、と使い分けられます。',
@@ -113,6 +146,7 @@ const TASKS: Task[] = [
     action: 'rules',
   },
   {
+    group: 'share',
     goal: '作った予定を Outlook / Google カレンダーで見たい',
     answer:
       '書き出しを開き、期間（既定は今月の1日〜末日）と形式（迷ったら iCalendar）を選んで書き出します。取り込み先には専用のカレンダーを作ってからにしてください。あとで丸ごと消せます。',
@@ -120,19 +154,41 @@ const TASKS: Task[] = [
     action: 'export',
   },
   {
-    goal: '税務だけ、入金だけ、と分けて渡したい',
+    group: 'build',
+    goal: '似たルールをもう1本作りたい',
     answer:
-      'ルールに〈グループ〉名を付けると、カレンダー上部で絞り込めるようになり、書き出しもグループ単位でできます。取り込み先で分けておくと、束ごと消せます。',
+      'ルール一覧の〈複製〉を押すと、その設定を写した状態で編集画面が開きます。' +
+      '営業日カレンダーやグループ、前後の予定もそのまま写ります。名前を直して保存してください。' +
+      '押しただけでは増えないので、気軽に試せます。',
     section: 'group',
     action: 'rules',
   },
   {
+    group: 'share',
+    goal: 'グループの名前をまとめて変えたい・グループごと消したい',
+    answer:
+      'ルール一覧のグループ見出しにある〈名前を変更〉〈まとめて削除〉から。' +
+      '1件ずつ開き直す必要はありません。削除は何件消えるかを確かめてから実行します。',
+    section: 'group',
+    action: 'rules',
+  },
+  {
+    group: 'share',
+    goal: '税務だけ、入金だけ、と分けて渡したい',
+    answer:
+      'ルールに〈グループ〉名を付けると、カレンダー上部で絞り込めるようになり、書き出しもグループ単位でできます。複数の束を同時に選べるので、「税務と入金だけ」もまとめて渡せます。',
+    section: 'group',
+    action: 'rules',
+  },
+  {
+    group: 'share',
     goal: '予定が多くて1か月を見渡せない',
     answer:
       'カレンダーの上の〈表示〉で「点」に切り替えると、名前を隠して1か月の混み具合だけを見られます。日を押せばその日の詳細が開きます。印刷には予定名が出ます。',
     section: 'marks',
   },
   {
+    group: 'share',
     goal: 'まず全体像を見てから決めたい',
     answer:
       '実務でよく使う予定をまとめた完成例があります。中身を見てから、必要なものだけ選んで追加できます。追加しても既にあるルールは消えません。',
@@ -140,6 +196,7 @@ const TASKS: Task[] = [
     action: 'samples',
   },
   {
+    group: 'share',
     goal: '別の端末でも同じ設定を使いたい',
     answer:
       '設定の〈エクスポート〉で JSON を書き出し、移った先で〈インポート〉します。データは端末ごとに保存されるので、自動では同期しません。',
@@ -147,6 +204,7 @@ const TASKS: Task[] = [
     action: 'settings',
   },
   {
+    group: 'trouble',
     goal: '設定したのに予定が出ない',
     answer:
       'まず保存欄のそばに注意書きが出ていないか確かめてください。「◯件の回で日付を決められません」と出ていれば、その月に営業日が足りていません。ルールが無効になっていないか、有効期間や除外日に入っていないかも確かめてください。',
@@ -315,13 +373,27 @@ const SECTIONS: Section[] = [
       '「税務」「入金」のような名前を付けて束ねると、その束だけを表示したり、束ごとに書き出したりできます。',
     steps: [
       'ルール一覧から「編集」を押し、〈グループ〉に名前を入れて保存します（既にある名前は候補に出ます）。',
-      '1つでもグループが付くと、カレンダーの上に〈グループ〉の絞り込みが出ます。',
+      '1つでもグループが付くと、カレンダーの上に〈グループ〉の絞り込みが出ます。押すたびに入り切りでき、複数の束を同時に選べます。',
       '書き出しの〈対象〉でも同じ束を選べます。絞り込んで見ているときは、その束が最初から選ばれています。',
+    ],
+    rows: [
+      {
+        term: '名前をまとめて変える',
+        body: 'ルール一覧のグループ見出しにある〈名前を変更〉から。その束のルールを1件ずつ開き直す必要はありません。空にすると未分類へ移します。',
+      },
+      {
+        term: 'グループごと消す',
+        body: 'グループ見出しの〈まとめて削除〉から。何件消えるかを確かめてから実行します。元には戻せません。',
+      },
+      {
+        term: '複数の束を同時に見る',
+        body: '「税務」と「入金」だけを見比べたいときは、両方を押してください。「すべて」を押すと絞り込みを外します。',
+      },
     ],
     notes: [
       'グループを付けていないルールは「未分類」として扱われます。',
       'サンプルにはあらかじめグループが付いています（基本／税務／売上・入金／支払・振込／会議・報告）。',
-      'グループで絞っているときに新しいルールを足すと、その束の続きとして作られます。',
+      'グループを1つだけ選んでいるときに新しいルールを足すと、その束の続きとして作られます。',
     ],
   },
   {
@@ -393,6 +465,10 @@ const SECTIONS: Section[] = [
       { term: '追加できる型', body: '基本セット／税務・届出／売上・入金／支払・振込／会議・報告。使い始めたあとでも足せます。' },
       { term: '追加のしかた', body: '上の「ルール」→「サンプル」から。「内容を選ぶ」で必要な予定だけ選べます。' },
       { term: '既存のルールは？', body: '消えません。同じ束をもう一度「追加」しても、既にあるものはそのままです。' },
+      {
+        term: 'サンプルの内容で上書き',
+        body: '編集したあと元に戻したくなったら、こちらを選びます。その束のルールをサンプルのとおりに戻します。「追加済み」の印は出しません。一部だけ使ったり、追加したものを消したりしても実態と合わなくなるためです。',
+      },
       { term: '元に戻す', body: '編集した内容を捨てて、その束を元の内容へ戻します。件数を示したうえで確認します。' },
     ],
   },
@@ -495,11 +571,20 @@ export function renderHelp(handlers: HelpHandlers | (() => void)): HTMLElement {
     h('h2', { class: 'editor-title' }, 'ヘルプ'),
   );
 
+  // 引き方が2通りあるので、面を分ける。
+  //
+  // やりたいことの索引と、項目ごとの解説を1枚に積むと、上から順に読むしかない
+  // 長さになる。目当ての引き方を選んでから読めるようにする。
+  const tasksPane = h('div', { class: 'help-pane', id: 'help-pane-tasks', role: 'tabpanel' });
+  const readingPane = h('div', { class: 'help-pane', id: 'help-pane-reading', role: 'tabpanel' });
+
   const goTo = (id: string): void => {
-    scrollIntoView(root.querySelector(`#help-${id}`));
+    // 解説はもう一方の面にあるので、そちらへ切り替えてから運ぶ。
+    show('reading');
+    scrollIntoView(readingPane.querySelector(`#help-${id}`));
   };
 
-  root.append(renderTasks(goTo, onAction));
+  tasksPane.append(renderTasks(goTo, onAction));
 
   // 長いので、行き先も並べる。読みたいところへ直接飛べるようにする。
   const toc = h('nav', { class: 'help-toc', 'aria-label': 'ヘルプの目次' });
@@ -508,17 +593,84 @@ export function renderHelp(handlers: HelpHandlers | (() => void)): HTMLElement {
     link.addEventListener('click', (event) => {
       // モーダルの中では通常のアンカー移動が効かないため、自分で送る。
       event.preventDefault();
-      goTo(section.id);
+      scrollIntoView(readingPane.querySelector(`#help-${section.id}`));
     });
     toc.append(link);
   }
-  root.append(h('h3', { class: 'help-heading' }, '項目から探す'), toc);
+  readingPane.append(toc);
+  for (const section of SECTIONS) readingPane.append(renderSection(section));
 
-  for (const section of SECTIONS) root.append(renderSection(section));
+  const tabs = h('div', { class: 'help-tabs', role: 'tablist', 'aria-label': 'ヘルプの引き方' });
+  const buttons = new Map<HelpTab, HTMLElement>();
+  const panes: Record<HelpTab, HTMLElement> = { tasks: tasksPane, reading: readingPane };
+
+  function show(tab: HelpTab): void {
+    for (const [name, node] of buttons) {
+      node.setAttribute('aria-selected', name === tab ? 'true' : 'false');
+      node.setAttribute('tabindex', name === tab ? '0' : '-1');
+    }
+    for (const [name, pane] of Object.entries(panes)) {
+      pane.hidden = name !== tab;
+    }
+  }
+
+  for (const [index, [tab, label]] of TAB_LABELS.entries()) {
+    const node = h(
+      'button',
+      {
+        type: 'button',
+        class: 'help-tab',
+        role: 'tab',
+        'aria-controls': `help-pane-${tab}`,
+      },
+      label,
+    );
+    node.addEventListener('click', () => show(tab));
+    // タブは Tab キーでは1つぶんしか入らない（選ばれていないものは
+    // tabindex="-1"）。矢印で移れないと、キーボードだけでは切り替えられない。
+    node.addEventListener('keydown', (event) => {
+      const step = TAB_KEY_STEPS[event.key];
+      if (step === undefined) return;
+      event.preventDefault();
+      const next =
+        step === 'first'
+          ? 0
+          : step === 'last'
+            ? TAB_LABELS.length - 1
+            : (index + step + TAB_LABELS.length) % TAB_LABELS.length;
+      const target = TAB_LABELS[next]?.[0];
+      if (target === undefined) return;
+      show(target);
+      // 選ぶだけでなく焦点も動かす。押した先が見えていないと迷う。
+      buttons.get(target)?.focus();
+    });
+    buttons.set(tab, node);
+    tabs.append(node);
+  }
+
+  root.append(tabs, tasksPane, readingPane);
+  show('tasks');
 
   root.append(h('div', { class: 'editor-actions' }, button('閉じる', onClose, 'button button-primary')));
   return root;
 }
+
+type HelpTab = 'tasks' | 'reading';
+
+const TAB_LABELS: [HelpTab, string][] = [
+  ['tasks', 'やりたいことから探す'],
+  ['reading', '項目から探す'],
+];
+
+/** タブの間を移るキー。端は回り込ませる。 */
+const TAB_KEY_STEPS: Record<string, number | 'first' | 'last' | undefined> = {
+  ArrowRight: 1,
+  ArrowDown: 1,
+  ArrowLeft: -1,
+  ArrowUp: -1,
+  Home: 'first',
+  End: 'last',
+};
 
 /**
  * 「やりたいこと」から引く索引。
@@ -535,7 +687,7 @@ function renderTasks(
   onAction: ((action: HelpAction) => void) | undefined,
 ): HTMLElement {
   const list = h('div', { class: 'help-tasks' });
-  for (const task of TASKS) {
+  const render = (task: Task): void => {
     const body = h('div', { class: 'help-task-body' }, h('p', {}, task.answer));
 
     const links = h('div', { class: 'help-task-actions' });
@@ -558,17 +710,24 @@ function renderTasks(
         body,
       ),
     );
+  };
+
+  // 種類でまとめる。16件を平らに並べると、目で追うだけで疲れる。
+  for (const [group, title] of Object.entries(TASK_GROUP_TITLES) as [TaskGroup, string][]) {
+    const items = TASKS.filter((task) => task.group === group);
+    if (items.length === 0) continue;
+    list.append(h('h4', { class: 'help-task-group' }, title));
+    for (const task of items) render(task);
   }
 
   return h(
     'section',
     { class: 'help-section', id: 'help-tasks' },
-    h('h3', { class: 'help-heading' }, 'やりたいことから探す'),
     h(
       'p',
       { class: 'field-hint' },
       '近いものを開くと、手順とその場から始める入口が出ます。' +
-        '当てはまるものが無ければ、下の「項目から探す」からどうぞ。',
+        '当てはまるものが無ければ、上の「項目から探す」へどうぞ。',
     ),
     list,
   );

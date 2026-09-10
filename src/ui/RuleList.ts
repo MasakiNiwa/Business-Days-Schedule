@@ -14,8 +14,14 @@ export type RuleListHandlers = {
   onLoadSamples: () => void;
   onAdd: () => void;
   onEdit: (ruleId: string) => void;
+  /** 似た設定を作るとき、一から組み直さずに済むようにする。 */
+  onDuplicate: (ruleId: string) => void;
   onToggle: (ruleId: string, enabled: boolean) => void;
   onOpenSettings: () => void;
+  /** グループ名をまとめて付け替える。1件ずつ編集させると取りこぼすため。 */
+  onRenameGroup: (group: string, next: string) => void;
+  /** グループごとまとめて消す。 */
+  onDeleteGroup: (group: string) => void;
   onClose: () => void;
 };
 
@@ -73,7 +79,59 @@ function renderRule(
         h('span', { class: 'switch-text' }, '有効'),
       ),
       button('編集', () => handlers.onEdit(rule.id), 'button button-sm button-quiet'),
+      button('複製', () => handlers.onDuplicate(rule.id), 'button button-sm button-quiet'),
     ),
+  );
+}
+
+/**
+ * グループごとの一括操作。
+ *
+ * 見出しの横に常時置くと、予定を読むだけのときにも目に入り続ける。
+ * たまにしか使わないので、まとめて畳んでおく。
+ */
+function renderGroupActions(
+  names: readonly string[],
+  buckets: ReadonlyMap<string, Rule[]>,
+  handlers: RuleListHandlers,
+): HTMLElement {
+  const rows = h('ul', { class: 'group-actions' });
+  for (const name of names) {
+    const count = buckets.get(name)?.length ?? 0;
+    rows.append(
+      h(
+        'li',
+        { class: 'group-action-row' },
+        h('span', { class: 'group-action-name' }, name),
+        h('span', { class: 'rule-group-count' }, `${count}件`),
+        button(
+          '名前を変更',
+          () => {
+            const next = globalThis.prompt(
+              `「${name}」の新しい名前を入力してください。\n空にすると未分類へ移します。`,
+              name,
+            );
+            if (next === null) return;
+            handlers.onRenameGroup(name, next);
+          },
+          'button button-sm button-quiet',
+        ),
+        button('まとめて削除', () => handlers.onDeleteGroup(name), 'button button-sm button-quiet'),
+      ),
+    );
+  }
+
+  return h(
+    'details',
+    { class: 'advanced-options' },
+    h('summary', {}, 'グループ操作（名前の変更・まとめて削除）'),
+    h(
+      'p',
+      { class: 'field-hint' },
+      '名前を変えると、その束のルールをまとめて付け替えます。' +
+        '削除は何件消えるかを確かめてから実行します（元に戻せません）。',
+    ),
+    rows,
   );
 }
 
@@ -178,6 +236,13 @@ export function renderRuleList(
           h('ul', { class: 'rules' }, ...items.map((rule) => renderRule(rule, calendars, handlers))),
         ),
       );
+    }
+
+    // 束の操作は1か所にまとめて畳む。見出しごとにボタンを常時並べると、
+    // 予定を読むだけのときに目に入り続けて邪魔になる。
+    const named = names.filter((name) => name !== UNGROUPED);
+    if (named.length > 0) {
+      section.append(renderGroupActions(named, buckets, handlers));
     }
   }
 

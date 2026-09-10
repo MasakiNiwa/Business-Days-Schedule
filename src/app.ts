@@ -15,10 +15,13 @@ import { buildMonthGrid, gridRangeOf, shiftMonth } from './core/monthGrid';
 import {
   UNGROUPED,
   collectGroups,
-  filterByGroup,
+  filterByGroups,
   groupLabel,
+  groupsLabel,
   hasUngrouped,
-  resolveActiveGroup,
+  renameGroup,
+  resolveActiveGroups,
+  rulesInGroup,
 } from './core/group';
 import { expandRules, groupByDate } from './core/schedule';
 import type { ScheduleContext } from './core/schedule';
@@ -224,10 +227,13 @@ export class App {
     const calendarId = this.state.calendars[0]?.id ?? COMPANY_CALENDAR_ID;
     // グループで絞って見ているときは、そのグループの続きを足すのが自然。
     // 何も指定せずに作ると、追加した直後に画面から消えて戸惑わせる。
-    const group = this.activeGroup();
+    // 絞り込みが1つだけのときは、その続きを足すのが自然。
+    // 複数選んでいるときはどれに入れたいのか決まらないので、指定しない。
+    const groups = this.activeGroups();
+    const group = groups !== null && groups.length === 1 ? groups[0] : undefined;
     this.mode = {
       kind: 'edit',
-      rule: createRule(group === null ? { calendarId } : { calendarId, group }),
+      rule: createRule(group === undefined ? { calendarId } : { calendarId, group }),
       isNew: true,
     };
     this.render();
@@ -237,6 +243,39 @@ export class App {
     const rule = this.state.rules.find((item) => item.id === ruleId);
     if (rule === undefined) return;
     this.mode = { kind: 'edit', rule, isNew: false };
+    this.render();
+  }
+
+  /**
+   * 既存のルールを写して作り始める。
+   *
+   * 「25日締め」と「末日締め」のように、1か所だけ違うルールを何本も作ることが多い。
+   * 一から組み直させると、営業日カレンダーやグループの指定を写し忘れる。
+   *
+   * 保存はまだしない。編集画面に出したうえで、名前を直してから保存してもらう。
+   * 断りなく増やすと、一覧に似た名前が並んで見分けがつかなくなる。
+   */
+  private startDuplicate(ruleId: string): void {
+    const source = this.state.rules.find((item) => item.id === ruleId);
+    if (source === undefined) return;
+    const copy = structuredClone(source);
+    // 作り直すのは id と日時だけ。既定値ごと被せると、写したはずの
+    // 営業日カレンダーや繰り返しまで初期状態へ戻ってしまう。
+    const fresh = createRule({});
+    this.mode = {
+      kind: 'edit',
+      rule: {
+        ...copy,
+        id: fresh.id,
+        createdAt: fresh.createdAt,
+        updatedAt: fresh.updatedAt,
+        title: `${source.title}のコピー`,
+        // 前後の予定の識別子も作り直す。同じ id のままだと、書き出したときに
+        // 元の予定を上書きしてしまう。
+        notices: copy.notices.map(({ id: _id, ...notice }) => notice),
+      },
+      isNew: true,
+    };
     this.render();
   }
 
@@ -358,10 +397,10 @@ export class App {
   private occurrencesBetween(
     from: DateStr,
     to: DateStr,
-    group: string | null,
+    groups: string[] | null,
   ): ReturnType<typeof expandRules> {
     return expandRules(
-      filterByGroup(this.state.rules, group),
+      filterByGroups(this.state.rules, groups),
       { start: from, end: to },
       this.scheduleContext(this.businessCalendars()),
     );
@@ -376,7 +415,7 @@ export class App {
     const { occurrences, warnings } = this.occurrencesBetween(
       request.from,
       request.to,
-      request.group,
+      request.groups,
     );
     // 日付を出せなかった準備日・フォローがあるまま黙って書き出すと、
     // 取り込み先で「設定したのに無い」に気づけない。
@@ -387,8 +426,8 @@ export class App {
     }
     const rules = new Map(this.state.rules.map((rule) => [rule.id, rule]));
     // 取り込み先ではカレンダー名が手掛かりになる。グループごとに別の名前を渡す。
-    const calendarName =
-      request.group === null ? APP_NAME : `${APP_NAME} — ${groupLabel(request.group)}`;
+    const label = groupsLabel(request.groups);
+    const calendarName = label === null ? APP_NAME : `${APP_NAME} — ${label}`;
     const options = {
       includeNotices: request.includeNotices,
       includeFollows: request.includeFollows,
@@ -402,7 +441,7 @@ export class App {
     this.download(
       text,
       MIME_TYPES[request.format],
-      exportCalendarFileName(request.from, request.to, request.format, request.group),
+      exportCalendarFileName(request.from, request.to, request.format, label),
     );
     this.mode = { kind: 'calendar' };
     this.notify(`${request.format.toUpperCase()} を書き出しました。`);
@@ -678,7 +717,6 @@ export class App {
     if (mode.kind === 'samples') {
       return renderSamplePicker(
         this.samplePacks ?? [],
-        new Set(this.state.prefs.addedSamplePacks),
         {
           onAdd: (pack) => void this.addSamplePack(pack, 'add'),
           onRestore: (pack) => void this.addSamplePack(pack, 'merge'),
@@ -701,7 +739,7 @@ export class App {
         {
           onExport: (request) => this.exportCalendarFile(request),
           countOccurrences: (request) =>
-            this.occurrencesBetween(request.from, request.to, request.group).occurrences.filter(
+            this.occurrencesBetween(request.from, request.to, request.groups).occurrences.filter(
               (occurrence) =>
                 occurrence.kind === 'main' ||
                 (occurrence.kind === 'notice' ? request.includeNotices : request.includeFollows),
@@ -712,7 +750,7 @@ export class App {
         {
           groups: collectGroups(this.state.rules),
           hasUngrouped: hasUngrouped(this.state.rules),
-          activeGroup: this.activeGroup(),
+          activeGroups: this.activeGroups(),
         },
       );
     }
@@ -758,7 +796,10 @@ export class App {
         onLoadSamples: () => void this.openSamples(),
         onAdd: () => this.startAdd(),
         onEdit: (ruleId) => this.startEdit(ruleId),
+        onDuplicate: (ruleId) => this.startDuplicate(ruleId),
         onToggle: (ruleId, enabled) => this.toggleRule(ruleId, enabled),
+        onRenameGroup: (group, next) => this.renameGroupTo(group, next),
+        onDeleteGroup: (group) => this.deleteGroup(group),
         onOpenSettings: () => {
           this.mode = { kind: 'settings' };
           this.render();
@@ -840,17 +881,78 @@ export class App {
    * 画面に出ていない予定が書き出しに混ざる。
    */
   private visibleRules(): Rule[] {
-    return filterByGroup(this.state.rules, this.activeGroup());
+    return filterByGroups(this.state.rules, this.activeGroups());
   }
 
   /** 選択中のグループ。名前を変えた・最後の1件を消したときは「すべて」へ戻す。 */
-  private activeGroup(): string | null {
-    return resolveActiveGroup(this.state.rules, this.state.prefs.activeGroup);
+  private activeGroups(): string[] | null {
+    return resolveActiveGroups(this.state.rules, this.state.prefs.activeGroups);
   }
 
-  private setActiveGroup(group: string | null): void {
-    this.state.prefs.activeGroup = group;
+  private setActiveGroups(groups: string[] | null): void {
+    this.state.prefs.activeGroups = groups === null || groups.length === 0 ? null : groups;
     this.persist();
+    this.render();
+  }
+
+  /** 1つのグループの選択を入り切りする。 */
+  private toggleActiveGroup(group: string): void {
+    const current = this.activeGroups();
+    // 「すべて」から1つ押したら、そのグループだけに絞る。
+    // 全部が選ばれた状態から1つ外す動きにすると、押した意図と逆になる。
+    if (current === null) {
+      this.setActiveGroups([group]);
+      return;
+    }
+    const next = current.includes(group)
+      ? current.filter((item) => item !== group)
+      : [...current, group];
+    this.setActiveGroups(next);
+  }
+
+  /**
+   * グループ名をまとめて付け替える。
+   *
+   * グループは実体ではなくルールが持つ文字列なので、1件ずつ編集させると
+   * 取りこぼす。空にすると未分類へ移す。
+   */
+  private renameGroupTo(from: string, to: string): void {
+    const target = to.trim();
+    if (target === from) return;
+    const result = renameGroup(this.state.rules, from, target);
+    if (!result.ok) {
+      // 保存してから気づくと、その束のルールが再読込で消える。手前で止める。
+      this.notify(result.reason, 'error');
+      this.render();
+      return;
+    }
+    this.state.rules = result.rules;
+    // 選んでいた名前は消えるので、新しい名前へ付け替える。
+    const current = this.state.prefs.activeGroups;
+    if (current !== null && current.includes(from)) {
+      this.state.prefs.activeGroups = [...new Set(current.map((g) => (g === from ? target : g)))];
+    }
+    this.persist();
+    this.notify(
+      target === UNGROUPED
+        ? `「${groupLabel(from)}」のグループ分けを外しました。`
+        : `「${groupLabel(from)}」を「${target}」に変えました。`,
+    );
+    this.render();
+  }
+
+  /** グループごとまとめて消す。元に戻せないので、件数を見せてから確かめる。 */
+  private deleteGroup(group: string): void {
+    const targets = rulesInGroup(this.state.rules, group);
+    if (targets.length === 0) return;
+    const message =
+      `「${groupLabel(group)}」の ${targets.length} 件のルールをすべて削除します。\n` +
+      '元に戻せません。よろしいですか？';
+    if (!globalThis.confirm(message)) return;
+    const ids = new Set(targets.map((rule) => rule.id));
+    this.state.rules = this.state.rules.filter((rule) => !ids.has(rule.id));
+    this.persist();
+    this.notify(`「${groupLabel(group)}」の ${targets.length} 件を削除しました。`);
     this.render();
   }
 
@@ -873,20 +975,34 @@ export class App {
 
     const left = h('div', { class: 'toolbar-left' });
     if (groups.length > 0) {
-      const options = [{ value: '\u0000all', label: 'すべてのグループ' }];
-      for (const group of groups) options.push({ value: group, label: group });
-      if (hasUngrouped(this.state.rules)) {
-        options.push({ value: UNGROUPED, label: groupLabel(UNGROUPED) });
-      }
-      const current = this.activeGroup();
-      left.append(
-        field(
-          'グループ',
-          select(options, current === null ? '\u0000all' : current, (value) =>
-            this.setActiveGroup(value === '\u0000all' ? null : value),
+      // 1つずつしか選べないと、「税務と入金だけ見比べたい」のたびに選び直す
+      // ことになる。押して入り切りできる形にして、複数選べるようにする。
+      const current = this.activeGroups();
+      const choices = h('div', {
+        class: 'group-choices',
+        role: 'group',
+        'aria-label': '表示するグループ',
+      });
+      const chip = (label: string, pressed: boolean, onClick: () => void): HTMLElement => {
+        const node = h(
+          'button',
+          { type: 'button', class: 'group-chip', 'aria-pressed': pressed ? 'true' : 'false' },
+          label,
+        );
+        node.addEventListener('click', onClick);
+        return node;
+      };
+      choices.append(chip('すべて', current === null, () => this.setActiveGroups(null)));
+      const names = [...groups, ...(hasUngrouped(this.state.rules) ? [UNGROUPED] : [])];
+      for (const name of names) {
+        choices.append(
+          chip(groupLabel(name), current !== null && current.includes(name), () =>
+            this.toggleActiveGroup(name),
           ),
-        ),
-      );
+        );
+      }
+      // 丸いボタンが並ぶだけでは、複数選べることが初見で伝わらない。
+      left.append(field('グループ（複数選択可）', choices));
     }
 
     const right = h('div', { class: 'toolbar-right' });
@@ -918,11 +1034,11 @@ export class App {
 
     // 何で絞ったかは紙にも残す。絞り込んだ結果だけを渡されると誤解を招くため、
     // 画面では隠し、印刷のときだけ見出しとして出す。
-    const current = this.activeGroup();
+    const printedLabel = groupsLabel(this.activeGroups());
     const printed = h(
       'p',
       { class: 'print-group' },
-      current === null ? '' : `グループ: ${groupLabel(current)}`,
+      printedLabel === null ? '' : `グループ: ${printedLabel}`,
     );
 
     return h('div', { class: 'view-toolbar' }, left, right, printed);
@@ -1028,7 +1144,9 @@ export class App {
     return h(
       'div',
       { class: 'empty-prompt' },
-      h('p', {}, 'まだルールがありません。まずは1件、作ってみてください。'),
+      // 最初の画面で長く説明しても読まれない。何ができるかを1文で言い、
+      // あとはボタンの名前で分かるようにする。
+      h('p', { class: 'empty-prompt-lead' }, '営業日を考慮した繰り返し予定を作れます。'),
       h(
         'div',
         { class: 'empty-prompt-actions' },
@@ -1036,20 +1154,6 @@ export class App {
         button('完成例を見る', () => void this.openSamples(), 'button'),
         // やりたいことから引ける索引があることを、最初の画面で見せる。
         button('使い方を見る', () => this.openMode('help'), 'button button-quiet'),
-      ),
-      h(
-        'p',
-        { class: 'field-hint' },
-        '給与振込・支払・締め日・会議のひな型から選べます。' +
-          '営業日補正や決算月の設定は、作りながら決められます。',
-      ),
-      h(
-        'p',
-        { class: 'field-hint' },
-        '「完成例を見る」は、実務でよく使う予定を束ごと取り込む入口です。' +
-          '中身を見てから、必要なものだけ選んで追加できます。' +
-          '「使い方を見る」では、「毎月25日の給与振込を作りたい」のように' +
-          'やりたいことから引けます。',
       ),
     );
   }

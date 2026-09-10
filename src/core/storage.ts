@@ -30,18 +30,46 @@ export type Preferences = {
    * 画面幅から勝手に決めず、利用者が選んだものを覚える。
    */
   chipDisplay: 'text' | 'dot';
-  /** 表示するグループ。null は「すべて」。 */
-  activeGroup: string | null;
+  /**
+   * 表示するグループ。null は「すべて」。空文字は未分類を指す。
+   *
+   * 「税務」と「入金」だけを見比べたい、のような使い方があるので複数持てる。
+   */
+  activeGroups: string[] | null;
   /** 追加済みのサンプル束。再読込しても「追加済み」を保てるよう保存する。 */
   addedSamplePacks: string[];
 };
+
+/**
+ * 表示するグループの読み込み。
+ *
+ * 以前は1つだけを文字列で持っていたので、そちらも受け取って配列に均す。
+ * 未分類（空文字）は以前の読み込みで落とされていたが、選べる以上は覚える。
+ */
+function readActiveGroups(
+  value: Record<string, unknown>,
+  defaults: Preferences,
+): string[] | null {
+  const raw = value['activeGroups'];
+  if (Array.isArray(raw)) {
+    const groups = raw
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.slice(0, LIMITS.groupLength))
+      .slice(0, 100);
+    return groups.length === 0 ? null : [...new Set(groups)];
+  }
+  // 旧形式。1つだけ選んでいた状態をそのまま引き継ぐ。
+  const legacy = value['activeGroup'];
+  if (typeof legacy === 'string') return [legacy.slice(0, LIMITS.groupLength)];
+  return defaults.activeGroups === null ? null : [...defaults.activeGroups];
+}
 
 export const DEFAULT_PREFERENCES: Preferences = {
   defaultView: 'calendar',
   listDays: 30,
   theme: 'auto',
   chipDisplay: 'text',
-  activeGroup: null,
+  activeGroups: null,
   addedSamplePacks: [],
 };
 
@@ -172,10 +200,7 @@ function normalizePreferences(input: unknown, defaults: Preferences): Preference
         ? value['theme']
         : defaults.theme,
     chipDisplay: value['chipDisplay'] === 'dot' ? 'dot' : defaults.chipDisplay,
-    activeGroup:
-      typeof value['activeGroup'] === 'string' && value['activeGroup'] !== ''
-        ? value['activeGroup'].slice(0, LIMITS.groupLength)
-        : defaults.activeGroup,
+    activeGroups: readActiveGroups(value, defaults),
     addedSamplePacks: Array.isArray(value['addedSamplePacks'])
       ? value['addedSamplePacks'].filter((id): id is string => typeof id === 'string').slice(0, 50)
       : [...defaults.addedSamplePacks],

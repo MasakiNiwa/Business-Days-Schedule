@@ -10,6 +10,23 @@ import type { Page } from '@playwright/test';
 
 const STORAGE_KEY = 'bds.v1.rules';
 
+/** グループの一括操作は1か所にまとめて畳んである。既に開いていれば何もしない。 */
+async function openGroupActions(page: Page): Promise<void> {
+  const box = page.locator('details.advanced-options', {
+    has: page.getByText('グループ操作（名前の変更・まとめて削除）'),
+  });
+  if (await box.evaluate((node: HTMLDetailsElement) => node.open)) return;
+  await page.getByText('グループ操作（名前の変更・まとめて削除）').click();
+}
+
+const groupActionRow = (page: Page, name: string) =>
+  page.locator('.group-action-row').filter({ has: page.getByText(name, { exact: true }) });
+
+/** グループの絞り込みチップを押す。複数選べる。 */
+async function selectGroup(page: Page, label: string): Promise<void> {
+  await page.locator('.toolbar-left .group-chip', { hasText: label }).first().click();
+}
+
 /**
  * 前後の予定の欄を開く。使わない人のほうが多いので既定では畳んである。
  */
@@ -257,7 +274,7 @@ test.describe('表示', () => {
     await page.goto('');
     await loadSamplePack(page, '税務');
     await closeDialog(page);
-    await page.locator('.toolbar-left select').selectOption('税務');
+    await selectGroup(page, '税務');
 
     await expect(page.locator('.print-group')).toBeHidden();
     await page.emulateMedia({ media: 'print' });
@@ -349,20 +366,37 @@ test.describe('グループ', () => {
 
     const all = await page.locator('.chips .chip').count();
 
-    await page.locator('.toolbar-left select').selectOption('税務');
+    await selectGroup(page, '税務');
     const narrowed = await page.locator('.chips .chip').count();
     expect(narrowed).toBeGreaterThan(0);
     expect(narrowed).toBeLessThan(all);
 
     // 見ているものと渡すものが食い違うと、画面に無い予定が取り込み先へ紛れ込む。
     await page.getByRole('button', { name: '書き出し' }).click();
-    const target = page.locator('.export select').first();
-    await expect(target).toHaveValue('税務');
+    await expect(
+      page.locator('.export .group-choices .group-chip[aria-pressed="true"]'),
+    ).toHaveText('税務');
+  });
+
+  test('複数のグループをまとめて表示できる', async ({ page }) => {
+    // 1つずつしか選べないと、見比べるたびに選び直すことになる。
+    await page.goto('');
+    await loadSamplePack(page, '税務');
+    await addSamplePack(page, '会議・報告');
+    await closeDialog(page);
+
+    await selectGroup(page, '税務');
+    const onlyTax = await page.locator('.chips .chip').count();
+    await selectGroup(page, '会議');
+    const both = await page.locator('.chips .chip').count();
+
+    expect(both).toBeGreaterThan(onlyTax);
+    await expect(page.locator('.toolbar-left .group-chip[aria-pressed="true"]')).toHaveCount(2);
   });
 
   test('グループが1つも無ければ絞り込み欄を出さない', async ({ page }) => {
     await page.goto('');
-    await expect(page.locator('.toolbar-left select')).toHaveCount(0);
+    await expect(page.locator('.toolbar-left .group-choices')).toHaveCount(0);
   });
 });
 
@@ -652,6 +686,91 @@ test.describe('最初の導線', () => {
   });
 });
 
+test.describe('グループの一括操作', () => {
+  test('名前をまとめて付け替えられる', async ({ page }) => {
+    // 1件ずつ編集させると取りこぼす。
+    await page.goto('');
+    await loadSamplePack(page, '税務');
+    await closeDialog(page);
+    await openRulePanel(page);
+
+    await openGroupActions(page);
+    page.once('dialog', (dialog) => void dialog.accept('税金'));
+    await groupActionRow(page, '税務').getByRole('button', { name: '名前を変更' }).click();
+
+    await expect(page.locator('.rule-group-title', { hasText: '税金' })).toBeVisible();
+    await expect(page.locator('.rule-group-title', { hasText: '税務' })).toHaveCount(0);
+  });
+
+  test('まとめて削除は件数を見せてから消す', async ({ page }) => {
+    await page.goto('');
+    await loadSamplePack(page, '税務');
+    await closeDialog(page);
+    await openRulePanel(page);
+    const before = await page.locator('li.rule').count();
+
+    await openGroupActions(page);
+    let message = '';
+    page.once('dialog', (dialog) => {
+      message = dialog.message();
+      void dialog.dismiss();
+    });
+    await groupActionRow(page, '税務').getByRole('button', { name: 'まとめて削除' }).click();
+
+    // 取り消せば1件も減らない。
+    expect(message).toContain('件のルールをすべて削除します');
+    expect(message).toContain('元に戻せません');
+    await expect(page.locator('li.rule')).toHaveCount(before);
+
+    await openGroupActions(page);
+    page.once('dialog', (dialog) => void dialog.accept());
+    await groupActionRow(page, '税務').getByRole('button', { name: 'まとめて削除' }).click();
+    await expect(page.locator('li.rule')).toHaveCount(0);
+  });
+});
+
+test.describe('グループ名の長さ', () => {
+  test('長すぎる名前は弾き、ルールを消さない', async ({ page }) => {
+    // 読み込み側は上限を超えるグループ名のルールを捨てる。検証せずに保存すると、
+    // その束のルールが再読込で丸ごと消える。
+    await page.goto('');
+    await loadSamplePack(page, '税務');
+    await closeDialog(page);
+    await openRulePanel(page);
+    const before = await page.locator('li.rule').count();
+
+    await openGroupActions(page);
+    page.once('dialog', (dialog) => void dialog.accept('あ'.repeat(41)));
+    await groupActionRow(page, '税務').getByRole('button', { name: '名前を変更' }).click();
+
+    await expect(page.locator('.banner, .flash')).toContainText('40 文字');
+    await expect(page.locator('li.rule')).toHaveCount(before);
+
+    // 読み直しても消えていない。
+    await page.reload();
+    await openRulePanel(page);
+    await expect(page.locator('li.rule')).toHaveCount(before);
+  });
+});
+
+test.describe('ルールの複製', () => {
+  test('写した設定で編集画面が開く', async ({ page }) => {
+    await page.goto('');
+    await openRulePanel(page);
+    await page.getByRole('button', { name: '＋ 新規ルール' }).click();
+    await page.getByRole('button', { name: '給与', exact: true }).click();
+    await page.getByRole('button', { name: '保存' }).click();
+
+    await openRulePanel(page);
+    await page.locator('li.rule').first().getByRole('button', { name: '複製' }).click();
+
+    // まだ保存はしない。名前を直してからにしてもらう。
+    await expect(page.locator('.editor-title')).toHaveText('ルールを追加');
+    await expect(page.getByLabel('タイトル')).toHaveValue('給与振込のコピー');
+    await expect(page.locator('dialog').getByLabel('営業日カレンダー')).toHaveValue('bank');
+  });
+});
+
 test.describe('やりたいことから探す', () => {
   test('ヘルプの先頭に置き、開くと手順が出る', async ({ page }) => {
     await page.goto('');
@@ -722,7 +841,7 @@ test.describe('グループの気づきやすさ', () => {
     });
     await page.reload();
 
-    await expect(page.locator('.toolbar-left select')).toHaveCount(0);
+    await expect(page.locator('.toolbar-left .group-choices')).toHaveCount(0);
     await openRulePanel(page);
     await expect(page.locator('.callout-info')).toContainText('グループで束ねられます');
   });
@@ -737,12 +856,26 @@ test.describe('グループの気づきやすさ', () => {
 });
 
 test.describe('ヘルプ', () => {
-  test('目次から節へ飛べる', async ({ page }) => {
+  test('タブを切り替えると目次から節へ飛べる', async ({ page }) => {
     await page.goto('');
-    await page.locator('.header-actions').getByRole('button', { name: 'ヘルプ' }).click();
+    await page.locator('.header-actions').getByRole('button', { name: '使い方・ヘルプ' }).click();
+
+    // 既定はやりたいことの索引。目次はもう一方のタブにある。
+    await page.getByRole('tab', { name: '項目から探す' }).click();
     await expect(page.locator('.help-toc-link').first()).toBeVisible();
 
     await page.getByRole('link', { name: '決算月から逆算する' }).click();
+    await expect(page.locator('#help-fiscal')).toBeInViewport();
+  });
+
+  test('逆引きの「詳しく読む」でも節へ飛べる', async ({ page }) => {
+    await page.goto('');
+    await page.locator('.header-actions').getByRole('button', { name: '使い方・ヘルプ' }).click();
+
+    const task = page.locator('.help-task', { hasText: '決算期に合わせた予定' });
+    await task.locator('summary').click();
+    await task.getByRole('button', { name: '詳しく読む' }).click();
+
     await expect(page.locator('#help-fiscal')).toBeInViewport();
   });
 });
@@ -753,7 +886,7 @@ test.describe('ひな型とグループ', () => {
     await page.goto('');
     await loadSamplePack(page, '基本セット');
     await closeDialog(page);
-    await page.locator('.toolbar-left select').selectOption('基本');
+    await selectGroup(page, '基本');
 
     await openRulePanel(page);
     await page.getByRole('button', { name: '＋ 新規ルール' }).click();

@@ -22,6 +22,21 @@ function open(rule: Rule): { form: HTMLFormElement; handlers: RuleEditorHandlers
   return { form: editor.element, handlers };
 }
 
+/** 新規作成の画面。ひな型の選択欄が出る。 */
+function openNew(): { form: HTMLFormElement; handlers: RuleEditorHandlers } {
+  const handlers: RuleEditorHandlers = { onSave: vi.fn(), onCancel: vi.fn(), onDelete: vi.fn() };
+  const editor = new RuleEditor(
+    makeRule({ title: '' }),
+    calendars,
+    scheduleContext,
+    handlers,
+    true,
+    '2026-09-04',
+    [],
+  );
+  return { form: editor.element, handlers };
+}
+
 const at = (form: HTMLFormElement, label: string): HTMLInputElement | HTMLSelectElement => {
   const node = form.querySelector<HTMLInputElement | HTMLSelectElement>(`[aria-label="${label}"]`);
   if (node === null) throw new Error(`欄が見つかりません: ${label}`);
@@ -271,9 +286,11 @@ describe('直近1組', () => {
       ],
     });
     const { form } = open(rule);
+    // 年は見出し側に1度だけ。日付を並べると年が繰り返されるだけで読みにくい。
+    expect(form.querySelector('.next-dates-label')?.textContent).toBe('直近（2026年）:');
     const chain = form.querySelector('.next-dates-chain')?.textContent ?? '';
-    expect(chain).toContain('2026-09-10（木）');
-    expect(chain).toContain('2026-09-16（水）');
+    expect(chain).toContain('9/10（木）');
+    expect(chain).toContain('9/16（水）');
   });
 
   it('動いた回には理由を添える', () => {
@@ -286,7 +303,7 @@ describe('直近1組', () => {
     const { form } = open(shifted);
     // 2026-09-20 は日曜。前営業日は 09-18(金)。
     expect(form.querySelector('.next-dates-note')?.textContent).toBe(
-      '2026-09-20（日）が休業日のため前営業日へ',
+      '9/20（日）が休業日のため前営業日へ',
     );
   });
 });
@@ -445,8 +462,8 @@ describe('エラーの出し場所', () => {
     type(at(form, '2 件目: 営業日数'), '0');
     form.dispatchEvent(new Event('submit', { cancelable: true }));
 
-    // フォーム先頭ではなく、悪いほうの欄へ運ぶ。
-    expect(document.activeElement).toBe(at(form, '2 件目: どの月か'));
+    // 行の先頭（どの月）ではなく、悪い値が入っている欄そのものへ運ぶ。
+    expect(document.activeElement).toBe(at(form, '2 件目: 営業日数'));
     form.remove();
   });
 });
@@ -485,5 +502,121 @@ describe('動いた理由を添える', () => {
     const first = form.querySelector('.preview-related-item');
     expect(first?.textContent).toContain('2026-09-16（水）');
     expect(first?.querySelector('.preview-note')).toBeNull();
+  });
+});
+
+describe('開いて保存するだけでは何も変えない', () => {
+  /**
+   * 「同じ週」「同じ月」は設定が向きを言わない。それなのに保存時に役割を
+   * 一律「後」で塗り替えていたため、既存の準備予定が開いて保存するだけで
+   * フォローに変わり、外部カレンダーの識別子まで変わっていた。
+   */
+  const sameWeekPrep = (): Rule =>
+    makeRule({
+      id: 'r',
+      title: '月次締め',
+      recurrence: { type: 'monthlyByDay', interval: 1, days: [11], overflow: 'clamp' },
+      adjust: { mode: 'none', keepInMonth: false },
+      notices: [
+        {
+          id: 'n0',
+          label: '打合せ',
+          role: 'before',
+          timing: { kind: 'weekday', weeks: 0, weekday: 3, onClosed: 'none' },
+        },
+      ],
+    });
+
+  it('同じ週の準備予定は、保存しても準備のまま', () => {
+    const { form, handlers } = open(sameWeekPrep());
+    expect(save(form, handlers)?.notices[0]?.role).toBe('before');
+  });
+
+  it('同じ月の準備予定も、保存しても準備のまま', () => {
+    const rule = makeRule({
+      id: 'r',
+      title: 'x',
+      notices: [
+        {
+          id: 'n0',
+          label: '確認',
+          role: 'before',
+          timing: { kind: 'monthlyBusinessDay', months: 0, nth: 5 },
+        },
+      ],
+    });
+    const { form, handlers } = open(rule);
+    expect(save(form, handlers)?.notices[0]?.role).toBe('before');
+  });
+
+  it('日付の設定も何も変わらない', () => {
+    const before = sameWeekPrep();
+    const { form, handlers } = open(before);
+    const after = save(form, handlers);
+    expect(after?.notices).toEqual(before.notices);
+  });
+
+  it('ずらす数を変えれば、設定どおりの向きになる', () => {
+    // 0 でなくなれば設定から決まるので、そちらが優先される。
+    const { form, handlers } = open(sameWeekPrep());
+    choose(at(form, '1 件目: どの週か'), '1');
+    expect(save(form, handlers)?.notices[0]?.role).toBe('after');
+  });
+});
+
+describe('ひな型を選び直しても画面が二重にならない', () => {
+  it('プレビューの見出しは1つだけ', () => {
+    const { form } = openNew();
+    clickText(form, '給与');
+    const headings = [...form.querySelectorAll('summary')].filter((node) =>
+      (node.textContent ?? '').includes('10回'),
+    );
+    expect(headings).toHaveLength(1);
+  });
+
+  it('続けて選び直しても増えない', () => {
+    const { form } = openNew();
+    clickText(form, '給与');
+    // ひな型の欄は選んだあと消えるので、プレビューだけを数える。
+    expect(form.querySelectorAll('.preview-body')).toHaveLength(1);
+  });
+});
+
+describe('年をまたぐ直近1組', () => {
+  it('本体と違う年の予定には年を付ける', () => {
+    // 「12/31（木） 年末締め → 1/8（金） 翌月確認」だと、翌年の1月8日が
+    // 同じ年に見えてしまう。年末年始の前後予定では年が曖昧になる。
+    const yearEnd = makeRule({
+      id: 'r',
+      title: '年末締め',
+      recurrence: { type: 'monthlyByDay', interval: 1, days: ['last'], overflow: 'clamp' },
+      adjust: { mode: 'none', keepInMonth: false },
+      period: { start: '2026-12-01', end: null },
+      notices: [
+        { id: 'n0', label: '翌月確認', timing: { kind: 'monthlyBusinessDay', months: 1, nth: 5 } },
+      ],
+    });
+    const { form } = open(yearEnd);
+    const chain = form.querySelector('.next-dates-chain')?.textContent ?? '';
+
+    expect(form.querySelector('.next-dates-label')?.textContent).toBe('直近（2026年）:');
+    // 本体は年を出さず、翌年へ回るフォローだけ年を付ける。
+    expect(chain).toContain('12/31（木） 年末締め');
+    expect(chain).toContain('2027/1/');
+  });
+
+  it('同じ年のうちは短いまま', () => {
+    const rule = makeRule({
+      id: 'r',
+      title: '月次締め',
+      recurrence: { type: 'monthlyByDay', interval: 1, days: [10], overflow: 'clamp' },
+      adjust: { mode: 'none', keepInMonth: false },
+      notices: [
+        { id: 'n0', label: '報告会', timing: { kind: 'weekday', weeks: 1, weekday: 3, onClosed: 'next' } },
+      ],
+    });
+    const chain = open(rule).form.querySelector('.next-dates-chain')?.textContent ?? '';
+    expect(chain).toContain('9/16（水）');
+    expect(chain).not.toContain('2026/9/16');
   });
 });

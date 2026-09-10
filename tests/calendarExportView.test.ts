@@ -35,6 +35,23 @@ const clickText = (root: ParentNode, text: string): void => {
 const dateInputs = (root: ParentNode): HTMLInputElement[] =>
   [...root.querySelectorAll<HTMLInputElement>('input[type="date"]')];
 
+/** グループの選択チップ。 */
+const groupChips = (root: HTMLElement): string[] =>
+  [...root.querySelectorAll('.group-choices .group-chip')].map((n) => n.textContent ?? '');
+
+const pressedChips = (root: HTMLElement): string[] =>
+  [...root.querySelectorAll('.group-choices .group-chip[aria-pressed="true"]')].map(
+    (n) => n.textContent ?? '',
+  );
+
+const clickChip = (root: HTMLElement, label: string): void => {
+  const chip = [...root.querySelectorAll<HTMLButtonElement>('.group-choices .group-chip')].find(
+    (n) => n.textContent === label,
+  );
+  if (chip === undefined) throw new Error(`チップが見つかりません: ${label}`);
+  chip.dispatchEvent(new MouseEvent('click'));
+};
+
 describe('renderCalendarExport', () => {
   it('既定は今月の1日から末日、iCalendar', () => {
     // 試しに1回押しただけで1年分が取り込み先へ流れ込まないようにする。
@@ -111,7 +128,7 @@ describe('renderCalendarExport', () => {
       format: 'csv',
       includeNotices: true,
       includeFollows: true,
-      group: null,
+      groups: null,
     });
   });
 
@@ -183,16 +200,14 @@ describe('renderCalendarExport', () => {
       const { element } = open(42, {
         groups: ['税務', '入金'],
         hasUngrouped: true,
-        activeGroup: null,
+        activeGroups: null,
       });
-      const labels = [...(targetSelect(element)?.options ?? [])].map((o) => o.textContent);
-      expect(labels).toEqual(['すべてのグループ', '税務', '入金', '未分類']);
+      expect(groupChips(element)).toEqual(['すべて', '税務', '入金', '未分類']);
     });
 
     it('未分類のルールが無ければ未分類は出さない', () => {
-      const { element } = open(42, { groups: ['税務'], hasUngrouped: false, activeGroup: null });
-      const labels = [...(targetSelect(element)?.options ?? [])].map((o) => o.textContent);
-      expect(labels).toEqual(['すべてのグループ', '税務']);
+      const { element } = open(42, { groups: ['税務'], hasUngrouped: false, activeGroups: null });
+      expect(groupChips(element)).toEqual(['すべて', '税務']);
     });
 
     it('画面で絞り込み中のグループを初期値にする', () => {
@@ -200,24 +215,47 @@ describe('renderCalendarExport', () => {
       const { element, handlers } = open(42, {
         groups: ['税務', '入金'],
         hasUngrouped: false,
-        activeGroup: '税務',
+        activeGroups: ['税務'],
       });
-      expect(targetSelect(element)?.value).toBe('税務');
+      expect(pressedChips(element)).toEqual(['税務']);
       clickText(element, '書き出す');
-      expect(vi.mocked(handlers.onExport).mock.calls[0]?.[0]?.group).toBe('税務');
+      expect(vi.mocked(handlers.onExport).mock.calls[0]?.[0]?.groups).toEqual(['税務']);
     });
 
     it('対象を変えると件数を数え直す', () => {
       const { element, handlers } = open(42, {
         groups: ['税務'],
         hasUngrouped: false,
-        activeGroup: null,
+        activeGroups: null,
       });
-      const select = targetSelect(element);
-      select!.value = '税務';
-      select?.dispatchEvent(new Event('change'));
+      clickChip(element, '税務');
       const last = vi.mocked(handlers.countOccurrences).mock.calls.at(-1)?.[0];
-      expect(last?.group).toBe('税務');
+      expect(last?.groups).toEqual(['税務']);
+    });
+
+    it('複数のグループをまとめて書き出せる', () => {
+      // 1つずつしか選べないと、そのたびに書き出し直すことになる。
+      const { element, handlers } = open(42, {
+        groups: ['税務', '入金'],
+        hasUngrouped: false,
+        activeGroups: null,
+      });
+      clickChip(element, '税務');
+      clickChip(element, '入金');
+      expect(pressedChips(element)).toEqual(['税務', '入金']);
+      clickText(element, '書き出す');
+      expect(vi.mocked(handlers.onExport).mock.calls[0]?.[0]?.groups).toEqual(['税務', '入金']);
+    });
+
+    it('選び直して空になったら「すべて」へ戻す', () => {
+      // 何も選ばれていない状態で書き出すと、0件のファイルができてしまう。
+      const { element } = open(42, {
+        groups: ['税務'],
+        hasUngrouped: false,
+        activeGroups: ['税務'],
+      });
+      clickChip(element, '税務');
+      expect(pressedChips(element)).toEqual(['すべて']);
     });
   });
 });

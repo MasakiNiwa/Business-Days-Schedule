@@ -209,3 +209,40 @@ describe('前後が入れ替わっても UID が変わらない', () => {
     expect(uids).toContain('UID:r-follow-2026-09-10-single-n1@business-days-schedule');
   });
 });
+
+describe('設定を変えずに保存しても UID が変わらない', () => {
+  it('同じ週の準備予定を開いて保存しただけでは、識別子が動かない', () => {
+    // 保存時に役割を一律「後」で塗り替えていたため、日付の設定を触っていないのに
+    // notice → follow へ変わり、取り込み先で別の予定として増えていた。
+    const before = makeRule({
+      id: 'r',
+      title: '月次締め',
+      recurrence: { type: 'monthlyByDay', interval: 1, days: [11], overflow: 'clamp' },
+      adjust: { mode: 'none', keepInMonth: false },
+      notices: [
+        {
+          id: 'n0',
+          label: '打合せ',
+          role: 'before',
+          timing: { kind: 'weekday', weeks: 0, weekday: 3, onClosed: 'none' },
+        },
+      ],
+    });
+    // 編集画面を通したあとのルール（役割だけが書き換わりうる）。
+    const after: Rule = {
+      ...before,
+      notices: [{ ...before.notices[0]!, role: 'before' }],
+    };
+
+    const uids = (rule: Rule): string[] => {
+      const occurrences = expandRules([rule], { start: '2026-09-01', end: '2026-09-30' }, scheduleContext)
+        .occurrences.filter((o) => o.kind !== 'main');
+      return buildIcs(occurrences, new Map([[rule.id, rule]]), OPTIONS, NOW)
+        .split('\r\n')
+        .filter((line) => line.startsWith('UID:'));
+    };
+
+    expect(uids(after)).toEqual(uids(before));
+    expect(uids(before)[0]).toContain('-notice-');
+  });
+});
