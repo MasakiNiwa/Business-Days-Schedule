@@ -259,3 +259,37 @@ describe('renderCalendarExport', () => {
     });
   });
 });
+
+describe('初期の期間', () => {
+  it('渡された期間を初期値にする', () => {
+    // 10月を見ているのに 9月が初期値だと、「いま見ている予定を書き出す」つもりの
+    // 操作で違う月を渡してしまう。
+    const { element } = open(42, {
+      groups: [],
+      hasUngrouped: false,
+      activeGroups: null,
+      initialRange: { from: '2026-10-01', to: '2026-10-31' },
+    });
+    const dates = [...element.querySelectorAll<HTMLInputElement>('input[type="date"]')];
+    expect(dates[0]?.value).toBe('2026-10-01');
+    expect(dates[1]?.value).toBe('2026-10-31');
+  });
+
+  it('渡さなければ今月', () => {
+    const { element } = open(42, { groups: [], hasUngrouped: false, activeGroups: null });
+    const dates = [...element.querySelectorAll<HTMLInputElement>('input[type="date"]')];
+    expect(dates[0]?.value).toBe('2026-09-01');
+    expect(dates[1]?.value).toBe('2026-09-30');
+  });
+
+  it('その期間で件数を数える', () => {
+    const { handlers } = open(42, {
+      groups: [],
+      hasUngrouped: false,
+      activeGroups: null,
+      initialRange: { from: '2026-10-01', to: '2026-10-31' },
+    });
+    const first = vi.mocked(handlers.countOccurrences).mock.calls[0]?.[0];
+    expect(first).toMatchObject({ from: '2026-10-01', to: '2026-10-31' });
+  });
+});

@@ -12,7 +12,7 @@
 
 import { APP_NAME } from './buildInfo';
 import { dayOf, monthOf, addDays, weekdayOf, yearOf } from './dateUtil';
-import { describeRule } from './describe';
+import { describeRule, noticeFallback } from './describe';
 import type { DateStr, Occurrence, Rule } from '../types';
 import type { ExpandWarning } from './schedule';
 
@@ -107,8 +107,7 @@ export function describeOccurrence(occurrence: Occurrence, rule: Rule): string {
  */
 export function titleOf(occurrence: Occurrence, rule: Rule): string {
   if (occurrence.kind !== 'main') {
-    const fallback = occurrence.kind === 'follow' ? 'フォロー' : '準備';
-    return `【${occurrence.noticeLabel ?? fallback}】${rule.title}`;
+    return `【${occurrence.noticeLabel ?? noticeFallback(occurrence)}】${rule.title}`;
   }
   if (!occurrence.shifted) return rule.title;
   return `${rule.title}（${occurrence.shiftDirection === 'prev' ? '繰上' : '繰下'}）`;

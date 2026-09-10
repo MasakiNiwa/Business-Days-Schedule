@@ -96,7 +96,7 @@ describe('renderDayDetail', () => {
     const item = element.querySelector('.day-item.is-notice');
     expect(item?.querySelector('.day-item-title')?.textContent).toBe('給与振込: 振込データ作成');
     expect(item?.querySelector('.day-item-origin')?.textContent).toContain(
-      '2026-04-24 の予定に対する準備日',
+      '2026-04-24 の「給与振込」に対する準備日',
     );
   });
 
@@ -134,5 +134,45 @@ describe('renderDayDetail', () => {
     const { element } = open('2026-04-24', [evil]);
     expect(element.querySelector('img')).toBeNull();
     expect(element.querySelector('.day-item-title')?.textContent).toBe('<img src=x onerror=alert(1)>');
+  });
+});
+
+describe('フォロー予定の名前', () => {
+  /**
+   * カレンダーには「給与振込: 着金確認」と出るのに、日付詳細では
+   * 「給与振込」としか出ていなかった。何をする日か分からず、フォローを
+   * 何件も付けると区別もできない。
+   */
+  const salary = makeRule({
+    id: 'salary',
+    title: '給与振込',
+    recurrence: { type: 'monthlyByDay', interval: 1, days: [4], overflow: 'clamp' },
+    adjust: { mode: 'none', keepInMonth: false },
+    notices: [
+      { id: 'n0', label: '着金確認', timing: { kind: 'offset', offset: 3, unit: 'business' } },
+      { id: 'n1', label: '仕訳入力', timing: { kind: 'offset', offset: 5, unit: 'business' } },
+    ],
+  });
+
+  /** 2026-09-04(金) の3営業日後は 09-09(水)、5営業日後は 09-11(金)。 */
+  const follows = { 着金確認: '2026-09-09', 仕訳入力: '2026-09-11' };
+
+  const titlesOn = (date: string): (string | null)[] =>
+    [...open(date, [salary]).element.querySelectorAll('.day-item-title')].map((n) => n.textContent);
+
+  it('フォローにも予定名を付ける', () => {
+    expect(titlesOn(follows.着金確認)).toContain('給与振込: 着金確認');
+  });
+
+  it('複数のフォローを見分けられる', () => {
+    expect(titlesOn(follows.仕訳入力)).toContain('給与振込: 仕訳入力');
+    expect(titlesOn(follows.仕訳入力)).not.toContain('給与振込: 着金確認');
+  });
+
+  it('由来にも本体の名前を添える', () => {
+    const origin = [
+      ...open(follows.着金確認, [salary]).element.querySelectorAll('.day-item-origin'),
+    ].map((n) => n.textContent ?? '');
+    expect(origin.join('\n')).toContain('の「給与振込」に対するフォロー');
   });
 });

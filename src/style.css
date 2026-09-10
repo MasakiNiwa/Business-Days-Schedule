@@ -2686,3 +2686,9 @@ main:focus {
   color: var(--fg-faint);
   line-height: 1.7;
 }
+
+/* 一覧の起点。月の移動と同じ場所に置き、切り替えても目が迷わないようにする。 */
+.list-start {
+  width: auto;
+  min-width: 8.5rem;
+}

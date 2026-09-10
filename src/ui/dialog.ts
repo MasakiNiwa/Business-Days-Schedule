@@ -14,7 +14,8 @@ export type DialogController = {
   element: HTMLDialogElement;
   /** 中身だけ差し替える。開いたままの更新に使う（フォーカスを失わない）。 */
   setContent: (content: HTMLElement) => void;
-  close: () => void;
+  /** 閉じる。確認を通す。`force` を立てると確認せずに閉じる。 */
+  close: (force?: boolean) => void;
 };
 
 export function createDialog(
@@ -22,6 +23,14 @@ export function createDialog(
   onClose: () => void,
   size: DialogSize = 'md',
   mount: HTMLElement = document.body,
+  /**
+   * 閉じてよいかを尋ねる。false を返すと閉じない。
+   *
+   * 入力途中で Esc を押す・背景を触るのは起こりやすく、確認なしに閉じると
+   * 前後の予定まで組んだ内容が消える。呼び出し側が「変更があるか」を知っている
+   * ので、判断はそちらに任せる。
+   */
+  canClose: () => boolean = () => true,
 ): DialogController {
   const body = h('div', { class: 'modal-body' }, content);
 
@@ -33,7 +42,9 @@ export function createDialog(
 
   const element = h('dialog', { class: `modal modal-${size}` }, closeButton, body);
 
-  const close = (): void => {
+  /** 確認を通してから閉じる。強制的に閉じたいときは force を立てる。 */
+  const close = (force = false): void => {
+    if (!force && !canClose()) return;
     // jsdom など close() を持たない環境でも壊れないようにする。
     if (typeof element.close === 'function') element.close();
     else {
@@ -42,8 +53,13 @@ export function createDialog(
     }
   };
 
-  closeButton.addEventListener('click', close);
+  closeButton.addEventListener('click', () => close());
   element.addEventListener('close', () => onClose());
+
+  // Esc は close イベントの前に cancel が飛ぶ。ここで止めれば閉じない。
+  element.addEventListener('cancel', (event) => {
+    if (!canClose()) event.preventDefault();
+  });
 
   // 背景（バックドロップ）のクリックで閉じる。中身の外側かどうかで判定する。
   element.addEventListener('click', (event) => {

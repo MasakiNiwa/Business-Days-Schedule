@@ -7,7 +7,14 @@
 
 import { createBusinessDayCalendar, COMPANY_CALENDAR_ID } from './core/businessDay';
 import type { BusinessDayCalendar } from './core/businessDay';
-import { addDays, lastDayOfMonth, monthOf, todayInTokyo, yearOf } from './core/dateUtil';
+import {
+  addDays,
+  lastDateOfMonth,
+  lastDayOfMonth,
+  monthOf,
+  todayInTokyo,
+  yearOf,
+} from './core/dateUtil';
 import { field, named, select } from './ui/controls';
 import { createBundledHolidayLookup, outOfRangeMessage } from './core/holidays';
 import type { HolidayLookup } from './core/holidays';
@@ -103,6 +110,15 @@ export class App {
   private pendingFocusDate: DateStr | null = null;
   private dialog: DialogController | null = null;
   private dialogKey: string | null = null;
+  /** 開いている編集画面。閉じる前に未保存の変更を確かめるために持つ。 */
+  private openEditor: RuleEditor | null = null;
+  /**
+   * 一覧の起点。null は「今日から」。
+   *
+   * 「いま見ている予定を一覧にする」と考えるのが自然なので、カレンダーで別の月を
+   * 見ていたらその月から始める。今日から見たい場面も残したいので、起点は選べる。
+   */
+  private listStart: DateStr | null = null;
   private samplePacks: SamplePack[] | null = null;
   private sampleError: string | null = null;
 
@@ -163,10 +179,41 @@ export class App {
   // 操作
   // -------------------------------------------------------------------------
 
+  /**
+   * カレンダーと一覧を切り替える。見ている期間を引き継ぐ。
+   *
+   * 10月を見ているのに一覧が「今日から」に戻ると、同じ予定を見ているつもりで
+   * 別の期間を読むことになる。逆向きも同じ。
+   */
   private setView(view: 'calendar' | 'list'): void {
+    if (view === 'list') {
+      const viewingThisMonth =
+        this.view.year === yearOf(this.today) && this.view.month === monthOf(this.today);
+      // 今月を見ているなら「今日から」のまま。過去の予定まで遡らせない。
+      this.listStart = viewingThisMonth
+        ? null
+        : `${String(this.view.year).padStart(4, '0')}-${String(this.view.month).padStart(2, '0')}-01`;
+    } else if (this.listStart !== null) {
+      this.view = { year: yearOf(this.listStart), month: monthOf(this.listStart) };
+    }
     this.state.prefs = { ...this.state.prefs, defaultView: view };
     this.persist();
     this.render();
+  }
+
+  /**
+   * いま画面に出している期間。書き出しの初期値にする。
+   *
+   * 10月を見ているのに 9月が初期値だと、「いま見ている予定を書き出す」つもりの
+   * 操作で違う月を渡してしまう。
+   */
+  private visibleRange(): { from: DateStr; to: DateStr } {
+    if (this.state.prefs.defaultView === 'list') {
+      const from = this.listFrom();
+      return { from, to: addDays(from, this.state.prefs.listDays - 1) };
+    }
+    const from = `${String(this.view.year).padStart(4, '0')}-${String(this.view.month).padStart(2, '0')}-01`;
+    return { from, to: lastDateOfMonth(this.view.year, this.view.month) };
   }
 
   private setListDays(days: number): void {
@@ -564,11 +611,22 @@ export class App {
     monthLabel.setAttribute('title', '月を移動');
     if (this.mode.kind === 'jump') monthLabel.setAttribute('aria-pressed', 'true');
 
+    // 一覧は「今日から」だけでなく、起点を選べるようにする。
+    // カレンダーで別の月を見てから切り替えたときに、その月から読めるようにするため。
+    const listFrom = this.listFrom();
+    const startInput = named(
+      h('input', { type: 'date', class: 'input list-start', value: listFrom }),
+      '一覧の起点',
+    );
+    startInput.addEventListener('change', () => {
+      this.setListStart(startInput.value === '' ? null : startInput.value);
+    });
+
     const center = isList
       ? h(
           'div',
           { class: 'header-center' },
-          h('p', { class: 'month-label is-static' }, '今後の予定'),
+          startInput,
           named(
             select(
               LIST_RANGES.map((days) => ({ value: String(days), label: `${days}日先まで` })),
@@ -586,7 +644,12 @@ export class App {
       h(
         'div',
         { class: 'header-left' },
-        isList ? null : button('今日', () => this.goToToday(), 'button button-sm'),
+        isList
+          ? // 起点を動かしたあと、今日へ戻す手を残す。
+            listFrom === this.today
+            ? null
+            : button('今日から', () => this.setListStart(null), 'button button-sm')
+          : button('今日', () => this.goToToday(), 'button button-sm'),
       ),
       center,
       h(
@@ -602,6 +665,8 @@ export class App {
 
   /** ヘッダーのボタンはトグル動作にする。同じボタンをもう一度押せば閉じる。 */
   private openMode(kind: 'settings' | 'help' | 'rules' | 'jump' | 'calendarExport'): void {
+    // 編集中に別の画面へ移ると、そのまま入力が消える。移る前に確かめる。
+    if (!this.confirmDiscard()) return;
     this.mode = this.mode.kind === kind ? { kind: 'calendar' } : { kind };
     this.render();
   }
@@ -672,13 +737,18 @@ export class App {
         this.scheduleContext(this.businessCalendars()),
         {
           onSave: (rule) => this.saveRule(rule),
-          onCancel: () => this.backToCalendar(),
+          onCancel: () => {
+            if (!this.confirmDiscard()) return;
+            this.backToCalendar();
+          },
           onDelete: (ruleId) => this.deleteRule(ruleId),
         },
         mode.isNew,
         this.today,
         collectGroups(this.state.rules),
       );
+      // 閉じる前に「変更があるか」を尋ねられるよう、開いている編集画面を覚えておく。
+      this.openEditor = editor;
       return editor.element;
     }
 
@@ -751,6 +821,7 @@ export class App {
           groups: collectGroups(this.state.rules),
           hasUngrouped: hasUngrouped(this.state.rules),
           activeGroups: this.activeGroups(),
+          initialRange: this.visibleRange(),
         },
       );
     }
@@ -821,8 +892,10 @@ export class App {
     const key = dialogKeyOf(this.mode);
 
     if (key === null) {
+      // ここへ来る時点でモードは calendar なので、確認は済んでいる。
+      this.openEditor = null;
       this.dialog?.element.remove();
-      this.dialog?.close();
+      this.dialog?.close(true);
       this.dialog = null;
       this.dialogKey = null;
       return;
@@ -845,15 +918,33 @@ export class App {
     if (this.dialog !== null) {
       const previous = this.dialog;
       this.dialog = null;
+      // 編集画面は閉じるので、閉じる前の確認先としては手放す。
+      if (this.mode.kind !== 'edit') this.openEditor = null;
       previous.element.remove();
     }
 
-    this.dialog = createDialog(content, () => this.onDialogClosed(), size);
+    this.dialog = createDialog(content, () => this.onDialogClosed(), size, document.body, () =>
+      this.confirmDiscard(),
+    );
     this.dialogKey = key;
+  }
+
+  /**
+   * 入力途中で閉じてよいか。
+   *
+   * Esc・×・背景クリックのどれも起こりやすく、確認なしに閉じると
+   * 前後の予定まで組んだ内容が消える。変更があるときだけ尋ねる。
+   */
+  private confirmDiscard(): boolean {
+    if (this.mode.kind !== 'edit') return true;
+    const editor = this.openEditor;
+    if (editor === null || !editor.isDirty()) return true;
+    return globalThis.confirm('入力した内容が保存されていません。破棄して閉じますか？');
   }
 
   /** ブラウザ側の操作（Esc・背景クリック）で閉じられたときの後始末。 */
   private onDialogClosed(): void {
+    this.openEditor = null;
     if (this.dialog === null) return;
     this.dialog.element.remove();
     this.dialog = null;
@@ -1159,8 +1250,19 @@ export class App {
   }
 
   /** 一覧表示（§8.3）。今日から prefs.listDays 日ぶんを時系列で並べる。 */
+  /** 一覧の起点。指定が無ければ今日から。 */
+  private listFrom(): DateStr {
+    return this.listStart ?? this.today;
+  }
+
+  private setListStart(date: DateStr | null): void {
+    this.listStart = date;
+    this.render();
+  }
+
   private buildListPane(): HTMLElement {
     const days = this.state.prefs.listDays;
+    const from = this.listFrom();
     const calendars = this.businessCalendars();
     const ctx = this.scheduleContext(calendars);
     const businessCalendar = calendars.get(ctx.fallbackCalendarId);
@@ -1168,7 +1270,7 @@ export class App {
 
     const { occurrences } = expandRules(
       this.visibleRules(),
-      { start: this.today, end: addDays(this.today, days - 1) },
+      { start: from, end: addDays(from, days - 1) },
       ctx,
     );
 
@@ -1178,7 +1280,7 @@ export class App {
       new Map(this.state.calendars.map((item) => [item.id, item])),
       businessCalendar,
       this.holidays,
-      this.today,
+      from,
       days,
       this.today,
       {

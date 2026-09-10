@@ -6,7 +6,7 @@
  */
 
 import type { BusinessDayCalendar, ClosedReason } from '../core/businessDay';
-import { describeRule, weekdayName } from '../core/describe';
+import { describeRule, occurrenceTitle, weekdayName } from '../core/describe';
 import { weekdayOf } from '../core/dateUtil';
 import type { HolidayLookup } from '../core/holidays';
 import type { BusinessCalendar, DateStr, Occurrence, Rule } from '../types';
@@ -45,9 +45,9 @@ function renderOccurrence(
 
   const origin =
     occurrence.kind === 'notice'
-      ? `${occurrence.rawDate} の予定に対する準備日`
+      ? `${occurrence.rawDate} の「${rule.title}」に対する準備日`
       : occurrence.kind === 'follow'
-      ? `${occurrence.rawDate} の予定に対するフォロー`
+      ? `${occurrence.rawDate} の「${rule.title}」に対するフォロー`
       : occurrence.shifted
         ? `本来は ${occurrence.rawDate}（休業日）。${
             occurrence.shiftDirection === 'prev' ? '前営業日へ前倒し' : '翌営業日へ後ろ倒し'
@@ -61,13 +61,9 @@ function renderOccurrence(
     h(
       'div',
       { class: 'day-item-body' },
-      h(
-        'p',
-        { class: 'day-item-title' },
-        occurrence.kind === 'notice'
-          ? `${rule.title}: ${occurrence.noticeLabel ?? '準備'}`
-          : rule.title,
-      ),
+      // カレンダー・一覧と同じ名前を出す。ここだけ別に書いていたため、
+      // フォローが「給与振込」としか出ず、何をする日か分からなくなっていた。
+      h('p', { class: 'day-item-title' }, occurrenceTitle(occurrence, rule)),
       origin === null ? null : h('p', { class: 'day-item-origin' }, origin),
       h('p', { class: 'day-item-desc' }, details.join(' / ')),
       rule.note === undefined || rule.note === ''
