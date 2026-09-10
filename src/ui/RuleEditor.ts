@@ -277,6 +277,8 @@ export class RuleEditor {
    * 編集を始めた時点の値もここに登録する（登録しないと切り替えで既定値へ落ちる）。
    */
   private readonly timingStates = new Map<string, TimingState>();
+  /** 開いた直後の姿。変更があるかの判定に使う。 */
+  private baseline = '';
   private readonly previewBody = h('div', { class: 'preview-body' });
   private readonly issuesBody = h('div', { class: 'issues' });
   /**
@@ -312,6 +314,35 @@ export class RuleEditor {
     this.element = this.build();
     this.renderRecurrence();
     this.refresh();
+    // 読み込みの整え（前後予定の id 付けなど）が済んだあとを「触っていない状態」
+    // とする。ここより前に取ると、開いただけで変更ありと見なしてしまう。
+    this.baseline = this.snapshot();
+  }
+
+  /**
+   * 開いたときから何か変わっているか。閉じる前の確認に使う。
+   *
+   * 入力途中で Esc を押す・背景を触るのは起こりやすく、確認なしに閉じると
+   * 前後の予定まで組んだ内容が消える。
+   */
+  isDirty(): boolean {
+    return this.snapshot() !== this.baseline;
+  }
+
+  /**
+   * 比べるための姿。updatedAt は保存時に付け替わるので外す。
+   *
+   * 編集中の状態も混ぜる。日数を消して空欄にした状態は、畳めないので
+   * 保存する形へは書き戻していない。保存用データだけを比べると、
+   * 打ち直している最中は「触っていない」ことになり、閉じる確認をすり抜ける。
+   */
+  private snapshot(): string {
+    const { updatedAt: _updatedAt, ...rest } = this.draft;
+    const editing = this.draft.notices.map((notice) => [
+      notice.id,
+      this.timingStates.get(notice.id ?? ''),
+    ]);
+    return JSON.stringify({ rest, editing });
   }
 
   // -------------------------------------------------------------------------

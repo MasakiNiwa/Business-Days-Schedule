@@ -686,6 +686,107 @@ test.describe('最初の導線', () => {
   });
 });
 
+test.describe('入力途中で閉じたとき', () => {
+  const startEditing = async (page: Page): Promise<void> => {
+    await page.goto('');
+    await openRulePanel(page);
+    await page.getByRole('button', { name: '＋ 新規ルール' }).click();
+    await page.getByRole('button', { name: '自由入力' }).click();
+    await page.getByLabel('タイトル').fill('作りかけ');
+  };
+
+  test('Esc では確認を出し、取り消せば残る', async ({ page }) => {
+    await startEditing(page);
+
+    let asked = '';
+    page.once('dialog', (dialog) => {
+      asked = dialog.message();
+      void dialog.dismiss();
+    });
+    await page.keyboard.press('Escape');
+
+    expect(asked).toContain('保存されていません');
+    await expect(page.getByLabel('タイトル')).toHaveValue('作りかけ');
+  });
+
+  test('破棄を選べば閉じる', async ({ page }) => {
+    await startEditing(page);
+    page.once('dialog', (dialog) => void dialog.accept());
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.editor-title')).toHaveCount(0);
+  });
+
+  test('×ボタンでも確認する', async ({ page }) => {
+    await startEditing(page);
+    let asked = false;
+    page.once('dialog', (dialog) => {
+      asked = true;
+      void dialog.dismiss();
+    });
+    await page.locator('.modal-close').click();
+    expect(asked).toBe(true);
+    await expect(page.getByLabel('タイトル')).toHaveValue('作りかけ');
+  });
+
+  test('何も変えていなければ黙って閉じる', async ({ page }) => {
+    // 読み込みの整えを変更と見なして、毎回尋ねられては煩わしい。
+    await page.goto('');
+    await loadSamplePack(page, '基本セット');
+    await closeDialog(page);
+    await openRulePanel(page);
+    await page.locator('li.rule').first().getByRole('button', { name: '編集' }).click();
+
+    let asked = false;
+    page.once('dialog', () => {
+      asked = true;
+    });
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.editor-title')).toHaveCount(0);
+    expect(asked).toBe(false);
+  });
+});
+
+test.describe('表示中の期間の引き継ぎ', () => {
+  test('別の月を見てから書き出すと、その月が初期値になる', async ({ page }) => {
+    await page.goto('');
+    // 翌月へ移動する。
+    await page.locator('.header-center').getByRole('button', { name: '次の月' }).click();
+    const month = await page.locator('.month-label').first().textContent();
+
+    await page.getByRole('button', { name: '書き出し' }).click();
+    const from = page.locator('.export input[type="date"]').first();
+    const value = (await from.inputValue()).slice(0, 7).replace('-', '年') + '月';
+    expect(month?.replace(/\s/g, '')).toContain(value.replace(/^0+/, ''));
+  });
+
+  test('別の月を見てから一覧に切り替えると、その月から並ぶ', async ({ page }) => {
+    await page.goto('');
+    await page.locator('.header-center').getByRole('button', { name: '次の月' }).click();
+
+    await page.locator('.segmented').getByRole('button', { name: '一覧' }).click();
+    const start = await page.getByLabel('一覧の起点').inputValue();
+    expect(start.endsWith('-01')).toBe(true);
+    // 今日より先の月から始まる。
+    expect(start > new Date().toISOString().slice(0, 10)).toBe(true);
+  });
+
+  test('今日から見たいときは戻せる', async ({ page }) => {
+    await page.goto('');
+    await page.locator('.header-center').getByRole('button', { name: '次の月' }).click();
+    await page.locator('.segmented').getByRole('button', { name: '一覧' }).click();
+
+    await page.getByRole('button', { name: '今日から' }).click();
+    await expect(page.getByRole('button', { name: '今日から' })).toHaveCount(0);
+  });
+
+  test('起点を選び直せる', async ({ page }) => {
+    await page.goto('');
+    await page.locator('.segmented').getByRole('button', { name: '一覧' }).click();
+    await page.getByLabel('一覧の起点').fill('2027-03-01');
+    await expect(page.locator('.print-title')).toContainText('2027-03-01');
+  });
+});
+
 test.describe('グループの一括操作', () => {
   test('名前をまとめて付け替えられる', async ({ page }) => {
     // 1件ずつ編集させると取りこぼす。

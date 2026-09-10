@@ -7,18 +7,16 @@
  */
 
 import { createBusinessDayCalendar } from '../core/businessDay';
-import { monthOf, todayInTokyo, yearOf } from '../core/dateUtil';
+import { isValidMonthDay, monthOf, todayInTokyo, yearOf } from '../core/dateUtil';
 import type { HolidayLookup } from '../core/holidays';
 import { exportFileName } from '../core/storage';
 import type { BusinessCalendar, DateStr, Month, Weekday } from '../types';
 import { validateCalendar } from '../core/validate';
-import { button, checkbox, field, named, select } from './controls';
+import { button, checkbox, field, markInvalid, named, select } from './controls';
 import { clear, h } from './dom';
 import { BUILD_INFO, longVersion } from '../core/buildInfo';
 
 const WEEKDAY_NAMES = ['日', '月', '火', '水', '木', '金', '土'] as const;
-const MONTH_DAY_PATTERN = /^\d{2}-\d{2}$/;
-
 export type SettingsHandlers = {
   onChange: (calendars: BusinessCalendar[]) => void;
   onExport: () => void;
@@ -193,8 +191,22 @@ export class SettingsView {
         `休業期間 ${rangeIndex + 1}: 名称`,
       );
 
+      const issue = h('p', { class: 'issue issue-error', hidden: true });
+
       const apply = (): void => {
-        if (!MONTH_DAY_PATTERN.test(from.value) || !MONTH_DAY_PATTERN.test(to.value)) return;
+        // 形だけでなく実在する月日かを確かめる。13-01 のようなものを通すと、
+        // 以後の営業日計算が例外で落ち、再読込しても同じところで落ちる。
+        const badFrom = !isValidMonthDay(from.value);
+        const badTo = !isValidMonthDay(to.value);
+        markInvalid(from, badFrom);
+        markInvalid(to, badTo);
+        if (badFrom || badTo) {
+          // 黙って捨てると、入力欄の値と保存される値が食い違う。
+          issue.textContent = '休業期間は実在する月日を MM-DD 形式で入力してください（例 08-13）。';
+          issue.hidden = false;
+          return;
+        }
+        issue.hidden = true;
         const next = [...calendar.closedRanges];
         next[rangeIndex] = { from: from.value, to: to.value, label: label.value };
         update(next);
@@ -206,14 +218,19 @@ export class SettingsView {
       list.append(
         h(
           'div',
-          { class: 'row' },
-          from,
-          h('span', { class: 'unit' }, '〜'),
-          to,
-          label,
-          button('削除', () => {
-            update(calendar.closedRanges.filter((_, i) => i !== rangeIndex));
-          }, 'button button-sm button-quiet'),
+          { class: 'closed-range' },
+          h(
+            'div',
+            { class: 'row' },
+            from,
+            h('span', { class: 'unit' }, '〜'),
+            to,
+            label,
+            button('削除', () => {
+              update(calendar.closedRanges.filter((_, i) => i !== rangeIndex));
+            }, 'button button-sm button-quiet'),
+          ),
+          issue,
         ),
       );
     }

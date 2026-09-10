@@ -7,13 +7,16 @@
 
 import type { BusinessDayCalendar } from '../core/businessDay';
 import { addDays, weekdayOf } from '../core/dateUtil';
-import { describeRule, weekdayName } from '../core/describe';
+import { describeRule, occurrenceTitle, weekdayName } from '../core/describe';
 import type { HolidayLookup } from '../core/holidays';
 import type { BusinessCalendar, DateStr, Occurrence, Rule } from '../types';
 import { h } from './dom';
 
 /** 一覧で先読みできる日数の選択肢。 */
 export const LIST_RANGES = [30, 90, 180, 365] as const;
+
+/** 一覧の起点。既定は今日だが、表示中の月から見たいこともある。 */
+export type ListStart = { date: DateStr; isToday: boolean };
 
 const SHIFT_MARK = { prev: '←', next: '→' } as const;
 
@@ -73,7 +76,7 @@ function renderRow(
       'span',
       { class: occurrence.kind !== 'main' ? 'is-notice-title' : '' },
       occurrence.kind !== 'main'
-        ? `${rule.title}: ${occurrence.noticeLabel ?? (occurrence.kind === 'follow' ? 'フォロー' : '準備')}`
+        ? occurrenceTitle(occurrence, rule)
         : rule.title,
     ),
   );

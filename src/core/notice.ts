@@ -13,7 +13,7 @@
  */
 
 import type { BusinessDayCalendar } from './businessDay';
-import { addDays, addMonths, diffDays, monthOf, weekdayOf, yearOf } from './dateUtil';
+import { addDays, addMonths, monthOf, weekdayOf, yearOf } from './dateUtil';
 import type { DateStr, Notice, NoticeRole, NoticeTiming, Rule, Weekday } from '../types';
 
 /** 順番から作る既定の id。移行時に既存の UID と一致させるための形。 */
@@ -184,53 +184,4 @@ function plainNoticeDate(
       return calendar.nthBusinessDayOfMonth(yearOf(target), monthOf(target), timing.nth);
     }
   }
-}
-
-/**
- * 本体からどれだけ離れうるかの幅。展開範囲を広げるのに使う。
- *
- * 営業日で数えるものは、暦日に換算した見積もりでは足りない。
- * 「月曜だけ営業」のようなカレンダーでは60営業日が60週になる。
- * そこだけは実際にカレンダーを歩いて数える。
- *
- * 週・月で決めるものは前後どちらへも動きうるので、向きで分けず両側へ広げる。
- * 見積もりが甘いと、本体が範囲の外にあるぶんの前後予定が黙って消える。
- */
-export function noticeSpanDays(
-  timing: NoticeTiming,
-  calendar: BusinessDayCalendar,
-): { before: number; after: number } {
-  switch (timing.kind) {
-    case 'offset': {
-      const days =
-        timing.unit === 'calendar'
-          ? Math.abs(timing.offset)
-          : businessDaysToCalendarDays(Math.abs(timing.offset), calendar);
-      return timing.offset < 0 ? { before: days, after: 0 } : { before: 0, after: days };
-    }
-    case 'weekday': {
-      const days = Math.abs(timing.weeks) * 7 + 14;
-      return { before: days, after: days };
-    }
-    case 'monthlyBusinessDay': {
-      const days = (Math.abs(timing.months) + 2) * 31;
-      return { before: days, after: days };
-    }
-  }
-}
-
-/**
- * N営業日ぶんが暦日で何日になるかを、実際にカレンダーを歩いて数える。
- * 起点をどこに取っても大きく変わらないので、代表として今日の近くから数える。
- * 休業が続いて数えきれなくなったら、そこまでの幅を返す（本体は探索対象に残す）。
- */
-function businessDaysToCalendarDays(count: number, calendar: BusinessDayCalendar): number {
-  const origin = '2000-01-03';
-  let date = origin;
-  for (let remaining = count; remaining > 0; remaining -= 1) {
-    const next = calendar.nextBusinessDay(date);
-    if (next === null) break;
-    date = next;
-  }
-  return diffDays(origin, date);
 }

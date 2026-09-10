@@ -10,7 +10,15 @@
  */
 
 import type { AnnualRange, BusinessCalendar, DateStr, Month, MonthDayStr } from '../types';
-import { addDays, dayOf, lastDayOfMonth, makeDate, monthOf, weekdayOf } from './dateUtil';
+import {
+  addDays,
+  dayOf,
+  isValidMonthDay,
+  lastDayOfMonth,
+  makeDate,
+  monthOf,
+  weekdayOf,
+} from './dateUtil';
 import type { HolidayLookup } from './holidays';
 
 /** 補正時に営業日を探す上限日数。これを超える場合は設定が破綻していると判断する。 */
@@ -83,13 +91,19 @@ export function createBusinessDayCalendar(
   const openDates = new Set(calendar.openDates);
   const closedDates = new Set(calendar.closedDates);
   const weekendDays = new Set<number>(calendar.weekendDays);
+  // 実在しない月日（13-01 など）を持つ休業期間は、ここで落とす。
+  // 保存済みの壊れたデータで画面が開かなくなるのを防ぐための最後の砦。
+  // 入力と検証でも弾いているので、通常ここへは来ない。
+  const closedRanges = calendar.closedRanges.filter(
+    (range) => isValidMonthDay(range.from) && isValidMonthDay(range.to),
+  );
   // 同じ日を繰り返し判定するため（月の営業日列挙・営業日加算）結果をメモ化する。
   const cache = new Map<DateStr, ClosedReason | null>();
 
   function computeClosedReason(date: DateStr): ClosedReason | null {
     if (openDates.has(date)) return null;
     if (closedDates.has(date)) return { kind: 'closedDate' };
-    for (const range of calendar.closedRanges) {
+    for (const range of closedRanges) {
       if (matchesAnnualRange(date, range)) return { kind: 'closedRange', label: range.label };
     }
     if (calendar.useNationalHolidays) {

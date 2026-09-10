@@ -53,6 +53,13 @@ export type CalendarExportOptionsInput = {
   hasUngrouped: boolean;
   /** 画面で絞り込み中のグループ。初期値にする。 */
   activeGroups: string[] | null;
+  /**
+   * 初期の期間。いま画面に出している期間を渡す。
+   *
+   * 10月を見ているのに 9月が初期値だと、「いま見ている予定を書き出す」つもりの
+   * 操作で違う月を渡してしまう。省略すると今月。
+   */
+  initialRange?: { from: DateStr; to: DateStr };
 };
 
 /** これを超えたら「多い」と伝える。取り込みは戻しにくいので、押す前に気づかせる。 */
@@ -145,7 +152,7 @@ export function renderCalendarExport(
   today: DateStr = todayInTokyo(),
   options: CalendarExportOptionsInput = { groups: [], hasUngrouped: true, activeGroups: null },
 ): HTMLElement {
-  const initial = monthRange(today, 0);
+  const initial = options.initialRange ?? monthRange(today, 0);
   // 日付は「未入力」を持てるようにする。欄を空にしたのに前の値で書き出せると、
   // 画面に出ていない期間を渡してしまう。
   const draft: {

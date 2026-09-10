@@ -176,3 +176,19 @@ export function todayInTokyo(now: Date = new Date()): DateStr {
   // en-CA は "YYYY-MM-DD" を返す。
   return formatter.format(now);
 }
+
+/**
+ * "MM-DD" が実在する月日か。うるう年を通すため 02-29 は許容する。
+ *
+ * 形だけを見て通すと、13-01 のような月日が保存され、以後の営業日計算が
+ * 例外で落ちる。再読込しても同じところで落ちるので、画面が開かなくなる。
+ */
+export function isValidMonthDay(value: string): boolean {
+  const parts = /^(\d{2})-(\d{2})$/.exec(value);
+  if (parts === null) return false;
+  const month = Number(parts[1]);
+  const day = Number(parts[2]);
+  if (month < 1 || month > 12 || day < 1) return false;
+  // 2024 はうるう年。02-29 を通すためにこの年で数える。
+  return day <= lastDayOfMonth(2024, month);
+}

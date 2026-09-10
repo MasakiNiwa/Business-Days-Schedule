@@ -11,7 +11,15 @@
  */
 
 import type { BusinessDayCalendar } from './businessDay';
-import type { DateRange, DateStr, Notice, NoticeRole, Occurrence, Rule } from '../types';
+import type {
+  DateRange,
+  DateStr,
+  Notice,
+  NoticeRole,
+  NoticeTiming,
+  Occurrence,
+  Rule,
+} from '../types';
 import { adjustToBusinessDays } from './adjust';
 import {
   addDays,
@@ -30,7 +38,6 @@ import {
   roleOf,
   noticeDate,
   noticeDateDetail,
-  noticeSpanDays,
   timingOf,
 } from './notice';
 import { expandRecurrence, skipsAdjustment } from './recurrence';
@@ -53,18 +60,61 @@ export function expandBoundsFor(
 ): DateRange {
   let { start, end } = range;
   for (const notice of rule.notices) {
-    const span = noticeSpanDays(timingOf(notice), calendar);
-    // 休業日にある本体と営業日補正の移動幅も含める。
-    if (span.before > 0) {
-      const bound = addDays(end, span.before + MAX_SHIFT_DAYS * 2);
-      if (bound > end) end = bound;
+    const bound = noticeBound(timingOf(notice), range, calendar);
+    // 前後予定ごとの必要量は**足し合わせない**。同じ「30営業日前」を20件
+    // 付けても必要な範囲は1件ぶんと変わらないのに、加算すると6年先まで
+    // 探索して1秒かかっていた（入力のたびにプレビューを計算するので響く）。
+    if (bound.start < start) start = bound.start;
+    if (bound.end > end) end = bound.end;
+  }
+  // 休業日にある本体と、営業日補正で動く幅を足す。広げたぶんにだけ付ければよい。
+  if (start < range.start) start = addDays(start, -MAX_SHIFT_DAYS * 2);
+  if (end > range.end) end = addDays(end, MAX_SHIFT_DAYS * 2);
+  return { start, end };
+}
+
+/**
+ * その前後予定を取りこぼさないために本体を探すべき範囲。
+ *
+ * 日数の見積もりではなく、**実際のカレンダーを歩いて**求める。
+ * 以前は 2000-01-03 を起点に暦日へ換算していたため、対象年だけ臨時休業が
+ * 多いカレンダーで足りなくなり、年間の展開には出る準備日が月単位の展開では
+ * 警告もなく消えていた。
+ */
+function noticeBound(
+  timing: NoticeTiming,
+  range: DateRange,
+  calendar: BusinessDayCalendar,
+): DateRange {
+  switch (timing.kind) {
+    case 'offset': {
+      const size = Math.abs(timing.offset);
+      if (size === 0) return range;
+      if (timing.unit === 'calendar') {
+        return timing.offset < 0
+          ? { start: range.start, end: addDays(range.end, size) }
+          : { start: addDays(range.start, -size), end: range.end };
+      }
+      // 「N営業日前」の前後予定は、本体が範囲の N営業日ぶん先にあっても範囲へ入る。
+      // 休業が続いて数えきれないときは、暦日で多めに見て取りこぼしを防ぐ。
+      if (timing.offset < 0) {
+        const end = calendar.addBusinessDays(range.end, size) ?? addDays(range.end, size * 7);
+        return { start: range.start, end };
+      }
+      const start = calendar.addBusinessDays(range.start, -size) ?? addDays(range.start, -size * 7);
+      return { start, end: range.end };
     }
-    if (span.after > 0) {
-      const bound = addDays(start, -(span.after + MAX_SHIFT_DAYS * 2));
-      if (bound < start) start = bound;
+    case 'weekday': {
+      // 週で決めるものは前後どちらへも動きうる。1週ぶん余分に見る。
+      const slack = Math.abs(timing.weeks) * 7 + 7;
+      return { start: addDays(range.start, -slack), end: addDays(range.end, slack) };
+    }
+    case 'monthlyBusinessDay': {
+      // 月で決めるものも同じ。ずらす月数より1か月ぶん広く見る。
+      const months = Math.abs(timing.months) + 1;
+      return { start: addMonths(range.start, -months), end: addMonths(range.end, months) };
     }
   }
-  return { start, end };
 }
 
 export type ScheduleContext = {
@@ -340,7 +390,17 @@ export function expandRules(
         ? withMargin(viewRange)
         : expandBoundsFor(rule, withMargin(viewRange), resolved.calendar);
     const result = expandRule(rule, expandRange, ctx);
-    warnings.push(...result.warnings);
+    // 警告も表示範囲に合わせて絞る。探索範囲は本体を取りこぼさないために
+    // 広げてあるので、そのまま返すと「3月を書き出したいのに前年11月の話」が
+    // 混ざる。前後予定の警告は、その本体が表示範囲にあるかで判断する。
+    for (const warning of result.warnings) {
+      if (warning.rawDate === null) {
+        warnings.push(warning);
+        continue;
+      }
+      if (warning.rawDate < viewRange.start || warning.rawDate > viewRange.end) continue;
+      warnings.push(warning);
+    }
     for (const occurrence of result.occurrences) {
       if (occurrence.date < viewRange.start || occurrence.date > viewRange.end) continue;
       occurrences.push(occurrence);

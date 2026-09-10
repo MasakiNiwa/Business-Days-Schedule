@@ -214,6 +214,37 @@ export function saveState(store: KeyValueStore, state: AppState): void {
   store.setItem(KEY_SCHEMA_VERSION, String(SCHEMA_VERSION));
 }
 
+/**
+ * 表示の好みだけを保存する。
+ *
+ * 一覧の日数や配色を変えただけで全部を書き戻すと、別のタブが持っている
+ * 古いルール一覧で上書きしてしまう。実際に、片方のタブで作ったルールが
+ * もう片方の表示切り替えで消えた。触っていないものは触らない。
+ */
+export function savePreferences(store: KeyValueStore, prefs: Preferences): void {
+  store.setItem(KEY_PREFS, JSON.stringify(prefs));
+  store.setItem(KEY_SCHEMA_VERSION, String(SCHEMA_VERSION));
+}
+
+/** ルールだけを保存する。カレンダーと表示の好みには触れない。 */
+export function saveRules(store: KeyValueStore, rules: readonly Rule[]): void {
+  store.setItem(KEY_RULES, JSON.stringify(rules));
+  store.setItem(KEY_SCHEMA_VERSION, String(SCHEMA_VERSION));
+}
+
+/** 営業日カレンダーだけを保存する。 */
+export function saveCalendars(store: KeyValueStore, calendars: readonly BusinessCalendar[]): void {
+  store.setItem(KEY_CALENDARS, JSON.stringify(calendars));
+  store.setItem(KEY_SCHEMA_VERSION, String(SCHEMA_VERSION));
+}
+
+/** 別のタブが書き換えたら知りたいキー。 */
+export const STORAGE_KEYS = {
+  rules: KEY_RULES,
+  calendars: KEY_CALENDARS,
+  prefs: KEY_PREFS,
+} as const;
+
 export function clearState(store: KeyValueStore): void {
   for (const key of [KEY_RULES, KEY_CALENDARS, KEY_PREFS, KEY_SCHEMA_VERSION]) {
     store.removeItem(key);

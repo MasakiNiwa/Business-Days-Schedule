@@ -5,7 +5,7 @@
  * 表示ロジックだが DOM に依存しないため core に置き、テストで固定する。
  */
 
-import type { Adjustment, Month, NoticeTiming, Recurrence, Rule } from '../types';
+import type { Adjustment, Month, NoticeTiming, Occurrence, Recurrence, Rule } from '../types';
 
 const WEEKDAY_NAMES = ['日', '月', '火', '水', '木', '金', '土'] as const;
 
@@ -197,4 +197,23 @@ export function describePeriod(period: Rule['period']): string {
   if (start !== null && end !== null) return `${start} 〜 ${end}`;
   if (start !== null) return `${start} 〜`;
   return `〜 ${end ?? ''}`;
+}
+
+/**
+ * 画面に出す予定の名前。
+ *
+ * 「給与振込: 着金確認」のように、本体の名前と前後予定の名前を並べる。
+ * カレンダー・一覧・日付詳細で同じものを出すため、ここ1か所で決める。
+ *
+ * 同じ判定を3か所へ写していたため、日付詳細だけがフォローを取りこぼし、
+ * 「給与振込」としか出なくなっていた。フォローを何件も付けると区別もできない。
+ */
+export function occurrenceTitle(occurrence: Occurrence, rule: Rule): string {
+  if (occurrence.kind === 'main') return rule.title;
+  return `${rule.title}: ${occurrence.noticeLabel ?? noticeFallback(occurrence)}`;
+}
+
+/** 名前を持たない前後予定の呼び名。 */
+export function noticeFallback(occurrence: Occurrence): string {
+  return occurrence.kind === 'follow' ? 'フォロー' : '準備';
 }

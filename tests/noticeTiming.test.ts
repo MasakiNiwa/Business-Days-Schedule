@@ -12,14 +12,13 @@ import {
   DEFAULT_TIMING,
   declaredRoleOf,
   noticeDate,
-  noticeSpanDays,
   normalizeNotices,
   roleOf,
   timingOf,
   weekStartOf,
 } from '../src/core/notice';
 import { describeTiming } from '../src/core/describe';
-import { expandRules } from '../src/core/schedule';
+import { expandBoundsFor, expandRules } from '../src/core/schedule';
 import { validateRule } from '../src/core/validate';
 import { companyCalendar, makeCalendar, makeRule, scheduleContext } from './helpers';
 import type { Notice, NoticeTiming } from '../src/types';
@@ -148,17 +147,45 @@ describe('古い形式の読み替え', () => {
   });
 });
 
-describe('noticeSpanDays', () => {
+describe('探索範囲（expandBoundsFor）', () => {
+  const range = { start: '2026-09-01', end: '2026-09-30' };
+  const withNotice = (timing: NoticeTiming): ReturnType<typeof expandBoundsFor> =>
+    expandBoundsFor(
+      makeRule({ id: 'b', notices: [{ id: 'n0', label: 'x', timing }] }),
+      range,
+      companyCalendar,
+    );
+
   it('週で決めるものは前後どちらへも広げる', () => {
-    const span = noticeSpanDays({ kind: 'weekday', weeks: 1, weekday: 3, onClosed: 'next' }, companyCalendar);
-    expect(span.before).toBeGreaterThan(0);
-    expect(span.after).toBeGreaterThan(0);
+    const bounds = withNotice({ kind: 'weekday', weeks: 1, weekday: 3, onClosed: 'next' });
+    expect(bounds.start < range.start).toBe(true);
+    expect(bounds.end > range.end).toBe(true);
   });
 
   it('月で決めるものは月ぶんの幅を持つ', () => {
-    const span = noticeSpanDays({ kind: 'monthlyBusinessDay', months: 1, nth: 5 }, companyCalendar);
-    expect(span.before).toBeGreaterThanOrEqual(62);
-    expect(span.after).toBeGreaterThanOrEqual(62);
+    const bounds = withNotice({ kind: 'monthlyBusinessDay', months: 1, nth: 5 });
+    expect(bounds.start <= '2026-07-01').toBe(true);
+    expect(bounds.end >= '2026-11-30').toBe(true);
+  });
+
+  it('同じ前後予定を増やしても範囲は広がらない', () => {
+    // 足し合わせていたため、同じ「30営業日前」を20件付けると6年先まで探索して
+    // 1秒かかっていた。必要な範囲は1件ぶんと変わらない。
+    const timing = { kind: 'offset', offset: -30, unit: 'business' } as const;
+    const one = expandBoundsFor(
+      makeRule({ id: 'b', notices: [{ id: 'n0', label: 'x', timing }] }),
+      range,
+      companyCalendar,
+    );
+    const many = expandBoundsFor(
+      makeRule({
+        id: 'b',
+        notices: Array.from({ length: 20 }, (_, i) => ({ id: `n${i}`, label: 'x', timing })),
+      }),
+      range,
+      companyCalendar,
+    );
+    expect(many).toEqual(one);
   });
 });
 

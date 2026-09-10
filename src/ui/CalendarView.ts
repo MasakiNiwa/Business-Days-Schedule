@@ -7,7 +7,7 @@
 
 import type { DayCell, MonthGrid } from '../core/monthGrid';
 import { addDays, weekdayOf } from '../core/dateUtil';
-import { describeRule, weekdayName } from '../core/describe';
+import { describeRule, noticeFallback, occurrenceTitle, weekdayName } from '../core/describe';
 import type { DateStr, Occurrence, Rule } from '../types';
 import { h } from './dom';
 
@@ -40,13 +40,15 @@ function cellClassName(cell: DayCell, isSelected: boolean): string {
 
 const dayOfDate = (date: string): string => String(Number(date.slice(8, 10)));
 
-/** 予定チップに付ける補足説明（ツールチップ・スクリーンリーダー向け）。 */
-export function occurrenceTitle(occurrence: Occurrence, rule: Rule): string {
+/**
+ * 予定チップに付ける補足説明（ツールチップ・スクリーンリーダー向け）。
+ * 画面に出る短い名前は `occurrenceTitle`（core/describe.ts）が決める。
+ */
+export function occurrenceTooltip(occurrence: Occurrence, rule: Rule): string {
   const lines = [rule.title, describeRule(rule)];
   if (occurrence.kind !== 'main') {
-    const fallback = occurrence.kind === 'follow' ? 'フォロー' : '準備日';
     const relation = occurrence.kind === 'follow' ? 'の予定の後' : 'の予定に対して';
-    lines.push(`${occurrence.noticeLabel ?? fallback}（${occurrence.rawDate} ${relation}）`);
+    lines.push(`${occurrence.noticeLabel ?? noticeFallback(occurrence)}（${occurrence.rawDate} ${relation}）`);
   } else if (occurrence.shifted) {
     const direction = occurrence.shiftDirection === 'prev' ? '前営業日へ' : '翌営業日へ';
     lines.push(`本来は ${occurrence.rawDate}（休業日）。${direction}。`);
@@ -58,7 +60,7 @@ export function occurrenceTitle(occurrence: Occurrence, rule: Rule): string {
 function renderOccurrence(occurrence: Occurrence, rule: Rule): HTMLElement {
   const isRelated = occurrence.kind !== 'main';
   const label = isRelated
-    ? `${rule.title}: ${occurrence.noticeLabel ?? (occurrence.kind === 'follow' ? 'フォロー' : '準備')}`
+    ? occurrenceTitle(occurrence, rule)
     : rule.title;
 
   // 補正済みは「←10」「→10」と出す。向きと、元がいつだったかの両方が2〜3文字で分かる。
@@ -80,7 +82,7 @@ function renderOccurrence(occurrence: Occurrence, rule: Rule): HTMLElement {
     'li',
     {
       class: `chip color-${rule.color}${isRelated ? ' is-notice' : ''}${occurrence.kind === 'follow' ? ' is-follow' : ''}`,
-      title: occurrenceTitle(occurrence, rule),
+      title: occurrenceTooltip(occurrence, rule),
     },
     mark,
     h('span', { class: 'chip-label' }, label),

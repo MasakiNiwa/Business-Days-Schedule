@@ -8,7 +8,7 @@
  */
 
 import type { BusinessCalendar, Recurrence, Rule } from '../types';
-import { isValidDateStr } from './dateUtil';
+import { isValidDateStr, isValidMonthDay } from './dateUtil';
 
 /** 実務でこれを超える設定は誤入力とみなす上限。無限ループや巨大ループを防ぐ。 */
 export const LIMITS = {
@@ -443,10 +443,12 @@ export function validateCalendar(calendar: BusinessCalendar): ValidationIssue[] 
       issues.push({ path: 'closedRanges', message: '休業期間の形式が不正です', severity: 'error' });
       continue;
     }
-    if (!/^\d{2}-\d{2}$/.test(range.from) || !/^\d{2}-\d{2}$/.test(range.to)) {
+    // 形だけでなく実在する月日かを確かめる。13-01 のようなものを通すと、
+    // 以後の営業日計算が例外で落ち、再読込しても同じところで落ちる。
+    if (!isValidMonthDay(range.from) || !isValidMonthDay(range.to)) {
       issues.push({
         path: 'closedRanges',
-        message: `休業期間は MM-DD 形式で指定してください: ${range.from}〜${range.to}`,
+        message: `休業期間は実在する MM-DD で指定してください: ${range.from}〜${range.to}`,
         severity: 'error',
       });
     }
