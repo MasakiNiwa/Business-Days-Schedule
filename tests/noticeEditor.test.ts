@@ -12,9 +12,17 @@ import { describe, expect, it, vi } from 'vitest';
 import { RuleEditor } from '../src/ui/RuleEditor';
 import type { RuleEditorHandlers } from '../src/ui/RuleEditor';
 import type { Rule } from '../src/types';
-import { companyCalendarDef, bankCalendarDef, makeRule, scheduleContext } from './helpers';
+import { createBusinessDayCalendar } from '../src/core/businessDay';
+import type { ScheduleContext } from '../src/core/schedule';
+import type { BusinessCalendar } from '../src/types';
+import { bankCalendarDef, companyCalendarDef, holidays, makeRule, scheduleContext } from './helpers';
 
 const calendars = [companyCalendarDef, bankCalendarDef];
+
+function editorOf(rule: Rule): RuleEditor {
+  const handlers: RuleEditorHandlers = { onSave: vi.fn(), onCancel: vi.fn(), onDelete: vi.fn() };
+  return new RuleEditor(rule, calendars, scheduleContext, handlers, false, '2026-09-04', []);
+}
 
 function open(rule: Rule): { form: HTMLFormElement; handlers: RuleEditorHandlers } {
   const handlers: RuleEditorHandlers = { onSave: vi.fn(), onCancel: vi.fn(), onDelete: vi.fn() };
@@ -618,5 +626,134 @@ describe('年をまたぐ直近1組', () => {
     const chain = open(rule).form.querySelector('.next-dates-chain')?.textContent ?? '';
     expect(chain).toContain('9/16（水）');
     expect(chain).not.toContain('2026/9/16');
+  });
+});
+
+describe('前後予定を1件消したとき', () => {
+  /**
+   * 編集状態（TimingState）は id で引く。順番で引くと、前の予定を消した
+   * 拍子に残った予定が消したものの設定を拾う。複製直後は id を外していたため、
+   * 「3営業日前」と「10営業日前」を持つルールを複製して前者を消すと、
+   * 残した 10営業日前が 3営業日前に化けていた。
+   */
+  const twoNotices = (withIds: boolean): Rule =>
+    makeRule({
+      id: 'r',
+      title: '給与振込',
+      recurrence: { type: 'monthlyByDay', interval: 1, days: [25], overflow: 'clamp' },
+      adjust: { mode: 'prev', keepInMonth: false },
+      notices: [
+        {
+          ...(withIds ? { id: 'n0' } : {}),
+          label: '準備A',
+          timing: { kind: 'offset', offset: -3, unit: 'business' },
+        },
+        {
+          ...(withIds ? { id: 'n1' } : {}),
+          label: '準備B',
+          timing: { kind: 'offset', offset: -10, unit: 'business' },
+        },
+      ],
+    });
+
+  const removeFirst = (form: HTMLFormElement): void => {
+    const removes = form.querySelectorAll<HTMLButtonElement>('.notice-remove');
+    expect(removes).toHaveLength(2);
+    removes[0]?.click();
+  };
+
+  it('id を持たないルール（複製直後）でも、残した予定の日数が変わらない', () => {
+    const { form, handlers } = open(twoNotices(false));
+    removeFirst(form);
+    const saved = save(form, handlers);
+    expect(saved?.notices).toHaveLength(1);
+    expect(saved?.notices[0]?.label).toBe('準備B');
+    expect(saved?.notices[0]?.timing).toEqual({ kind: 'offset', offset: -10, unit: 'business' });
+  });
+
+  it('id を持つルールでも同じ', () => {
+    const { form, handlers } = open(twoNotices(true));
+    removeFirst(form);
+    const saved = save(form, handlers);
+    expect(saved?.notices[0]?.label).toBe('準備B');
+    expect(saved?.notices[0]?.timing).toEqual({ kind: 'offset', offset: -10, unit: 'business' });
+  });
+
+  it('画面に出ている日数も、残したほうの値になる', () => {
+    const { form } = open(twoNotices(false));
+    removeFirst(form);
+    expect(at(form, '1 件目: 本体から何日か').value).toBe('10');
+  });
+});
+
+describe('別のところで営業日が変わったとき', () => {
+  /**
+   * 編集画面は開いたときのカレンダーを握ったままだった。別のタブで
+   * 9月25日を休業日にしても、プレビューは 9月25日のまま。保存すると
+   * 実際には前営業日の 9月24日になるので、画面と結果が食い違う。
+   */
+  const salary = (): Rule =>
+    makeRule({
+      id: 'salary',
+      title: '給与振込',
+      calendarId: companyCalendarDef.id,
+      recurrence: { type: 'monthlyByDay', interval: 1, days: [25], overflow: 'clamp' },
+      adjust: { mode: 'prev', keepInMonth: false },
+    });
+
+  /** 2026-09-25 を臨時休業日にしたカレンダーと、それを使う計算条件。 */
+  function withClosed25(): { defs: BusinessCalendar[]; ctx: ScheduleContext } {
+    const changed: BusinessCalendar = {
+      ...companyCalendarDef,
+      closedDates: [...companyCalendarDef.closedDates, '2026-09-25'],
+    };
+    const calendar = createBusinessDayCalendar(changed, holidays);
+    return {
+      defs: [changed, bankCalendarDef],
+      ctx: {
+        calendars: new Map([
+          [changed.id, calendar],
+          [bankCalendarDef.id, createBusinessDayCalendar(bankCalendarDef, holidays)],
+        ]),
+        fallbackCalendarId: changed.id,
+      },
+    };
+  }
+
+  it('取り込む前は、開いたときの営業日で出る', () => {
+    const editor = editorOf(salary());
+    expect(editor.element.querySelector('.next-dates-chain')?.textContent).toContain('9/25');
+  });
+
+  it('取り込むとプレビューが追従する', () => {
+    const editor = editorOf(salary());
+    const { defs, ctx } = withClosed25();
+    editor.useCalendars(defs, ctx);
+    const chain = editor.element.querySelector('.next-dates-chain')?.textContent ?? '';
+    expect(chain).toContain('9/24');
+    expect(chain).not.toContain('9/25');
+  });
+
+  it('入力途中の内容は消さない', () => {
+    const editor = editorOf(salary());
+    const title = editor.element.querySelector<HTMLInputElement>('.input');
+    title!.value = '給与振込（書きかけ）';
+    title!.dispatchEvent(new Event('input'));
+
+    const { defs, ctx } = withClosed25();
+    editor.useCalendars(defs, ctx);
+    expect(title!.value).toBe('給与振込（書きかけ）');
+  });
+
+  it('カレンダーの名前が変わったら選択欄も追従する', () => {
+    const editor = editorOf(salary());
+    const renamed: BusinessCalendar = { ...companyCalendarDef, name: '本社カレンダー' };
+    editor.useCalendars([renamed, bankCalendarDef], scheduleContext);
+    const options = [...editor.element.querySelectorAll('option')].map((o) => o.textContent);
+    expect(options).toContain('本社カレンダー');
+    // 選んでいたものは変わらない。
+    expect(editor.element.querySelector<HTMLSelectElement>('.select')?.value).toBe(
+      companyCalendarDef.id,
+    );
   });
 });

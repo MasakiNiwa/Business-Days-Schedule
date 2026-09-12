@@ -89,3 +89,30 @@ describe('renderSamplePicker', () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 });
+
+describe('取得に失敗したとき', () => {
+  /**
+   * エラーを抱えたままにすると、通信が戻っても取得処理へ入れない。
+   * ページを読み込み直すしか手がなくなるので、その場から取り直せるようにする。
+   */
+  it('再試行を出す', () => {
+    const onRetry = vi.fn();
+    const element = renderSamplePicker(
+      [],
+      { onAdd: vi.fn(), onRestore: vi.fn(), onClose: vi.fn(), onRetry },
+      '取得できません',
+    );
+    clickText(element, '再試行');
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+
+  it('再試行を渡していなければ出さない', () => {
+    const element = renderSamplePicker(
+      [],
+      { onAdd: vi.fn(), onRestore: vi.fn(), onClose: vi.fn() },
+      '取得できません',
+    );
+    const labels = [...element.querySelectorAll('button')].map((b) => b.textContent);
+    expect(labels).toEqual(['閉じる']);
+  });
+});

@@ -6,6 +6,7 @@
  */
 
 import { createBusinessDayCalendar, COMPANY_CALENDAR_ID } from './core/businessDay';
+import { detectSaveConflict, ruleFingerprint, upsertRule } from './core/conflict';
 import type { BusinessDayCalendar } from './core/businessDay';
 import {
   addDays,
@@ -85,7 +86,16 @@ const SAMPLES_DIR = `${import.meta.env.BASE_URL}data/samples/`;
 type Mode =
   | { kind: 'calendar' }
   | { kind: 'rules' }
-  | { kind: 'edit'; rule: Rule; isNew: boolean }
+  | {
+      kind: 'edit';
+      rule: Rule;
+      isNew: boolean;
+      /**
+       * 編集を始めた時点の、保存されていた姿。別のタブがその間に同じルールを
+       * 書き換えていないかを、保存の直前に見比べるために持つ。新規は null。
+       */
+      baseline: string | null;
+    }
   | { kind: 'settings' }
   | { kind: 'help' }
   | { kind: 'jump' }
@@ -128,7 +138,12 @@ export class App {
   private samplePacks: SamplePack[] | null = null;
   private sampleError: string | null = null;
 
-  private readonly today: DateStr;
+  /**
+   * 今日（日本時間）。起動時に1度だけ求めると、タブを開いたまま日付をまたいだ
+   * ときに古いままになる。〈今日〉を押しても前の日の月へ戻り、今日の強調も
+   * 動かなかった。画面へ戻ったときと、〈今日〉を押したときに取り直す。
+   */
+  private today: DateStr;
   private readonly store: KeyValueStore;
   private readonly storeAvailable: boolean;
 
@@ -141,10 +156,21 @@ export class App {
     this.storeAvailable = resolved.available;
     const loaded = loadState(this.store);
     this.state = { rules: loaded.rules, calendars: loaded.calendars, prefs: loaded.prefs };
-    if (loaded.droppedRules > 0 || loaded.droppedCalendars > 0) {
-      // 壊れたデータを黙って捨てると、無くなったことに気づけない。
+    // 壊れたデータを黙って捨てると、無くなったことに気づけない。
+    // 捨てたものと、外して残したものは分けて伝える。「読み込めなかった」と
+    // 一括で言うと、設定が生きているのに作り直させてしまう。
+    const dropped = loaded.droppedRules + loaded.droppedCalendars;
+    if (dropped > 0) {
       this.flash = {
-        text: `保存データのうち ${loaded.droppedRules + loaded.droppedCalendars} 件が壊れていたため読み込みませんでした。`,
+        text:
+          loaded.quarantinedRanges > 0
+            ? `保存データのうち ${dropped} 件が壊れていたため読み込みませんでした。また、実在しない月日の休業期間 ${loaded.quarantinedRanges} 件を外して営業日カレンダーを読み込みました。設定を確認してください。`
+            : `保存データのうち ${dropped} 件が壊れていたため読み込みませんでした。`,
+        tone: 'error',
+      };
+    } else if (loaded.quarantinedRanges > 0) {
+      this.flash = {
+        text: `実在しない月日の休業期間 ${loaded.quarantinedRanges} 件を外して営業日カレンダーを読み込みました。設定を確認してください。`,
         tone: 'error',
       };
     }
@@ -214,8 +240,16 @@ export class App {
     const loaded = loadState(this.store);
     this.state = { rules: loaded.rules, calendars: loaded.calendars, prefs: loaded.prefs };
     applyTheme(this.state.prefs.theme);
-    // 編集中なら、その画面は残す。書きかけを消さないため。
-    if (this.mode.kind === 'edit') return;
+    // 編集中なら、その画面は残す。書きかけを消さないため。ただし営業日が
+    // 変わったなら計算の前提は入れ替える。そうしないと、プレビューに出ている
+    // 日付と保存後に出る日付が食い違う。
+    if (this.mode.kind === 'edit') {
+      this.openEditor?.useCalendars(
+        this.state.calendars,
+        this.scheduleContext(this.businessCalendars()),
+      );
+      return;
+    }
     this.render();
   }
 
@@ -286,8 +320,35 @@ export class App {
   }
 
   private goToToday(): void {
+    this.refreshToday();
     this.view = { year: yearOf(this.today), month: monthOf(this.today) };
+    // 一覧で起点を動かしていたら、それも今日へ戻す。〈今日〉の意味を揃える。
+    this.listStart = null;
     this.render();
+  }
+
+  /** 今日を取り直す。変わっていたら true。 */
+  private refreshToday(): boolean {
+    const now = todayInTokyo();
+    if (now === this.today) return false;
+    this.today = now;
+    return true;
+  }
+
+  /**
+   * 画面へ戻ったときに日付を見直す。
+   *
+   * 日常的にタブを開いたまま使うので、日付をまたぐことは珍しくない。
+   * 編集中なら描き直さない（書きかけを消さないため）。日付は取り直してある
+   * ので、閉じたあとの表示には反映される。
+   */
+  watchDayChange(target: Pick<Document, 'addEventListener' | 'visibilityState'> = globalThis.document): void {
+    target.addEventListener('visibilitychange', () => {
+      if (target.visibilityState !== 'visible') return;
+      if (!this.refreshToday()) return;
+      if (this.mode.kind === 'edit') return;
+      this.render();
+    });
   }
 
   private cycleTheme(): void {
@@ -334,6 +395,7 @@ export class App {
       kind: 'edit',
       rule: createRule(group === undefined ? { calendarId } : { calendarId, group }),
       isNew: true,
+      baseline: null,
     };
     this.render();
   }
@@ -341,7 +403,7 @@ export class App {
   private startEdit(ruleId: string): void {
     const rule = this.state.rules.find((item) => item.id === ruleId);
     if (rule === undefined) return;
-    this.mode = { kind: 'edit', rule, isNew: false };
+    this.mode = { kind: 'edit', rule, isNew: false, baseline: ruleFingerprint(rule) };
     this.render();
   }
 
@@ -369,23 +431,50 @@ export class App {
         createdAt: fresh.createdAt,
         updatedAt: fresh.updatedAt,
         title: `${source.title}のコピー`,
-        // 前後の予定の識別子も作り直す。同じ id のままだと、書き出したときに
-        // 元の予定を上書きしてしまう。
-        notices: copy.notices.map(({ id: _id, ...notice }) => notice),
+        // 前後の予定の id はそのまま写す。書き出しの UID は ruleId から組み立てる
+        // ので、複製した時点で元とは別の予定になる。ここで id を外すと、編集画面が
+        // 順番で入力状態を引くことになり、1件消したときに残った予定が消したものの
+        // 設定を拾っていた（10営業日前が3営業日前に変わる）。
       },
       isNew: true,
+      baseline: null,
     };
     this.render();
   }
 
   private saveRule(rule: Rule): void {
-    const index = this.state.rules.findIndex((item) => item.id === rule.id);
-    if (index === -1) this.state.rules = [...this.state.rules, rule];
-    else this.state.rules = this.state.rules.map((item) => (item.id === rule.id ? rule : item));
+    if (!this.confirmOverwrite(rule)) return;
+
+    // 保存の直前に読み直す。別のタブが増やしたルールを、こちらが開いたときの
+    // 古い一覧で書き戻して消してしまわないため。storage イベントは取りこぼす
+    // ことがあるので、手元の状態だけを頼りにしない。
+    this.state.rules = upsertRule(loadState(this.store).rules, rule);
     this.persistRules();
     this.mode = { kind: 'calendar' };
     this.notify(`「${rule.title}」を保存しました。`);
     this.render();
+  }
+
+  /**
+   * 別のタブが同じルールを書き換えていないか、上書きする前に確かめる。
+   *
+   * 2つのタブで同じルールを開くと、後から保存したほうが先の変更を丸ごと
+   * 消してしまう。画面には自分が開いたときの内容しか出ていないので、
+   * 消したことにも気づけない。どちらを残すかは持ち主にしか決められないため、
+   * 黙って上書きせずに尋ねる。
+   */
+  private confirmOverwrite(rule: Rule): boolean {
+    const baseline = this.mode.kind === 'edit' ? this.mode.baseline : null;
+    const conflict = detectSaveConflict(loadState(this.store).rules, rule.id, baseline);
+    if (conflict === 'none') return true;
+    if (conflict === 'deleted') {
+      return globalThis.confirm(
+        `「${rule.title}」は別のタブで削除されています。このまま保存すると、同じ内容でもう一度作られます。よろしいですか？`,
+      );
+    }
+    return globalThis.confirm(
+      `「${rule.title}」は、編集を始めたあとに別のタブで変更されています。\nこのまま保存すると、そちらの変更が失われます。\n\nOK: この画面の内容で上書きする\nキャンセル: 保存せずに編集を続ける（別のタブの内容を確かめられます）`,
+    );
   }
 
   private deleteRule(ruleId: string): void {
@@ -410,7 +499,10 @@ export class App {
   /** サンプル一覧を取り込み、選択画面を開く。 */
   private async openSamples(): Promise<void> {
     this.mode = { kind: 'samples' };
-    if (this.samplePacks === null && this.sampleError === null) {
+    if (this.samplePacks === null) {
+      // 前回の失敗を持ち越さない。持ち越すと、通信が戻って開き直しても
+      // 取得そのものへ入れず、ページを読み込み直すしか手がなくなる。
+      this.sampleError = null;
       try {
         const response = await fetch(`${SAMPLES_DIR}index.json`);
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
@@ -864,6 +956,7 @@ export class App {
             return result.state.rules;
           },
           onAddSelected: (pack, ids) => void this.addSamplePack(pack, 'add', ids),
+          onRetry: () => void this.openSamples(),
           onClose: () => this.backToCalendar(),
         },
         this.sampleError,
@@ -1206,15 +1299,31 @@ export class App {
     return h('div', { class: 'view-toolbar' }, left, right, printed);
   }
 
+  /**
+   * いま画面に描く期間。
+   *
+   * カレンダーは前後の月がはみ出た枠ぶんまで、一覧は起点からの日数ぶん。
+   * 予定と警告はここから一緒に取る。別々に取ると、一覧で11月を見ているのに
+   * カレンダーが止まっている9月の警告が出る（11月の分は出ない）。
+   */
+  private shownRange(): { start: DateStr; end: DateStr } {
+    if (this.state.prefs.defaultView === 'list') {
+      const from = this.listFrom();
+      return { start: from, end: addDays(from, this.state.prefs.listDays - 1) };
+    }
+    return gridRangeOf(this.view.year, this.view.month);
+  }
+
   private buildOccurrences(): {
+    occurrences: ReturnType<typeof expandRules>['occurrences'];
     occurrencesByDate: Map<DateStr, ReturnType<typeof expandRules>['occurrences']>;
     warnings: ReturnType<typeof expandRules>['warnings'];
     hasNotice: boolean;
   } {
     const ctx = this.scheduleContext(this.businessCalendars());
-    const range = gridRangeOf(this.view.year, this.view.month);
-    const { occurrences, warnings } = expandRules(this.visibleRules(), range, ctx);
+    const { occurrences, warnings } = expandRules(this.visibleRules(), this.shownRange(), ctx);
     return {
+      occurrences,
       occurrencesByDate: groupByDate(occurrences),
       warnings,
       hasNotice: occurrences.some((occurrence) => occurrence.kind !== 'main'),
@@ -1331,19 +1440,14 @@ export class App {
     this.render();
   }
 
-  private buildListPane(): HTMLElement {
+  /** 予定はまとめて展開したものを受け取る。警告と対象を取り違えないため。 */
+  private buildListPane(occurrences: ReturnType<typeof expandRules>['occurrences']): HTMLElement {
     const days = this.state.prefs.listDays;
     const from = this.listFrom();
     const calendars = this.businessCalendars();
     const ctx = this.scheduleContext(calendars);
     const businessCalendar = calendars.get(ctx.fallbackCalendarId);
     if (businessCalendar === undefined) throw new Error('営業日カレンダーが1件もありません');
-
-    const { occurrences } = expandRules(
-      this.visibleRules(),
-      { start: from, end: addDays(from, days - 1) },
-      ctx,
-    );
 
     return renderList(
       occurrences,
@@ -1362,7 +1466,7 @@ export class App {
   }
 
   render(): void {
-    const { occurrencesByDate, warnings } = this.buildOccurrences();
+    const { occurrences, occurrencesByDate, warnings } = this.buildOccurrences();
 
     const notices: string[] = [];
     if (!this.storeAvailable) {
@@ -1412,7 +1516,7 @@ export class App {
       ...(empty ? [this.renderEmptyPrompt()] : []),
       this.renderViewToolbar(),
       this.state.prefs.defaultView === 'list'
-        ? this.buildListPane()
+        ? this.buildListPane(occurrences)
         : this.buildCalendarPane(occurrencesByDate),
     );
 
@@ -1448,4 +1552,6 @@ export function startApp(root: HTMLElement): void {
   // 別のタブで保存されたら取り込む。見えないまま操作を続けると、
   // 古い方の内容で上書きしてしまう。
   app.watchOtherTabs();
+  // 開いたまま日付をまたいだら、今日を取り直す。
+  app.watchDayChange();
 }

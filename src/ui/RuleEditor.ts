@@ -6,7 +6,7 @@
  */
 
 import { describeRule, describeTiming } from '../core/describe';
-import { createNotice, legacyNoticeId, roleOf, timingOf } from '../core/notice';
+import { createNotice, normalizeRule, roleOf, timingOf } from '../core/notice';
 import { createRule } from '../core/storage';
 import { todayInTokyo, weekdayOf } from '../core/dateUtil';
 import { previewSeries } from '../core/schedule';
@@ -296,19 +296,33 @@ export class RuleEditor {
   private showPresets = true;
   private adjustControls: HTMLElement | null = null;
   private adjustInapplicable: HTMLElement | null = null;
+  /**
+   * 補正の下書き。「第N営業日」のように補正が効かない種類へ切り替えると、
+   * モデルの値は none に均す（効かない設定を保存すると、画面と計算が食い違う）。
+   * ただし種類を戻したときに元へ復せるよう、均す前の値をここへ控える。
+   * 控えていないと、種類を往復しただけで「前営業日へ」が「補正しない」に変わる。
+   */
+  private adjustDraft: Rule['adjust'];
   private readonly today: DateStr;
+
+  /** 営業日カレンダーの選択欄。別のタブで名前や顔ぶれが変わったら作り直す。 */
+  private calendarSelect: HTMLSelectElement | null = null;
 
   constructor(
     initial: Rule,
-    private readonly calendars: readonly BusinessCalendar[],
-    private readonly ctx: ScheduleContext,
+    private calendars: readonly BusinessCalendar[],
+    private ctx: ScheduleContext,
     private readonly handlers: RuleEditorHandlers,
     private readonly isNew: boolean,
     today: DateStr = todayInTokyo(),
     /** すでに使われているグループ名。入力候補として出す。 */
     private readonly knownGroups: readonly string[] = [],
   ) {
-    this.draft = structuredClone(initial);
+    // 前後の予定に id が無いものが混ざりうる（複製・取り込み・古い保存データ）。
+    // 編集画面は id で入力状態を引くので、ここで必ず付けておく。順番で引くと、
+    // 1件消したときに残った予定が消したものの設定を拾う。
+    this.draft = normalizeRule(structuredClone(initial));
+    this.adjustDraft = { ...this.draft.adjust };
     this.drafts = defaultDrafts(this.draft.recurrence);
     this.today = today;
     this.element = this.build();
@@ -317,6 +331,46 @@ export class RuleEditor {
     // 読み込みの整え（前後予定の id 付けなど）が済んだあとを「触っていない状態」
     // とする。ここより前に取ると、開いただけで変更ありと見なしてしまう。
     this.baseline = this.snapshot();
+  }
+
+  private buildCalendarSelect(): HTMLSelectElement {
+    return select(
+      this.calendars.map((calendar) => ({ value: calendar.id, label: calendar.name })),
+      this.draft.calendarId,
+      (value) => {
+        this.draft.calendarId = value;
+        this.refresh();
+      },
+    );
+  }
+
+  /**
+   * 別のところで営業日カレンダーが変わったことを取り込む。
+   *
+   * 編集画面は開いたときのカレンダーを握ったままだったので、別のタブで
+   * 9月25日を休業日にしても、プレビューは 9月25日のまま出ていた。保存すると
+   * 実際には前営業日の 9月24日になる。入力中の内容は触らず、計算の前提だけを
+   * 入れ替える（書きかけを消さないため）。
+   */
+  useCalendars(calendars: readonly BusinessCalendar[], ctx: ScheduleContext): void {
+    this.calendars = calendars;
+    this.ctx = ctx;
+    // 顔ぶれや名前が変わっていれば選択欄も作り直す。選んでいたものが消えて
+    // いたら、選択は変えずに残す（保存時の検証で気づける）。
+    const fresh = this.buildCalendarSelect();
+    const current = this.calendarSelect;
+    if (current !== null) {
+      fresh.className = current.className;
+      for (const name of current.getAttributeNames()) {
+        if (name === 'class') continue;
+        fresh.setAttribute(name, current.getAttribute(name) ?? '');
+      }
+      current.replaceWith(fresh);
+      this.calendarSelect = fresh;
+    }
+    // 決算月の案内は反復条件の中にあるので、そちらも作り直す。
+    this.renderRecurrence();
+    this.refresh();
   }
 
   /**
@@ -455,14 +509,7 @@ export class RuleEditor {
       field('タイトル', title),
       field(
         '営業日カレンダー',
-        select(
-          this.calendars.map((calendar) => ({ value: calendar.id, label: calendar.name })),
-          this.draft.calendarId,
-          (value) => {
-            this.draft.calendarId = value;
-            this.refresh();
-          },
-        ),
+        (this.calendarSelect = this.buildCalendarSelect()),
         '社内の締めは自社、振込は銀行、のように使い分けます。',
       ),
       field(
@@ -926,6 +973,8 @@ export class RuleEditor {
       this.draft.adjust.mode,
       (value) => {
         this.draft.adjust.mode = value;
+        // 自分で選んだ値は下書きにも残す。種類を往復しても、これが戻る。
+        this.adjustDraft = { ...this.draft.adjust };
         keepInMonth.hidden = value === 'none';
         this.refresh();
       },
@@ -972,14 +1021,26 @@ export class RuleEditor {
     if (this.adjustControls !== null) this.adjustControls.hidden = !applies;
     if (this.adjustInapplicable !== null) this.adjustInapplicable.hidden = applies;
     if (!applies && this.draft.adjust.mode !== 'none') {
-      this.draft.adjust = { mode: 'none', keepInMonth: false };
-      const modeSelect = this.adjustControls?.querySelector('select');
-      if (modeSelect) modeSelect.value = 'none';
-      const keepInMonth = this.adjustControls?.querySelector<HTMLElement>('.checkbox');
-      if (keepInMonth) keepInMonth.hidden = true;
-      const checkbox = keepInMonth?.querySelector('input');
-      if (checkbox) checkbox.checked = false;
+      // 効かない種類へ移った。値は none に均すが、戻せるよう控えておく。
+      this.adjustDraft = { ...this.draft.adjust };
+      this.applyAdjust({ mode: 'none', keepInMonth: false });
+      return;
     }
+    if (applies && this.draft.adjust.mode === 'none' && this.adjustDraft.mode !== 'none') {
+      // 効く種類へ戻った。均す前の設定を復す。
+      this.applyAdjust({ ...this.adjustDraft });
+    }
+  }
+
+  /** 補正の値を、モデルと画面の両方へ入れる。 */
+  private applyAdjust(adjust: Rule['adjust']): void {
+    this.draft.adjust = adjust;
+    const modeSelect = this.adjustControls?.querySelector('select');
+    if (modeSelect) modeSelect.value = adjust.mode;
+    const keepInMonth = this.adjustControls?.querySelector<HTMLElement>('.checkbox');
+    if (keepInMonth) keepInMonth.hidden = adjust.mode === 'none';
+    const checkbox = keepInMonth?.querySelector('input');
+    if (checkbox) checkbox.checked = adjust.keepInMonth;
   }
 
   /**
@@ -1140,7 +1201,9 @@ export class RuleEditor {
    * 決め方を切り替えて戻したときに「覚えていない」ことになり、既定値へ落ちる。
    */
   private timingStateFor(notice: Notice): TimingState {
-    const key = notice.id ?? legacyNoticeId(this.draft.notices.indexOf(notice));
+    // 順番ではなく id で引く。順番で引くと、前の予定を1件消したときに
+    // 残った予定が消したものの編集状態を拾う（10営業日前が3営業日前になる）。
+    const key = notice.id ?? '';
     const existing = this.timingStates.get(key);
     if (existing !== undefined) return existing;
     const created = timingStateOf(timingOf(notice), roleOf(notice));

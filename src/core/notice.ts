@@ -13,7 +13,15 @@
  */
 
 import type { BusinessDayCalendar } from './businessDay';
-import { addDays, addMonths, monthOf, weekdayOf, yearOf } from './dateUtil';
+import {
+  addDays,
+  addMonths,
+  firstDateOfMonth,
+  lastDateOfMonth,
+  monthOf,
+  weekdayOf,
+  yearOf,
+} from './dateUtil';
 import type { DateStr, Notice, NoticeRole, NoticeTiming, Rule, Weekday } from '../types';
 
 /** 順番から作る既定の id。移行時に既存の UID と一致させるための形。 */
@@ -162,6 +170,45 @@ export function noticeDateDetail(
     return { date: moved, movedFrom: moved === null ? null : target };
   }
   return { date: plainNoticeDate(effectiveDate, timing, calendar), movedFrom: null };
+}
+
+/**
+ * その前後予定が出るはずの範囲。
+ *
+ * 日付を決められたならその日そのもの。決められなかったときは、設定が
+ * 指している週や月を返す。警告を「いま見ている期間の話か」で絞るために使う。
+ * 本体の日付だけで絞ると、1月31日の本体に付けた「翌月の第25営業日」の
+ * フォローが2月に無いことを、2月だけを見ているときに知らせられない。
+ */
+export function noticeWindow(
+  effectiveDate: DateStr,
+  timing: NoticeTiming,
+  calendar: BusinessDayCalendar,
+): { start: DateStr; end: DateStr } {
+  const resolved = noticeDateDetail(effectiveDate, timing, calendar).date;
+  if (resolved !== null) return { start: resolved, end: resolved };
+
+  switch (timing.kind) {
+    case 'offset': {
+      // 営業日を数えきれなかった場合。暦日で多めに見て、取りこぼさない側に倒す。
+      const span = timing.unit === 'calendar' ? timing.offset : timing.offset * 7;
+      const target = addDays(effectiveDate, span);
+      return target < effectiveDate
+        ? { start: target, end: effectiveDate }
+        : { start: effectiveDate, end: target };
+    }
+    case 'weekday': {
+      const start = addDays(weekStartOf(effectiveDate), timing.weeks * 7);
+      return { start, end: addDays(start, 6) };
+    }
+    case 'monthlyBusinessDay': {
+      const target = addMonths(effectiveDate, timing.months);
+      return {
+        start: firstDateOfMonth(yearOf(target), monthOf(target)),
+        end: lastDateOfMonth(yearOf(target), monthOf(target)),
+      };
+    }
+  }
 }
 
 function plainNoticeDate(

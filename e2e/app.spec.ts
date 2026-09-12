@@ -870,6 +870,54 @@ test.describe('ルールの複製', () => {
     await expect(page.getByLabel('タイトル')).toHaveValue('給与振込のコピー');
     await expect(page.locator('dialog').getByLabel('営業日カレンダー')).toHaveValue('bank');
   });
+
+  test('複製先で前後の予定を1件消しても、残したほうの設定が変わらない', async ({ page }) => {
+    // 前後の予定を順番で識別していたため、1件消すと残った予定が消したものの
+    // 設定を拾っていた（10営業日前が3営業日前に変わる）。
+    await page.goto('');
+    await openRulePanel(page);
+    await page.getByRole('button', { name: '＋ 新規ルール' }).click();
+    await page.getByRole('button', { name: '給与', exact: true }).click();
+
+    // 2件目の準備日を足し、日数を分けておく。
+    await openNotices(page);
+    await page.getByRole('button', { name: '＋ 準備日を追加（前）' }).click();
+    await page.getByRole('button', { name: '＋ 準備日を追加（前）' }).click();
+    await expect(page.locator('.notice-item')).toHaveCount(2);
+    await page.getByLabel('1 件目: 本体から何日か').fill('3');
+    await page.getByLabel('2 件目: 本体から何日か').fill('10');
+    await page.getByRole('button', { name: '保存' }).click();
+
+    await openRulePanel(page);
+    await page.locator('li.rule').first().getByRole('button', { name: '複製' }).click();
+
+    // 前後の予定が付いているので、この折りたたみは開いた状態で出る。
+    await expect(page.locator('.notice-item')).toHaveCount(2);
+
+    // 1件目を消す。残るのは「10営業日前」のはず。
+    await page.locator('.notice-remove').first().click();
+    await expect(page.locator('.notice-item')).toHaveCount(1);
+    await expect(page.getByLabel('1 件目: 本体から何日か')).toHaveValue('10');
+  });
+});
+
+test.describe('反復の種類を往復したとき', () => {
+  test('休業日補正の設定が消えない', async ({ page }) => {
+    // 「第N営業日」は補正が効かないので none に均すが、戻したら復す。
+    // 控えないと、往復しただけで「前営業日へ」が「補正しない」に変わる。
+    await page.goto('');
+    await openRulePanel(page);
+    await page.getByRole('button', { name: '＋ 新規ルール' }).click();
+    await page.getByRole('button', { name: '給与', exact: true }).click();
+
+    const mode = page.locator('.adjust-controls select');
+    await mode.selectOption('prev');
+
+    await page.getByRole('button', { name: '第N営業日' }).click();
+    await page.getByRole('button', { name: '毎月N日' }).click();
+
+    await expect(mode).toHaveValue('prev');
+  });
 });
 
 test.describe('やりたいことから探す', () => {

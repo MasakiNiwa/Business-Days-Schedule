@@ -20,6 +20,8 @@ export type SamplePickerHandlers = {
   onClose: () => void;
   onLoadRules?: (pack: SamplePack) => Promise<readonly Rule[]>;
   onAddSelected?: (pack: SamplePack, ids: string[]) => void;
+  /** 取得に失敗したときの取り直し。通信が戻ればここから先へ進める。 */
+  onRetry?: () => void;
 };
 
 export function renderSamplePicker(
@@ -46,9 +48,14 @@ export function renderSamplePicker(
 
   if (error !== null) {
     section.append(h('p', { class: 'issue issue-error' }, error));
-    section.append(
-      h('div', { class: 'editor-actions' }, button('閉じる', () => handlers.onClose(), 'button')),
-    );
+    // 通信が戻ったらここから取り直せるようにする。この場で直せないと、
+    // ページごと読み込み直すしか手がなくなる。
+    const actions = h('div', { class: 'editor-actions' });
+    if (handlers.onRetry !== undefined) {
+      actions.append(button('再試行', () => handlers.onRetry?.(), 'button button-primary'));
+    }
+    actions.append(button('閉じる', () => handlers.onClose(), 'button'));
+    section.append(actions);
     return section;
   }
 
