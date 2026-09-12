@@ -11,8 +11,11 @@ import {
   loadState,
   saveState,
   SCHEMA_VERSION,
+  STORAGE_KEYS,
 } from '../src/core/storage';
 import { GROUP_NAME_MAX, renameGroup } from '../src/core/group';
+import { createDefaultCalendars } from '../src/core/businessDay';
+import type { BusinessCalendar } from '../src/types';
 import type { Rule } from '../src/types';
 import { makeRule } from './helpers';
 
@@ -242,5 +245,74 @@ describe('グループ名の一括変更と保存の往復', () => {
     const loaded = roundTrip(rules);
     expect(loaded.rules).toHaveLength(3);
     expect(loaded.droppedRules).toBe(0);
+  });
+});
+
+describe('壊れた休業期間の隔離', () => {
+  /**
+   * 休業期間が1件不正なだけでカレンダーごと捨てると、週末の曜日も臨時営業日も
+   * 決算月も一緒に消える。そのカレンダーを参照するルールは代替カレンダーで
+   * 計算されるので、日付が静かにずれる。入力欄を塞いでも、以前に保存された
+   * データには効かない。
+   */
+  const [companyDef, bankDef] = createDefaultCalendars() as [BusinessCalendar, BusinessCalendar];
+
+  const withBrokenRange = (): BusinessCalendar => ({
+    ...companyDef,
+    fiscalYearEndMonth: 6,
+    closedRanges: [
+      ...companyDef.closedRanges,
+      { from: '13-01', to: '01-03', label: '存在しない月' },
+    ],
+  });
+
+  const load = (calendars: unknown[]) => {
+    const store = createMemoryStore();
+    store.setItem(STORAGE_KEYS.calendars, JSON.stringify(calendars));
+    return loadState(store);
+  };
+
+  it('不正な期間だけを外し、カレンダーは残す', () => {
+    const loaded = load([withBrokenRange(), bankDef]);
+    expect(loaded.calendars.map((calendar) => calendar.id)).toEqual(['company', 'bank']);
+    expect(loaded.droppedCalendars).toBe(0);
+    expect(loaded.quarantinedRanges).toBe(1);
+  });
+
+  it('決算月などの設定は残る', () => {
+    const company = load([withBrokenRange(), bankDef]).calendars.find((c) => c.id === 'company');
+    expect(company?.fiscalYearEndMonth).toBe(6);
+    // 正しい休業期間は落とさない。
+    expect(company?.closedRanges).toEqual(companyDef.closedRanges);
+  });
+
+  it('正しいデータなら何も外さない', () => {
+    const loaded = load([companyDef, bankDef]);
+    expect(loaded.quarantinedRanges).toBe(0);
+    expect(loaded.calendars).toHaveLength(2);
+  });
+
+  it('休業期間で直せない壊れ方は、これまでどおり捨てる', () => {
+    // id が無いカレンダーは、何を指すものか決まらない。
+    const { id: _id, ...noId } = companyDef;
+    const loaded = load([noId, bankDef]);
+    expect(loaded.calendars.map((calendar) => calendar.id)).toEqual(['bank']);
+    expect(loaded.droppedCalendars).toBe(1);
+  });
+
+  it('取り込みでも同じように外して残す', () => {
+    const file = {
+      schemaVersion: SCHEMA_VERSION,
+      exportedAt: '2026-09-12T00:00:00.000Z',
+      calendars: [withBrokenRange(), bankDef],
+      rules: [],
+      prefs: DEFAULT_PREFERENCES,
+    };
+    const result = importState(file, createDefaultState(), 'replace');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.calendars.map((calendar) => calendar.id)).toEqual(['company', 'bank']);
+    expect(result.skipped.calendars).toBe(0);
+    expect(result.state.calendars[0]?.fiscalYearEndMonth).toBe(6);
   });
 });

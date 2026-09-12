@@ -458,3 +458,38 @@ export function validateCalendar(calendar: BusinessCalendar): ValidationIssue[] 
 
 export const hasError = (issues: readonly ValidationIssue[]): boolean =>
   issues.some((issue) => issue.severity === 'error');
+
+/**
+ * 捨てる前に、取り除けば残りが生きる壊れ方を隔離する。
+ *
+ * 休業期間が1件でも不正だと、これまではカレンダーごと読み込み対象から外れて
+ * いた。週末の曜日も臨時営業日も決算月も一緒に消えるうえ、そのカレンダーを
+ * 参照するルールは代替カレンダーで計算されるので、日付が静かにずれる。
+ * 入力欄を塞いでも、以前に保存されたデータには効かない。
+ *
+ * 隔離するのは休業期間だけにする。ここは「1件外せば残りはそのまま使える」と
+ * 言い切れる形（毎年繰り返す期間の並び）だからで、id や週末の曜日のように
+ * カレンダーの意味そのものが決まらない壊れ方は、これまでどおり捨てる。
+ */
+export function quarantineCalendar(input: unknown): {
+  calendar: unknown;
+  /** 取り除いた休業期間の件数。0 でなければ利用者に知らせる。 */
+  quarantined: number;
+} {
+  if (!isRecord(input)) return { calendar: input, quarantined: 0 };
+  const ranges = input['closedRanges'];
+  if (!Array.isArray(ranges)) return { calendar: input, quarantined: 0 };
+  const kept = ranges.filter(
+    (range) =>
+      isRecord(range) &&
+      isStringValue(range['from']) &&
+      isStringValue(range['to']) &&
+      isValidMonthDay(range['from']) &&
+      isValidMonthDay(range['to']),
+  );
+  if (kept.length === ranges.length) return { calendar: input, quarantined: 0 };
+  return {
+    calendar: { ...input, closedRanges: kept },
+    quarantined: ranges.length - kept.length,
+  };
+}

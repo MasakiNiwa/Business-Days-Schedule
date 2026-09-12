@@ -9,7 +9,7 @@ import type { BusinessCalendar, Rule } from '../types';
 import { createDefaultCalendars, COMPANY_CALENDAR_ID } from './businessDay';
 import { todayInTokyo } from './dateUtil';
 import { normalizeRule } from './notice';
-import { LIMITS, hasError, validateCalendar, validateRule } from './validate';
+import { LIMITS, hasError, quarantineCalendar, validateCalendar, validateRule } from './validate';
 
 export const SCHEMA_VERSION = 1;
 
@@ -163,7 +163,35 @@ export type LoadResult = AppState & {
   /** 壊れていて読み込まなかった件数。0 でなければ利用者に知らせる。 */
   droppedRules: number;
   droppedCalendars: number;
+  /** カレンダーは残したが、取り除いた休業期間の件数。 */
+  quarantinedRanges: number;
 };
+
+/**
+ * 隔離してから検証する。休業期間が1件不正なだけでカレンダーごと捨てると、
+ * 週末の曜日も臨時営業日も決算月も一緒に消える。そのカレンダーを参照する
+ * ルールは代替カレンダーで計算されるので、日付が静かにずれる。
+ */
+function keepValidCalendars(items: unknown): { kept: BusinessCalendar[]; dropped: number; quarantined: number } {
+  if (!Array.isArray(items)) return { kept: [], dropped: 0, quarantined: 0 };
+  const kept: BusinessCalendar[] = [];
+  let dropped = 0;
+  let quarantined = 0;
+  for (const item of items) {
+    try {
+      const repaired = quarantineCalendar(item);
+      if (hasError(validateCalendar(repaired.calendar as BusinessCalendar))) {
+        dropped += 1;
+        continue;
+      }
+      kept.push(repaired.calendar as BusinessCalendar);
+      quarantined += repaired.quarantined;
+    } catch {
+      dropped += 1;
+    }
+  }
+  return { kept, dropped, quarantined };
+}
 
 export function loadState(store: KeyValueStore): LoadResult {
   const defaults = createDefaultState();
@@ -174,7 +202,7 @@ export function loadState(store: KeyValueStore): LoadResult {
   // 読み込んだ時点で前後予定の id を補う。以後は順番が変わっても識別子が動かない。
   const ruleResult = keepValid<Rule>(rules, validateRule);
   ruleResult.kept = ruleResult.kept.map(normalizeRule);
-  const calendarResult = keepValid<BusinessCalendar>(calendars, validateCalendar);
+  const calendarResult = keepValidCalendars(calendars);
 
   return {
     rules: Array.isArray(rules) ? ruleResult.kept : defaults.rules,
@@ -183,6 +211,7 @@ export function loadState(store: KeyValueStore): LoadResult {
     prefs: normalizePreferences(prefs, defaults.prefs),
     droppedRules: ruleResult.dropped,
     droppedCalendars: calendarResult.dropped,
+    quarantinedRanges: calendarResult.quarantined,
   };
 }
 
@@ -313,9 +342,10 @@ export function importState(raw: unknown, current: AppState, mode: ImportMode): 
   const validRules = (file.rules ?? [])
     .filter((rule): rule is Rule => !hasError(validateRule(rule)))
     .map(normalizeRule);
-  const validCalendars = (file.calendars ?? []).filter(
-    (calendar) => !hasError(validateCalendar(calendar)),
-  );
+  // 取り込みでも、不正な休業期間だけを外して残りを生かす。読み込みと揃える。
+  const validCalendars = (file.calendars ?? [])
+    .map((calendar) => quarantineCalendar(calendar).calendar as BusinessCalendar)
+    .filter((calendar) => !hasError(validateCalendar(calendar)));
   const skipped = {
     rules: (file.rules ?? []).length - validRules.length,
     calendars: (file.calendars ?? []).length - validCalendars.length,

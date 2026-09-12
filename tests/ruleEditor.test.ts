@@ -385,3 +385,76 @@ describe('直近1組の表示', () => {
     expect(chain).not.toContain('→');
   });
 });
+
+describe('反復の種類を往復したときの休業日補正', () => {
+  /**
+   * 「第N営業日」は常に営業日なので、補正の設定は効かない。効かない値を
+   * 触れる状態で残すと、保存された値と実際の計算が食い違うため none に均す。
+   * ただし均したまま戻すと、往復しただけで「前営業日へ」が「補正しない」に
+   * 変わる。2026-10 の予定が 23日（金）から 25日（日）へ動いていた。
+   */
+  const monthly = makeRule({
+    id: 'close',
+    title: '月次締め',
+    calendarId: companyCalendarDef.id,
+    recurrence: { type: 'monthlyByDay', interval: 1, days: [25], overflow: 'clamp' },
+    adjust: { mode: 'prev', keepInMonth: false },
+  });
+
+  const savedAdjust = (form: HTMLFormElement, handlers: RuleEditorHandlers): Rule['adjust'] => {
+    form.dispatchEvent(new Event('submit', { cancelable: true }));
+    const saved = vi.mocked(handlers.onSave).mock.calls[0]?.[0];
+    if (saved === undefined) throw new Error('保存されませんでした');
+    return saved.adjust;
+  };
+
+  it('戻したら元の補正が復る', () => {
+    const { form, handlers } = open(monthly);
+    clickText(form, '第N営業日');
+    clickText(form, '毎月N日');
+    expect(savedAdjust(form, handlers)).toEqual({ mode: 'prev', keepInMonth: false });
+  });
+
+  it('画面の選択も元に戻る', () => {
+    const { form } = open(monthly);
+    clickText(form, '第N営業日');
+    clickText(form, '毎月N日');
+    const modeSelect = form.querySelector<HTMLSelectElement>('.adjust-controls select');
+    expect(modeSelect?.value).toBe('prev');
+  });
+
+  it('プレビューの日付も元に戻る', () => {
+    const { form } = open(monthly);
+    const before = previewDates(form)[0];
+    clickText(form, '第N営業日');
+    clickText(form, '毎月N日');
+    // 2026-09-25 は金曜。補正が効いていれば動かない。
+    expect(previewDates(form)[0]).toBe(before);
+  });
+
+  it('効かない種類のあいだは none のまま保存する', () => {
+    const { form, handlers } = open(monthly);
+    clickText(form, '第N営業日');
+    expect(savedAdjust(form, handlers)).toEqual({ mode: 'none', keepInMonth: false });
+  });
+
+  it('自分で「補正しない」を選んだなら、往復しても none のまま', () => {
+    const { form, handlers } = open(monthly);
+    const modeSelect = form.querySelector<HTMLSelectElement>('.adjust-controls select');
+    modeSelect!.value = 'none';
+    modeSelect!.dispatchEvent(new Event('change'));
+
+    clickText(form, '第N営業日');
+    clickText(form, '毎月N日');
+    expect(savedAdjust(form, handlers)).toEqual({ mode: 'none', keepInMonth: false });
+  });
+
+  it('当月内補正の指定も一緒に戻る', () => {
+    const { form, handlers } = open(
+      makeRule({ ...monthly, adjust: { mode: 'next', keepInMonth: true } }),
+    );
+    clickText(form, '第N営業日');
+    clickText(form, '毎月N日');
+    expect(savedAdjust(form, handlers)).toEqual({ mode: 'next', keepInMonth: true });
+  });
+});

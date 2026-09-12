@@ -319,3 +319,116 @@ describe('警告の対象を表示範囲に合わせる', () => {
     expect(result.warnings.map((w) => w.reason)).toContain('unknown-calendar');
   });
 });
+
+// ---------------------------------------------------------------------------
+// P4-5: 月をまたぐ前後予定の警告
+// ---------------------------------------------------------------------------
+
+describe('前後予定の警告は、その予定が出る期間で見せる', () => {
+  /**
+   * 本体の日付だけで絞ると取りこぼす。1月31日の本体に付けた「翌月の第25営業日」の
+   * フォローが2月に無いことは、2月だけを見ているときにこそ知らせたい。
+   */
+  const monthEnd = makeRule({
+    id: 'close',
+    title: '月次締め',
+    recurrence: { type: 'monthlyByDay', interval: 1, days: [31], overflow: 'clamp' },
+    adjust: { mode: 'prev', keepInMonth: false },
+    notices: [
+      {
+        id: 'n1',
+        label: '確定処理',
+        timing: { kind: 'monthlyBusinessDay', months: 1, nth: 25 },
+        role: 'after',
+      },
+    ],
+  });
+
+  const warningsIn = (start: string, end: string): string[] =>
+    expandRules([monthEnd], { start, end }, scheduleContext).warnings.map((w) => w.rawDate ?? '');
+
+  it('本体が前の月にあっても、フォローが出るはずの月で知らせる', () => {
+    // 1月末の本体は2月の表示範囲に入らないが、そのフォローは2月の話。
+    expect(warningsIn('2026-02-01', '2026-02-28')).toContain('2026-01-30');
+  });
+
+  it('関係のない月までは広げない', () => {
+    // 2月を見ているのに、5月や8月のフォローの話まで並べない。
+    const dates = warningsIn('2026-02-01', '2026-02-28');
+    for (const date of dates) {
+      // フォローは翌月なので、2月に出るのは1月と2月の本体だけ。
+      expect(date.slice(0, 7) === '2026-01' || date.slice(0, 7) === '2026-02').toBe(true);
+    }
+  });
+
+  it('同じ月に出る前後予定なら、これまでどおりその月だけ', () => {
+    const sameMonth = makeRule({
+      ...monthEnd,
+      notices: [
+        {
+          id: 'n1',
+          label: '確定処理',
+          timing: { kind: 'monthlyBusinessDay', months: 0, nth: 25 },
+          role: 'after',
+        },
+      ],
+    });
+    const march = expandRules(
+      [sameMonth],
+      { start: '2026-03-01', end: '2026-03-31' },
+      scheduleContext,
+    );
+    for (const warning of march.warnings) {
+      expect(warning.rawDate?.slice(0, 7)).toBe('2026-03');
+    }
+  });
+
+  it('前後が逆転した警告は、実際に出た日の側でも知らせる', () => {
+    // 本体は 2026-09-20（日）。翌週の月曜 09-21 は敬老の日で 09-22・23 も休み。
+    // 「休業日なら前営業日へ」だと 09-18（金）まで戻り、本体より前に出る。
+    const overtaking = makeRule({
+      id: 'overtaking',
+      title: '週次報告',
+      recurrence: { type: 'monthlyByDay', interval: 1, days: [20], overflow: 'clamp' },
+      adjust: { mode: 'none', keepInMonth: false },
+      notices: [
+        {
+          id: 'w2',
+          label: '提出',
+          timing: { kind: 'weekday', weeks: 1, weekday: 1, onClosed: 'prev' },
+        },
+      ],
+    });
+    const mismatch = expandRules(
+      [overtaking],
+      { start: '2026-09-01', end: '2026-09-30' },
+      scheduleContext,
+    ).warnings.find((w) => w.reason === 'notice-role-mismatch');
+
+    // 本体（09-20）と、実際に出た日（09-18）の両方を含む範囲。
+    expect(mismatch?.scope).toEqual({ start: '2026-09-18', end: '2026-09-20' });
+  });
+
+  it('前へ出てしまった側の期間だけを見ていても、警告が届く', () => {
+    const overtaking = makeRule({
+      id: 'overtaking',
+      title: '週次報告',
+      recurrence: { type: 'monthlyByDay', interval: 1, days: [20], overflow: 'clamp' },
+      adjust: { mode: 'none', keepInMonth: false },
+      notices: [
+        {
+          id: 'w2',
+          label: '提出',
+          timing: { kind: 'weekday', weeks: 1, weekday: 1, onClosed: 'prev' },
+        },
+      ],
+    });
+    // 本体（09-20）を含まない、前へ出た側だけの期間。
+    const result = expandRules(
+      [overtaking],
+      { start: '2026-09-14', end: '2026-09-19' },
+      scheduleContext,
+    );
+    expect(result.warnings.map((w) => w.reason)).toContain('notice-role-mismatch');
+  });
+});

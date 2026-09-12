@@ -35,9 +35,10 @@ import { describeTiming } from './describe';
 import {
   declaredRoleOf,
   legacyNoticeId,
-  roleOf,
   noticeDate,
   noticeDateDetail,
+  noticeWindow,
+  roleOf,
   timingOf,
 } from './notice';
 import { expandRecurrence, skipsAdjustment } from './recurrence';
@@ -146,6 +147,15 @@ export type ExpandWarning = {
    * 「書き出されるのに警告が出ない」「書き出されないのに警告が出る」が起きる。
    */
   noticeKind?: 'notice' | 'follow';
+  /**
+   * この警告が「どの期間の話か」。表示範囲で絞るときに使う。null はルール全体の
+   * 話（カレンダーが見つからない等）で、日付では絞れない。
+   *
+   * 本体の日付だけで絞ると取りこぼす。1月31日の本体に付けた「翌月の第25営業日」の
+   * フォローが2月に無いことは、2月だけを見ているときにこそ知らせたい。
+   * 前後が逆転した警告も同じで、前へ出てしまった予定の側を見ていることがある。
+   */
+  scope?: DateRange;
 };
 
 export type ExpandResult = {
@@ -234,6 +244,9 @@ function buildRelated(
           reason: 'notice-role-mismatch',
           noticeRole: intended,
           noticeKind: kind,
+          // 本体と、実際に出た日の両方を含める。前へ出てしまった予定の側を
+          // 見ていることがあるので、本体の日付だけで絞ると届かない。
+          scope: spanOf(main.date, { start: date, end: date }),
           message: `「${rule.title}」の${describeTiming(timingOf(notice))}（${notice.label}）は、${
             intended === 'before' ? '本体より前' : '本体より後'
           }のつもりの設定ですが ${date} に出ます（本体は ${main.date}）`,
@@ -317,6 +330,7 @@ function expandRule(
         ruleId: rule.id,
         rawDate,
         reason: 'no-business-day',
+        scope: { start: rawDate, end: rawDate },
         message: `${rawDate} の周辺に営業日が見つからないため、この発生日を除外しました`,
       });
       continue;
@@ -349,6 +363,9 @@ function expandRule(
           rawDate: occurrence.date,
           reason: 'notice-unresolved',
           noticeRole: roleOf(notice),
+          // 日付が出せなかったぶん、設定が指している週や月を範囲とする。
+          // 本体の日付だけで絞ると、その月を見ている人に届かない。
+          scope: spanOf(occurrence.date, noticeWindow(occurrence.date, timingOf(notice), calendar)),
           message: `「${rule.title}」の${describeTiming(timingOf(notice))}（${
             notice.label
           }）は ${occurrence.date} を起点に日付を決められませんでした`,
@@ -370,6 +387,30 @@ function compareOccurrence(a: Occurrence, b: Occurrence): number {
   if (a.date !== b.date) return a.date < b.date ? -1 : 1;
   if (a.kind !== b.kind) return KIND_ORDER[a.kind] - KIND_ORDER[b.kind];
   return a.ruleId < b.ruleId ? -1 : a.ruleId > b.ruleId ? 1 : 0;
+}
+
+/** 2つの日付を含む最小の範囲。前後どちらが先でもよい。 */
+function spanOf(a: DateStr, range: DateRange): DateRange {
+  return {
+    start: a < range.start ? a : range.start,
+    end: a > range.end ? a : range.end,
+  };
+}
+
+/**
+ * その警告が「どの期間の話か」。持っていなければ本体の日付そのもの、
+ * 本体の日付も無ければ期間を持たない（ルール全体の話）。
+ */
+function scopeOf(warning: ExpandWarning): DateRange | null {
+  if (warning.scope !== undefined) return warning.scope;
+  if (warning.rawDate === null) return null;
+  return { start: warning.rawDate, end: warning.rawDate };
+}
+
+/** 期間が少しでも重なるか。null は「期間を持たない」ので常に重なる扱い。 */
+function overlaps(scope: DateRange | null, view: DateRange): boolean {
+  if (scope === null) return true;
+  return scope.start <= view.end && scope.end >= view.start;
 }
 
 /** 有効なルール群を表示範囲で展開する。 */
@@ -394,11 +435,7 @@ export function expandRules(
     // 広げてあるので、そのまま返すと「3月を書き出したいのに前年11月の話」が
     // 混ざる。前後予定の警告は、その本体が表示範囲にあるかで判断する。
     for (const warning of result.warnings) {
-      if (warning.rawDate === null) {
-        warnings.push(warning);
-        continue;
-      }
-      if (warning.rawDate < viewRange.start || warning.rawDate > viewRange.end) continue;
+      if (!overlaps(scopeOf(warning), viewRange)) continue;
       warnings.push(warning);
     }
     for (const occurrence of result.occurrences) {
