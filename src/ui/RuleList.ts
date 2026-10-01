@@ -19,12 +19,14 @@ export type RuleListHandlers = {
   /** 似た設定を作るとき、一から組み直さずに済むようにする。 */
   onDuplicate: (ruleId: string) => void;
   onToggle: (ruleId: string, enabled: boolean) => void;
-  onOpenSettings: () => void;
+  /** 省略時はボタンを出さない（画面の切り替えから行けるとき）。 */
+  onOpenSettings?: () => void;
   /** グループ名をまとめて付け替える。1件ずつ編集させると取りこぼすため。 */
   onRenameGroup: (group: string, next: string) => void;
   /** グループごとまとめて消す。 */
   onDeleteGroup: (group: string) => void;
-  onClose: () => void;
+  /** 画面として開くときは閉じる操作が要らないので省く。 */
+  onClose?: () => void;
 };
 
 function renderRule(
@@ -148,7 +150,7 @@ export function renderRuleList(
     h(
       'div',
       { class: 'panel-head' },
-      h('h2', { class: 'editor-title', id: 'rules-heading' }, 'ルール'),
+      h('h2', { class: 'page-title', id: 'rules-heading' }, 'ルール'),
       h(
         'div',
         { class: 'panel-actions' },
@@ -159,7 +161,9 @@ export function renderRuleList(
         handlers.onOpenAiImport === undefined
           ? null
           : button('AIで作る', () => handlers.onOpenAiImport?.(), 'button button-sm'),
-        button('設定', () => handlers.onOpenSettings(), 'button button-sm button-quiet'),
+        handlers.onOpenSettings === undefined
+          ? null
+          : button('設定', () => handlers.onOpenSettings?.(), 'button button-sm button-quiet'),
       ),
     ),
   );
@@ -186,12 +190,9 @@ export function renderRuleList(
             : button('AIで作る', () => handlers.onOpenAiImport?.(), 'button button-quiet'),
         ),
       ),
-      h(
-        'div',
-        { class: 'editor-actions' },
-        button('閉じる', () => handlers.onClose(), 'button button-primary'),
-      ),
     );
+    const close = closeActions(handlers);
+    if (close !== null) section.append(close);
     return section;
   }
 
@@ -254,12 +255,18 @@ export function renderRuleList(
     }
   }
 
-  section.append(
-    h(
-      'div',
-      { class: 'editor-actions' },
-      button('閉じる', () => handlers.onClose(), 'button button-primary'),
-    ),
-  );
+  const close = closeActions(handlers);
+  if (close !== null) section.append(close);
   return section;
+}
+
+/** 閉じる操作。画面として開くときは要らないので出さない。 */
+function closeActions(handlers: RuleListHandlers): HTMLElement | null {
+  const onClose = handlers.onClose;
+  if (onClose === undefined) return null;
+  return h(
+    'div',
+    { class: 'editor-actions' },
+    button('閉じる', () => onClose(), 'button button-primary'),
+  );
 }

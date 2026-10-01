@@ -81,13 +81,14 @@ import { RuleEditor } from './ui/RuleEditor';
 import { renderRuleList } from './ui/RuleList';
 import { SettingsView } from './ui/SettingsView';
 import { AiImportView } from './ui/AiImportView';
+import { renderNavBar } from './ui/NavBar';
+import type { Page } from './ui/NavBar';
 import { appendImportedRules } from './core/aiImport';
 
 const SAMPLES_DIR = `${import.meta.env.BASE_URL}data/samples/`;
 
 type Mode =
   | { kind: 'calendar' }
-  | { kind: 'rules' }
   | {
       kind: 'edit';
       rule: Rule;
@@ -98,12 +99,10 @@ type Mode =
        */
       baseline: string | null;
     }
-  | { kind: 'settings' }
   | { kind: 'help' }
   | { kind: 'jump' }
   | { kind: 'samples' }
   | { kind: 'aiImport' }
-  | { kind: 'calendarExport' }
   | { kind: 'day'; date: DateStr };
 
 /** 開いているダイアログの中身を作り直してよいかの判定に使う。 */
@@ -123,6 +122,17 @@ function dialogKeyOf(mode: Mode): string | null {
 export class App {
   private state: AppState;
   private view: { year: number; month: Month };
+  /**
+   * いま開いている画面（docs/SPEC.md §8.1）。下（広い画面では上）のタブで切り替える。
+   * ダイアログ（mode）は、その上に重ねる作業中の入力だけに使う。
+   */
+  private page: Page = 'schedule';
+  /**
+   * 開いている設定・書き出しの画面。中に選択中の分類や期間の入力を持つので、
+   * 描き直しのたびに作り直さず、画面を移るまで同じものを使う。
+   */
+  private settingsView: SettingsView | null = null;
+  private exportView: HTMLElement | null = null;
   private mode: Mode = { kind: 'calendar' };
   private flash: { text: string; tone: 'info' | 'error' } | null = null;
   /** 矢印キーで月をまたいだあと、描き直しの後にフォーカスを戻す先。 */
@@ -245,6 +255,8 @@ export class App {
     const loaded = loadState(this.store);
     this.state = { rules: loaded.rules, calendars: loaded.calendars, prefs: loaded.prefs };
     applyTheme(this.state.prefs.theme);
+    // 別のタブで営業日や決算月が変わったなら、設定の画面も作り直して食い違いを残さない。
+    if (key === null || key === STORAGE_KEYS.calendars) this.settingsView = null;
     // 編集中なら、その画面は残す。書きかけを消さないため。ただし営業日が
     // 変わったなら計算の前提は入れ替える。そうしないと、プレビューに出ている
     // 日付と保存後に出る日付が食い違う。
@@ -602,6 +614,7 @@ export class App {
       if (!result.ok) throw new Error(result.errors.join(' / '));
       this.state = result.state;
       this.persist();
+      this.settingsView = null;
       const skipped = result.skipped.rules + result.skipped.calendars;
       this.notify(
         skipped === 0
@@ -683,6 +696,7 @@ export class App {
     }
     clearState(this.store);
     this.state = createDefaultState();
+    this.settingsView = null;
     this.mode = { kind: 'calendar' };
     this.notify('すべて削除しました。');
     this.render();
@@ -693,59 +707,21 @@ export class App {
   // -------------------------------------------------------------------------
 
   /**
-   * アプリ名・何をするものか・版。
+   * 画面の一番上。アプリ名・画面の切り替え・配色と使い方だけを置く（docs/SPEC.md §8.1）。
+   *
+   * 以前はここに月の移動・表示の切り替え・ルール・書き出し・配色・設定・使い方が
+   * 並んでいて、どれが「画面を移る」もので、どれが「いまの画面の見え方を変える」
+   * ものかが読み取れなかった。画面を移るものはタブにまとめ、見え方の操作は
+   * 予定の画面の中へ移す。
    *
    * 版は、静的サイトでは「いつのものを見ているか」が分かりにくく、
    * 不具合の報告を受けたときに突き合わせられないと原因を追えないため常に出す。
    */
-  private renderBrand(): HTMLElement {
-    return h(
-      'div',
-      { class: 'brand-bar' },
-      h(
-        'div',
-        { class: 'brand-text' },
-        h('h1', { class: 'brand' }, APP_NAME),
-        h(
-          'p',
-          { class: 'brand-tagline' },
-          // 他のカレンダーには無い部分なので、そこだけ強く出す。
-          h('strong', { class: 'brand-tagline-lead' }, APP_TAGLINE_LEAD),
-          APP_TAGLINE_REST,
-        ),
-      ),
-      h(
-        'span',
-        { class: 'brand-version', title: longVersion() },
-        shortVersion(),
-      ),
-    );
-  }
-
   private renderHeader(): HTMLElement {
-    const prev = button('‹', () => this.goToMonth(-1), 'nav');
-    prev.setAttribute('aria-label', '前の月');
-    const next = button('›', () => this.goToMonth(1), 'nav');
-    next.setAttribute('aria-label', '次の月');
-
     const theme = this.state.prefs.theme;
     const themeButton = button(themeIcon(theme), () => this.cycleTheme(), 'nav');
     themeButton.setAttribute('aria-label', `配色: ${themeLabel(theme)}（クリックで切り替え）`);
     themeButton.setAttribute('title', `配色: ${themeLabel(theme)}`);
-
-    const rulesButton = button('ルール', () => this.openMode('rules'), 'button button-sm');
-    rulesButton.setAttribute('title', 'ルールの一覧・追加');
-    if (this.mode.kind === 'rules') rulesButton.setAttribute('aria-pressed', 'true');
-
-    // 書き出しはこのアプリの出口なので、設定の中に埋めずヘッダーへ出す。
-    const exportButton = button('書き出し', () => this.openMode('calendarExport'), 'button button-sm');
-    exportButton.setAttribute('title', 'Outlook / Google カレンダーへ書き出す');
-    if (this.mode.kind === 'calendarExport') exportButton.setAttribute('aria-pressed', 'true');
-
-    const settingsButton = button('⚙', () => this.openMode('settings'), 'nav');
-    settingsButton.setAttribute('aria-label', '設定');
-    settingsButton.setAttribute('title', '設定');
-    if (this.mode.kind === 'settings') settingsButton.setAttribute('aria-pressed', 'true');
 
     // 「?」だけだと、やりたいことから引ける索引があることまでは伝わらない。
     // 広い画面では言葉も出す（狭い画面では記号だけに畳む）。
@@ -757,6 +733,41 @@ export class App {
     helpButton.setAttribute('aria-label', '使い方・ヘルプ');
     helpButton.setAttribute('title', '使い方・ヘルプ（やりたいことから探せます）');
     if (this.mode.kind === 'help') helpButton.setAttribute('aria-pressed', 'true');
+
+    return h(
+      'header',
+      { class: 'app-top' },
+      h(
+        'div',
+        { class: 'brand-text' },
+        h('h1', { class: 'brand' }, APP_NAME),
+        h(
+          'span',
+          { class: 'brand-version', title: longVersion() },
+          shortVersion(),
+        ),
+        h(
+          'p',
+          { class: 'brand-tagline' },
+          // 他のカレンダーには無い部分なので、そこだけ強く出す。
+          h('strong', { class: 'brand-tagline-lead' }, APP_TAGLINE_LEAD),
+          APP_TAGLINE_REST,
+        ),
+      ),
+      renderNavBar(this.page, (page) => this.navigate(page)),
+      h('div', { class: 'header-tools' }, themeButton, helpButton),
+    );
+  }
+
+  /**
+   * 予定の画面の上端。月の移動と、カレンダー／一覧の切り替え。
+   * どちらも「いま見ている予定の見え方」を決めるので、予定の画面の中に置く。
+   */
+  private renderScheduleBar(): HTMLElement {
+    const prev = button('‹', () => this.goToMonth(-1), 'nav');
+    prev.setAttribute('aria-label', '前の月');
+    const next = button('›', () => this.goToMonth(1), 'nav');
+    next.setAttribute('aria-label', '次の月');
 
     const isList = this.state.prefs.defaultView === 'list';
 
@@ -827,7 +838,7 @@ export class App {
       : h('div', { class: 'header-center' }, prev, monthLabel, next);
 
     return h(
-      'header',
+      'div',
       { class: 'app-header' },
       h(
         'div',
@@ -840,19 +851,30 @@ export class App {
           : button('今日', () => this.goToToday(), 'button button-sm'),
       ),
       center,
-      h(
-        'div',
-        { class: 'header-actions' },
-        viewToggle,
-        // よく使うものと、たまにしか使わないものを見た目でも分ける。
-        h('div', { class: 'action-group' }, rulesButton, exportButton),
-        h('div', { class: 'action-group' }, themeButton, settingsButton, helpButton),
-      ),
+      h('div', { class: 'header-actions' }, viewToggle),
     );
   }
 
+  /**
+   * 画面を移る。開いているダイアログは閉じる（入力途中なら確かめる）。
+   * 同じタブをもう一度押したときは、その画面の先頭へ戻すだけ。
+   */
+  private navigate(page: Page): void {
+    if (!this.confirmDiscard()) return;
+    this.mode = { kind: 'calendar' };
+    if (page !== this.page) {
+      this.page = page;
+      this.settingsView = null;
+      this.exportView = null;
+    }
+    this.render();
+    globalThis.scrollTo?.({ top: 0 });
+    // タブは描き直しで作り直されるので、押したタブへ焦点を戻す。
+    this.root.querySelector<HTMLElement>('.app-nav [aria-current="page"]')?.focus();
+  }
+
   /** ヘッダーのボタンはトグル動作にする。同じボタンをもう一度押せば閉じる。 */
-  private openMode(kind: 'settings' | 'help' | 'rules' | 'jump' | 'calendarExport'): void {
+  private openMode(kind: 'help' | 'jump'): void {
     // 編集中に別の画面へ移ると、そのまま入力が消える。移る前に確かめる。
     if (!this.confirmDiscard()) return;
     this.mode = this.mode.kind === kind ? { kind: 'calendar' } : { kind };
@@ -877,16 +899,13 @@ export class App {
         this.openAiImportMode();
         return;
       case 'settings':
-        this.mode = { kind: 'settings' };
-        this.render();
+        this.navigate('settings');
         return;
       case 'export':
-        this.mode = { kind: 'calendarExport' };
-        this.render();
+        this.navigate('export');
         return;
       case 'rules':
-        this.mode = { kind: 'rules' };
-        this.render();
+        this.navigate('rules');
         return;
     }
   }
@@ -915,6 +934,65 @@ export class App {
     );
   }
 
+  /** 予定以外の画面の中身。 */
+  private renderPage(page: Exclude<Page, 'schedule'>): HTMLElement {
+    const calendarDefs = new Map<string, BusinessCalendar>(
+      this.state.calendars.map((item) => [item.id, item]),
+    );
+    switch (page) {
+      case 'rules':
+        return renderRuleList(this.state.rules, calendarDefs, {
+          onLoadSamples: () => void this.openSamples(),
+          onOpenAiImport: () => this.openAiImportMode(),
+          onAdd: () => this.startAdd(),
+          onEdit: (ruleId) => this.startEdit(ruleId),
+          onDuplicate: (ruleId) => this.startDuplicate(ruleId),
+          onToggle: (ruleId, enabled) => this.toggleRule(ruleId, enabled),
+          onRenameGroup: (group, next) => this.renameGroupTo(group, next),
+          onDeleteGroup: (group) => this.deleteGroup(group),
+        });
+
+      case 'settings':
+        this.settingsView ??= new SettingsView(
+          this.state.calendars,
+          this.holidays,
+          {
+            onChange: (calendars) => {
+              this.state.calendars = calendars;
+              this.persistCalendars();
+            },
+            onExport: () => this.exportJson(),
+            onExportCalendar: () => this.navigate('export'),
+            onImport: (file, mode) => void this.importJson(file, mode),
+            onClearAll: () => this.clearAll(),
+          },
+          this.today,
+        );
+        return this.settingsView.element;
+
+      case 'export':
+        this.exportView ??= renderCalendarExport(
+          {
+            onExport: (request) => this.exportCalendarFile(request),
+            countOccurrences: (request) =>
+              this.occurrencesBetween(request.from, request.to, request.groups).occurrences.filter(
+                (occurrence) =>
+                  occurrence.kind === 'main' ||
+                  (occurrence.kind === 'notice' ? request.includeNotices : request.includeFollows),
+              ).length,
+          },
+          this.today,
+          {
+            groups: collectGroups(this.state.rules),
+            hasUngrouped: hasUngrouped(this.state.rules),
+            activeGroups: this.activeGroups(),
+            initialRange: this.visibleRange(),
+          },
+        );
+        return this.exportView;
+    }
+  }
+
   /** ダイアログの中身。モードによって出し分ける。 */
   private buildDialogContent(mode: Mode): HTMLElement | null {
     const calendarDefs = new Map<string, BusinessCalendar>(
@@ -941,31 +1019,6 @@ export class App {
       // 閉じる前に「変更があるか」を尋ねられるよう、開いている編集画面を覚えておく。
       this.openEditor = editor;
       return editor.element;
-    }
-
-    if (mode.kind === 'settings') {
-      const settings = new SettingsView(
-        this.state.calendars,
-        this.holidays,
-        {
-          onChange: (calendars) => {
-            this.state.calendars = calendars;
-            this.persistCalendars();
-            // カレンダーの変更は営業日の判定に直結するので、背面のカレンダーだけ描き直す。
-            this.renderCalendarPaneOnly();
-          },
-          onExport: () => this.exportJson(),
-          onExportCalendar: () => {
-            this.mode = { kind: 'calendarExport' };
-            this.render();
-          },
-          onImport: (file, mode2) => void this.importJson(file, mode2),
-          onClearAll: () => this.clearAll(),
-          onClose: () => this.backToCalendar(),
-        },
-        this.today,
-      );
-      return settings.element;
     }
 
     if (mode.kind === 'help') {
@@ -1014,28 +1067,6 @@ export class App {
       return view.element;
     }
 
-    if (mode.kind === 'calendarExport') {
-      return renderCalendarExport(
-        {
-          onExport: (request) => this.exportCalendarFile(request),
-          countOccurrences: (request) =>
-            this.occurrencesBetween(request.from, request.to, request.groups).occurrences.filter(
-              (occurrence) =>
-                occurrence.kind === 'main' ||
-                (occurrence.kind === 'notice' ? request.includeNotices : request.includeFollows),
-            ).length,
-          onClose: () => this.backToCalendar(),
-        },
-        this.today,
-        {
-          groups: collectGroups(this.state.rules),
-          hasUngrouped: hasUngrouped(this.state.rules),
-          activeGroups: this.activeGroups(),
-          initialRange: this.visibleRange(),
-        },
-      );
-    }
-
     if (mode.kind === 'jump') {
       return renderMonthPicker(
         this.view,
@@ -1076,24 +1107,6 @@ export class App {
       );
     }
 
-    if (mode.kind === 'rules') {
-      return renderRuleList(this.state.rules, calendarDefs, {
-        onLoadSamples: () => void this.openSamples(),
-        onOpenAiImport: () => this.openAiImportMode(),
-        onAdd: () => this.startAdd(),
-        onEdit: (ruleId) => this.startEdit(ruleId),
-        onDuplicate: (ruleId) => this.startDuplicate(ruleId),
-        onToggle: (ruleId, enabled) => this.toggleRule(ruleId, enabled),
-        onRenameGroup: (group, next) => this.renameGroupTo(group, next),
-        onDeleteGroup: (group) => this.deleteGroup(group),
-        onOpenSettings: () => {
-          this.mode = { kind: 'settings' };
-          this.render();
-        },
-        onClose: () => this.backToCalendar(),
-      });
-    }
-
     return null;
   }
 
@@ -1124,7 +1137,7 @@ export class App {
     const content = this.buildDialogContent(this.mode);
     if (content === null) return;
 
-    const size = this.mode.kind === 'edit' || this.mode.kind === 'settings' ? 'lg' : 'md';
+    const size = this.mode.kind === 'edit' ? 'lg' : 'md';
 
     if (this.dialog !== null && key === this.dialogKey) {
       this.dialog.setContent(content);
@@ -1177,17 +1190,6 @@ export class App {
       this.mode = { kind: 'calendar' };
       this.render();
     }
-  }
-
-  /** 設定変更のたびに右パネルごと作り直すと入力位置を失うため、左側だけ差し替える。 */
-  private renderCalendarPaneOnly(): void {
-    const existing = this.root.querySelector('.calendar-pane');
-    if (existing === null) {
-      this.render();
-      return;
-    }
-    const replacement = this.buildCalendarPane(this.buildOccurrences().occurrencesByDate);
-    existing.replaceWith(replacement);
   }
 
   /**
@@ -1457,7 +1459,7 @@ export class App {
 
     const open = button(
       `${calendarName}: 営業日 ${businessDays}日 / 休業日 ${closedDays}日 ・ 決算月 ${fiscalMonth}月`,
-      () => this.openMode('settings'),
+      () => this.navigate('settings'),
       'month-summary is-link',
     );
     open.setAttribute('title', '営業日・決算月の設定を開く');
@@ -1575,19 +1577,25 @@ export class App {
     const empty = this.state.rules.length === 0;
     const main = h(
       'main',
-      { id: 'main', tabindex: '-1' },
-      ...(empty ? [this.renderEmptyPrompt()] : []),
-      this.renderViewToolbar(),
-      this.state.prefs.defaultView === 'list'
-        ? this.buildListPane(occurrences)
-        : this.buildCalendarPane(occurrencesByDate),
+      { id: 'main', tabindex: '-1', 'data-page': this.page },
+      ...(this.page === 'schedule'
+        ? [
+            ...(empty ? [this.renderEmptyPrompt()] : []),
+            this.renderScheduleBar(),
+            this.renderViewToolbar(),
+            this.state.prefs.defaultView === 'list'
+              ? this.buildListPane(occurrences)
+              : this.buildCalendarPane(occurrencesByDate),
+          ]
+        : [this.renderPage(this.page)]),
     );
 
     // 予定の出し方は画面全体に効く。画面幅では決めず、選ばれたものに従う。
     this.root.classList.toggle('is-dots', this.state.prefs.chipDisplay === 'dot');
 
     clear(this.root);
-    this.root.append(skipLink, this.renderBrand(), this.renderHeader(), banners, main, this.renderFooter());
+    this.root.classList.toggle('has-nav', true);
+    this.root.append(skipLink, this.renderHeader(), banners, main, this.renderFooter());
 
     this.syncDialog();
     this.restoreFocus();

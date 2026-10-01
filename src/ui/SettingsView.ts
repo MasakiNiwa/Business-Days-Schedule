@@ -23,7 +23,8 @@ export type SettingsHandlers = {
   onExportCalendar: () => void;
   onImport: (file: File, mode: 'replace' | 'merge') => void;
   onClearAll: () => void;
-  onClose: () => void;
+  /** 画面として開くときは閉じる操作が要らないので省く。 */
+  onClose?: () => void;
 };
 
 export class SettingsView {
@@ -45,13 +46,15 @@ export class SettingsView {
     this.element = h(
       'section',
       { class: 'settings' },
-      h('h2', { class: 'editor-title' }, '設定'),
+      h('h2', { class: 'page-title' }, '設定'),
       this.body,
-      h(
-        'div',
-        { class: 'editor-actions' },
-        button('閉じる', () => this.handlers.onClose(), 'button button-primary'),
-      ),
+      handlers.onClose === undefined
+        ? null
+        : h(
+            'div',
+            { class: 'editor-actions' },
+            button('閉じる', () => this.handlers.onClose?.(), 'button button-primary'),
+          ),
     );
     this.render();
   }

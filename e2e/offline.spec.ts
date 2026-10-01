@@ -46,9 +46,9 @@ test.describe('Service Worker', () => {
 
   test('設定に版の詳細が出る', async ({ page }) => {
     await page.goto('');
-    await page.getByRole('button', { name: '設定' }).click();
+    await page.locator('.app-nav').getByRole('button', { name: '設定' }).click();
     await page.getByRole('button', { name: '祝日・アプリ情報', exact: true }).click();
-    const about = page.locator('dialog .editor-section').filter({ hasText: 'このアプリについて' });
+    const about = page.locator('main .editor-section').filter({ hasText: 'このアプリについて' });
     await expect(about).toContainText('版');
     await expect(about).toContainText(/v\d+\.\d+\.\d+/);
   });
