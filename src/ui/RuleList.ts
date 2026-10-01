@@ -12,17 +12,21 @@ import { h } from './dom';
 
 export type RuleListHandlers = {
   onLoadSamples: () => void;
+  /** 普段使っている AI に設定を作ってもらう。省略時はボタンを出さない。 */
+  onOpenAiImport?: () => void;
   onAdd: () => void;
   onEdit: (ruleId: string) => void;
   /** 似た設定を作るとき、一から組み直さずに済むようにする。 */
   onDuplicate: (ruleId: string) => void;
   onToggle: (ruleId: string, enabled: boolean) => void;
-  onOpenSettings: () => void;
+  /** 省略時はボタンを出さない（画面の切り替えから行けるとき）。 */
+  onOpenSettings?: () => void;
   /** グループ名をまとめて付け替える。1件ずつ編集させると取りこぼすため。 */
   onRenameGroup: (group: string, next: string) => void;
   /** グループごとまとめて消す。 */
   onDeleteGroup: (group: string) => void;
-  onClose: () => void;
+  /** 画面として開くときは閉じる操作が要らないので省く。 */
+  onClose?: () => void;
 };
 
 function renderRule(
@@ -146,7 +150,7 @@ export function renderRuleList(
     h(
       'div',
       { class: 'panel-head' },
-      h('h2', { class: 'editor-title', id: 'rules-heading' }, 'ルール'),
+      h('h2', { class: 'page-title', id: 'rules-heading' }, 'ルール'),
       h(
         'div',
         { class: 'panel-actions' },
@@ -154,7 +158,12 @@ export function renderRuleList(
         // 空のときしか出していなかったため、使い始めると到達できなくなっていた。
         button('＋ 新規ルール', () => handlers.onAdd(), 'button button-sm button-primary'),
         button('サンプル', () => handlers.onLoadSamples(), 'button button-sm'),
-        button('設定', () => handlers.onOpenSettings(), 'button button-sm button-quiet'),
+        handlers.onOpenAiImport === undefined
+          ? null
+          : button('AIで作る', () => handlers.onOpenAiImport?.(), 'button button-sm'),
+        handlers.onOpenSettings === undefined
+          ? null
+          : button('設定', () => handlers.onOpenSettings?.(), 'button button-sm button-quiet'),
       ),
     ),
   );
@@ -176,14 +185,14 @@ export function renderRuleList(
           { class: 'empty-prompt-actions' },
           button('最初のルールを作る', () => handlers.onAdd(), 'button button-primary'),
           button('完成例を見る', () => handlers.onLoadSamples()),
+          handlers.onOpenAiImport === undefined
+            ? null
+            : button('AIで作る', () => handlers.onOpenAiImport?.(), 'button button-quiet'),
         ),
       ),
-      h(
-        'div',
-        { class: 'editor-actions' },
-        button('閉じる', () => handlers.onClose(), 'button button-primary'),
-      ),
     );
+    const close = closeActions(handlers);
+    if (close !== null) section.append(close);
     return section;
   }
 
@@ -246,12 +255,18 @@ export function renderRuleList(
     }
   }
 
-  section.append(
-    h(
-      'div',
-      { class: 'editor-actions' },
-      button('閉じる', () => handlers.onClose(), 'button button-primary'),
-    ),
-  );
+  const close = closeActions(handlers);
+  if (close !== null) section.append(close);
   return section;
+}
+
+/** 閉じる操作。画面として開くときは要らないので出さない。 */
+function closeActions(handlers: RuleListHandlers): HTMLElement | null {
+  const onClose = handlers.onClose;
+  if (onClose === undefined) return null;
+  return h(
+    'div',
+    { class: 'editor-actions' },
+    button('閉じる', () => onClose(), 'button button-primary'),
+  );
 }

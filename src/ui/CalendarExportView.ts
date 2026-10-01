@@ -41,7 +41,8 @@ export type CalendarExportHandlers = {
   onExport: (request: CalendarExportRequest) => void;
   /** 期間・対象が変わるたびに件数を数え直すために呼ぶ。 */
   countOccurrences: (request: CalendarExportRequest) => number;
-  onClose: () => void;
+  /** 画面として開くときは閉じる操作が要らないので省く。 */
+  onClose?: () => void;
 };
 
 /** 選択肢の値として使う「すべて」。グループ名と衝突しない値を使う。 */
@@ -274,7 +275,7 @@ export function renderCalendarExport(
   const section = h(
     'section',
     { class: 'export', 'aria-label': '外部カレンダーへの書き出し' },
-    h('h2', { class: 'editor-title' }, '外部カレンダーへ書き出す'),
+    h('h2', { class: 'page-title' }, '外部カレンダーへ書き出す'),
     // 押す前に必ず知っておいてほしいのは2つだけ。長い説明で設定欄を遠ざけない。
     // 手順は読みたい人だけが開けばよい（初回は開いた状態にしてある）。
     h(
@@ -343,7 +344,7 @@ export function renderCalendarExport(
       'div',
       { class: 'editor-actions' },
       exportButton,
-      button('閉じる', () => handlers.onClose(), 'button'),
+      handlers.onClose === undefined ? null : button('閉じる', () => handlers.onClose?.(), 'button'),
     ),
   );
 

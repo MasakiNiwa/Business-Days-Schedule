@@ -21,7 +21,7 @@ test('初回訪問で勝手に読み込み直さない', async ({ page }) => {
   });
 
   // 入力途中のものが失われないことを、実際に文字を入れて確かめる。
-  await page.locator('.header-actions').getByRole('button', { name: 'ルール', exact: true }).click();
+  await page.locator('.app-nav').getByRole('button', { name: 'ルール' }).click();
   await page.getByRole('button', { name: '＋ 新規ルール' }).click();
   await page.getByLabel('タイトル').fill('入力途中');
 

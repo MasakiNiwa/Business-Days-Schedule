@@ -34,7 +34,8 @@ async function seedSamples(page: Page): Promise<void> {
     .filter({ hasText: '基本セット' })
     .getByRole('button', { name: '追加', exact: true })
     .click();
-  await expect(page.locator('.banner')).toContainText('追加');
+  // 祝日データの鮮度などの常設のお知らせと混ざらないよう、操作の結果だけを見る。
+  await expect(page.locator('.banner-ok')).toContainText('追加');
   await page.locator('dialog .editor-actions').getByRole('button', { name: '閉じる' }).click();
   await expect(page.locator('dialog')).toHaveCount(0);
 }
@@ -53,19 +54,25 @@ test.describe('axe-core', () => {
 
   test('ルール編集', async ({ page }) => {
     await seedSamples(page);
-    await page.locator('.header-actions').getByRole('button', { name: 'ルール', exact: true }).click();
+    await page.locator('.app-nav').getByRole('button', { name: 'ルール' }).click();
     await page.getByRole('button', { name: '＋ 新規ルール' }).click();
     await analyze(page, 'dialog');
   });
 
   test('設定', async ({ page }) => {
     await seedSamples(page);
-    await page.getByRole('button', { name: '設定' }).click();
-    await analyze(page, 'dialog');
+    await page.locator('.app-nav').getByRole('button', { name: '設定' }).click();
+    await analyze(page, 'main');
     for (const name of ['銀行休業日', 'バックアップ・書き出し', '祝日・アプリ情報']) {
       await page.getByRole('button', { name, exact: true }).click();
-      await analyze(page, 'dialog');
+      await analyze(page, 'main');
     }
+  });
+
+  test('ルールの画面と画面の切り替え', async ({ page }) => {
+    await seedSamples(page);
+    await page.locator('.app-nav').getByRole('button', { name: 'ルール' }).click();
+    await analyze(page);
   });
 
   test('ヘルプ', async ({ page }) => {
@@ -77,14 +84,37 @@ test.describe('axe-core', () => {
   test('外部カレンダーへの書き出し', async ({ page }) => {
     // 期間の開始日・終了日は1つの枠に2つ並ぶため、欄ごとに名前が要る。
     await seedSamples(page);
-    await page.getByRole('button', { name: '書き出し' }).click();
-    await analyze(page, 'dialog');
+    await page.locator('.app-nav').getByRole('button', { name: '書き出し' }).click();
+    await analyze(page, 'main');
   });
 
   test('サンプルの追加', async ({ page }) => {
     await page.goto('');
-    await page.locator('.header-actions').getByRole('button', { name: 'ルール', exact: true }).click();
+    await page.locator('.app-nav').getByRole('button', { name: 'ルール' }).click();
     await page.getByRole('button', { name: 'サンプル', exact: true }).click();
+    await analyze(page, 'dialog');
+  });
+
+  test('AIで予定を作る（入力・確認・エラー）', async ({ page }) => {
+    await page.goto('');
+    await page.locator('.empty-prompt').getByRole('button', { name: 'AIで作る' }).click();
+    await analyze(page, 'dialog');
+
+    const reply = JSON.stringify({
+      format: 'business-days-schedule-ai-import',
+      schemaVersion: 1,
+      rules: [{ title: '支払', recurrence: { type: 'monthlyByDay', days: [25] }, adjust: { mode: 'prev' } }],
+    });
+    const input = page.getByLabel('AIから返ってきた内容を貼り付け');
+    await input.fill(reply);
+    await page.getByRole('button', { name: '内容を確認' }).click();
+    await expect(page.locator('dialog .ai-review')).toBeVisible();
+    await analyze(page, 'dialog');
+
+    await page.getByRole('button', { name: '貼り直す' }).click();
+    await input.fill(reply.replace('"prev"', '"later"'));
+    await page.getByRole('button', { name: '内容を確認' }).click();
+    await expect(page.locator('dialog .ai-errors')).toBeVisible();
     await analyze(page, 'dialog');
   });
 

@@ -694,6 +694,13 @@ button {
   margin: 0;
 }
 
+/* ルール・書き出し・設定の画面の見出し。ダイアログの見出しより一段大きくする。 */
+.page-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0;
+}
+
 .editor-section {
   display: flex;
   flex-direction: column;
@@ -946,6 +953,7 @@ button {
 
 .preview-list li {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: 0.35rem;
   font-size: 0.82rem;
@@ -974,6 +982,8 @@ button {
   margin: 0.15rem 0 0.3rem;
   padding: 0 0 0 0.9rem;
   border-left: 2px solid var(--border);
+  /* 本体の行の横に詰めず、必ず下の段へ送る。狭い画面で日付が折れて読めなくなる。 */
+  flex-basis: 100%;
 }
 
 .preview-related-item {
@@ -1854,6 +1864,143 @@ button {
 }
 
 
+/* --- AIで予定を作る（§9.5） ---------------------------------------------- */
+
+.ai-import,
+.ai-review,
+.ai-errors {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.ai-import > .field-hint {
+  font-size: 0.8rem;
+}
+
+/* 手順は番号付きで縦に並べる。スマートフォンでも上から順に追えるようにする。 */
+.ai-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  counter-reset: ai-step;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.ai-step {
+  counter-increment: ai-step;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.ai-step-title,
+.ai-result-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.ai-step-title::before {
+  content: counter(ai-step);
+  display: inline-grid;
+  place-items: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  margin-right: 0.45rem;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 0.8rem;
+}
+
+.ai-step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.ai-example {
+  margin: 0;
+  padding: 0.45rem 0.6rem;
+  border-left: 3px solid var(--border-strong);
+  background: var(--bg-sunken);
+  font-size: 0.82rem;
+  white-space: pre-line;
+}
+
+.ai-import-input,
+.ai-copy-text {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  resize: vertical;
+}
+
+.ai-copy-box,
+.ai-copy-status {
+  margin: 0;
+}
+
+.ai-copy-status {
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+}
+
+.ai-copy-status:empty {
+  display: none;
+}
+
+.ai-issues,
+.ai-technical {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.ai-technical {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+.ai-preview-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  overflow-wrap: anywhere;
+}
+
+.ai-preview-item p {
+  margin: 0;
+}
+
+.ai-preview-item .rule-dot {
+  margin-top: 0;
+}
+
+.ai-preview-label {
+  margin-top: 0.3rem !important;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
 /* --- サンプルの追加 ------------------------------------------------------ */
 
 .samples,
@@ -1964,6 +2111,133 @@ button {
   color: var(--fg-faint);
   font-variant-numeric: tabular-nums;
   cursor: help;
+}
+
+/* --- 画面の上端と切り替え（§8.1） --------------------------------------- */
+
+/*
+ * アプリ名・画面の切り替え・配色と使い方。
+ * 画面を移るものだけをここに置き、いまの画面の見え方を変える操作は各画面の中へ置く。
+ */
+.app-top {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem 1.25rem;
+  padding-bottom: 0.6rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.app-top .brand-text {
+  flex: 1 1 auto;
+}
+
+.header-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.app-nav {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.app-nav-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.app-nav-item:hover {
+  background: var(--bg-sunken);
+  color: var(--fg);
+}
+
+.app-nav-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* いまの画面。色だけに頼らず、塗りでも分かるようにする。 */
+.app-nav-item[aria-current='page'] {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--fg);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.app-nav-item[aria-current='page'] .nav-icon {
+  stroke: var(--accent);
+}
+
+.nav-icon {
+  width: 1.15rem;
+  height: 1.15rem;
+  flex: none;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* 狭い画面: 画面下に固定したタブにする。親指で届く位置に、常に同じ並びで置く。 */
+@media (max-width: 720px) {
+  #app.has-nav {
+    padding-bottom: calc(4.75rem + env(safe-area-inset-bottom));
+  }
+
+  .app-top {
+    margin-bottom: 0.6rem;
+  }
+
+  .app-top .brand-tagline {
+    display: none;
+  }
+
+  .app-nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    gap: 0;
+    padding: 0.2rem 0.25rem calc(0.2rem + env(safe-area-inset-bottom));
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -2px 10px rgb(0 0 0 / 6%);
+  }
+
+  .app-nav-item {
+    flex: 1 1 0;
+    flex-direction: column;
+    gap: 0.1rem;
+    padding: 0.35rem 0.2rem;
+    font-size: 0.72rem;
+  }
+
+  .nav-icon {
+    width: 1.35rem;
+    height: 1.35rem;
+  }
+
+  /* 画面下のタブでは、いまの画面の印を上端に付ける。 */
+  .app-nav-item[aria-current='page'] {
+    box-shadow: inset 0 2px 0 var(--accent);
+  }
+
+  /* 更新の案内はタブに重ならないよう、その上へ出す。 */
+  .update-banner {
+    bottom: calc(4.5rem + env(safe-area-inset-bottom));
+  }
 }
 
 /* --- 支援技術向け -------------------------------------------------------- */
@@ -2222,6 +2496,8 @@ main:focus {
   }
 
   .app-header,
+  .app-top,
+  .app-nav,
   .modal,
   .empty-prompt,
   .banner,
@@ -2505,6 +2781,7 @@ main:focus {
 .nav-help-text {
   font-size: 0.8rem;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 @media (max-width: 720px) {

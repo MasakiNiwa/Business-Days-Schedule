@@ -36,17 +36,24 @@ async function openNotices(page: Page): Promise<void> {
 
 /** ヘッダーの「ルール」ボタン。空状態の導線と紛れないよう厳密に選ぶ。 */
 async function openRulePanel(page: Page): Promise<void> {
-  await page.locator('.header-actions').getByRole('button', { name: 'ルール', exact: true }).click();
+  await page.locator('.app-nav').getByRole('button', { name: 'ルール' }).click();
 }
 
-/** モーダルの本文にある「閉じる」。右上の × と紛れないようにする。 */
+/**
+ * 開いているダイアログを閉じて、予定の画面へ戻る。
+ * ダイアログは本文にある「閉じる」で閉じる（右上の × と紛れないようにする）。
+ * ルールの画面から開いたものは、閉じるとルールの画面に戻るので、予定のタブへ移る。
+ */
 async function closeDialog(page: Page): Promise<void> {
-  await page.locator('dialog .editor-actions').getByRole('button', { name: '閉じる' }).click();
+  const close = page.locator('dialog .editor-actions').getByRole('button', { name: '閉じる' });
+  if ((await close.count()) > 0) await close.click();
+  await page.locator('.app-nav').getByRole('button', { name: '予定' }).click();
+  await expect(page.locator('main[data-page="schedule"]')).toBeVisible();
 }
 
 async function loadSamplePack(page: Page, name: string): Promise<void> {
   await openRulePanel(page);
-  await expect(page.locator('dialog .rule-panel')).toBeVisible();
+  await expect(page.locator('.rule-panel')).toBeVisible();
   await page.getByRole('button', { name: 'サンプル', exact: true }).click();
   await expect(page.locator('dialog .samples')).toBeVisible();
   await addSamplePack(page, name);
@@ -59,7 +66,8 @@ async function addSamplePack(page: Page, name: string): Promise<void> {
     .filter({ hasText: name })
     .getByRole('button', { name: '追加', exact: true })
     .click();
-  await expect(page.locator('.banner')).toContainText('追加');
+  // 祝日データの鮮度などの常設のお知らせと混ざらないよう、操作の結果だけを見る。
+  await expect(page.locator('.banner-ok')).toContainText('追加');
 }
 
 test.describe('初回起動と永続化', () => {
@@ -174,8 +182,8 @@ test.describe('書き出し', () => {
       ],
     );
     await page.goto('');
-    // 書き出しはヘッダーから直接開ける（設定の奥に埋めない）。
-    await page.getByRole('button', { name: '書き出し' }).click();
+    // 書き出しは画面の切り替えから直接開ける（設定の奥に埋めない）。
+    await page.locator('.app-nav').getByRole('button', { name: '書き出し' }).click();
     await page.getByRole('button', { name: '3か月' }).click();
 
     const [download] = await Promise.all([
@@ -372,7 +380,7 @@ test.describe('グループ', () => {
     expect(narrowed).toBeLessThan(all);
 
     // 見ているものと渡すものが食い違うと、画面に無い予定が取り込み先へ紛れ込む。
-    await page.getByRole('button', { name: '書き出し' }).click();
+    await page.locator('.app-nav').getByRole('button', { name: '書き出し' }).click();
     await expect(
       page.locator('.export .group-choices .group-chip[aria-pressed="true"]'),
     ).toHaveText('税務');
@@ -404,7 +412,7 @@ test.describe('書き出しの初期値', () => {
   test('既定は今月の1日から末日', async ({ page }) => {
     // 試しに1回押しただけで1年分が取り込み先へ流れ込む事故を防ぐ。
     await page.goto('');
-    await page.getByRole('button', { name: '書き出し' }).click();
+    await page.locator('.app-nav').getByRole('button', { name: '書き出し' }).click();
 
     const dates = page.locator('.export input[type="date"]');
     const from = await dates.nth(0).inputValue();
@@ -463,7 +471,7 @@ test.describe('決算月への導線', () => {
     await expect(summary).toContainText('決算月');
 
     await summary.click();
-    await expect(page.locator('dialog')).toBeVisible();
+    await expect(page.locator('main .settings')).toBeVisible();
     // 営業日カレンダーは自社・銀行の2つあり、どちらにも決算月がある。
     await expect(page.getByText('事業年度の終わる月').first()).toBeVisible();
   });
@@ -477,7 +485,8 @@ test.describe('フォロー予定', () => {
 
     // サンプルの「入金予定日」には翌営業日のフォローが付いている。
     await page.locator('.header-actions').getByRole('button', { name: '一覧' }).click();
-    await expect(page.locator('.list-notice-origin').first()).toContainText('のフォロー');
+    // 先頭に来るのが準備かフォローかは今日の日付で変わるので、フォローがあることだけを見る。
+    await expect(page.locator('.list-notice-origin', { hasText: 'のフォロー' }).first()).toBeVisible();
   });
 
   test('編集画面から前後どちらも足せる', async ({ page }) => {
@@ -753,7 +762,7 @@ test.describe('表示中の期間の引き継ぎ', () => {
     await page.locator('.header-center').getByRole('button', { name: '次の月' }).click();
     const month = await page.locator('.month-label').first().textContent();
 
-    await page.getByRole('button', { name: '書き出し' }).click();
+    await page.locator('.app-nav').getByRole('button', { name: '書き出し' }).click();
     const from = page.locator('.export input[type="date"]').first();
     const value = (await from.inputValue()).slice(0, 7).replace('-', '年') + '月';
     expect(month?.replace(/\s/g, '')).toContain(value.replace(/^0+/, ''));
@@ -844,7 +853,7 @@ test.describe('グループ名の長さ', () => {
     page.once('dialog', (dialog) => void dialog.accept('あ'.repeat(41)));
     await groupActionRow(page, '税務').getByRole('button', { name: '名前を変更' }).click();
 
-    await expect(page.locator('.banner, .flash')).toContainText('40 文字');
+    await expect(page.locator('.banner-error, .flash')).toContainText('40 文字');
     await expect(page.locator('li.rule')).toHaveCount(before);
 
     // 読み直しても消えていない。
@@ -923,7 +932,7 @@ test.describe('反復の種類を往復したとき', () => {
 test.describe('やりたいことから探す', () => {
   test('ヘルプの先頭に置き、開くと手順が出る', async ({ page }) => {
     await page.goto('');
-    await page.locator('.header-actions').getByRole('button', { name: '使い方・ヘルプ' }).click();
+    await page.locator('.header-tools').getByRole('button', { name: '使い方・ヘルプ' }).click();
 
     const tasks = page.locator('.help-task');
     await expect(tasks.first()).toBeVisible();
@@ -936,7 +945,7 @@ test.describe('やりたいことから探す', () => {
 
   test('その場からルール作成へ進める', async ({ page }) => {
     await page.goto('');
-    await page.locator('.header-actions').getByRole('button', { name: '使い方・ヘルプ' }).click();
+    await page.locator('.header-tools').getByRole('button', { name: '使い方・ヘルプ' }).click();
 
     const salary = page.locator('.help-task').first();
     await salary.locator('summary').click();
@@ -947,7 +956,7 @@ test.describe('やりたいことから探す', () => {
 
   test('書き出しの項目からは書き出し画面へ進める', async ({ page }) => {
     await page.goto('');
-    await page.locator('.header-actions').getByRole('button', { name: '使い方・ヘルプ' }).click();
+    await page.locator('.header-tools').getByRole('button', { name: '使い方・ヘルプ' }).click();
 
     const task = page.locator('.help-task', {
       hasText: '作った予定を Outlook / Google カレンダーで見たい',
@@ -966,7 +975,7 @@ test.describe('やりたいことから探す', () => {
 
   test('ヘルプを開いても横スクロールが出ない', async ({ page }) => {
     await page.goto('');
-    await page.locator('.header-actions').getByRole('button', { name: '使い方・ヘルプ' }).click();
+    await page.locator('.header-tools').getByRole('button', { name: '使い方・ヘルプ' }).click();
     await page.locator('.help-task').first().locator('summary').click();
 
     const overflow = await page.evaluate(
@@ -1007,7 +1016,7 @@ test.describe('グループの気づきやすさ', () => {
 test.describe('ヘルプ', () => {
   test('タブを切り替えると目次から節へ飛べる', async ({ page }) => {
     await page.goto('');
-    await page.locator('.header-actions').getByRole('button', { name: '使い方・ヘルプ' }).click();
+    await page.locator('.header-tools').getByRole('button', { name: '使い方・ヘルプ' }).click();
 
     // 既定はやりたいことの索引。目次はもう一方のタブにある。
     await page.getByRole('tab', { name: '項目から探す' }).click();
@@ -1019,7 +1028,7 @@ test.describe('ヘルプ', () => {
 
   test('逆引きの「詳しく読む」でも節へ飛べる', async ({ page }) => {
     await page.goto('');
-    await page.locator('.header-actions').getByRole('button', { name: '使い方・ヘルプ' }).click();
+    await page.locator('.header-tools').getByRole('button', { name: '使い方・ヘルプ' }).click();
 
     const task = page.locator('.help-task', { hasText: '決算期に合わせた予定' });
     await task.locator('summary').click();
