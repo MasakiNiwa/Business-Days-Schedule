@@ -59,7 +59,8 @@ async function addSamplePack(page: Page, name: string): Promise<void> {
     .filter({ hasText: name })
     .getByRole('button', { name: '追加', exact: true })
     .click();
-  await expect(page.locator('.banner')).toContainText('追加');
+  // 祝日データの鮮度などの常設のお知らせと混ざらないよう、操作の結果だけを見る。
+  await expect(page.locator('.banner-ok')).toContainText('追加');
 }
 
 test.describe('初回起動と永続化', () => {
@@ -477,7 +478,8 @@ test.describe('フォロー予定', () => {
 
     // サンプルの「入金予定日」には翌営業日のフォローが付いている。
     await page.locator('.header-actions').getByRole('button', { name: '一覧' }).click();
-    await expect(page.locator('.list-notice-origin').first()).toContainText('のフォロー');
+    // 先頭に来るのが準備かフォローかは今日の日付で変わるので、フォローがあることだけを見る。
+    await expect(page.locator('.list-notice-origin', { hasText: 'のフォロー' }).first()).toBeVisible();
   });
 
   test('編集画面から前後どちらも足せる', async ({ page }) => {
@@ -844,7 +846,7 @@ test.describe('グループ名の長さ', () => {
     page.once('dialog', (dialog) => void dialog.accept('あ'.repeat(41)));
     await groupActionRow(page, '税務').getByRole('button', { name: '名前を変更' }).click();
 
-    await expect(page.locator('.banner, .flash')).toContainText('40 文字');
+    await expect(page.locator('.banner-error, .flash')).toContainText('40 文字');
     await expect(page.locator('li.rule')).toHaveCount(before);
 
     // 読み直しても消えていない。

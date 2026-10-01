@@ -65,7 +65,7 @@ test.describe('AIで予定を作る', () => {
     expect(await page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY)).toBeNull();
 
     await review.getByRole('button', { name: 'この内容で登録' }).click();
-    await expect(page.locator('.banner', { hasText: '「支払」を登録しました。' })).toBeVisible();
+    await expect(page.locator('.banner-ok', { hasText: '「支払」を登録しました。' })).toBeVisible();
     await expect(page.locator('dialog .ai-import')).toHaveCount(0);
 
     const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? '[]'), STORAGE_KEY);

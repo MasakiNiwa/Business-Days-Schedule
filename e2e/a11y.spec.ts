@@ -34,7 +34,8 @@ async function seedSamples(page: Page): Promise<void> {
     .filter({ hasText: '基本セット' })
     .getByRole('button', { name: '追加', exact: true })
     .click();
-  await expect(page.locator('.banner')).toContainText('追加');
+  // 祝日データの鮮度などの常設のお知らせと混ざらないよう、操作の結果だけを見る。
+  await expect(page.locator('.banner-ok')).toContainText('追加');
   await page.locator('dialog .editor-actions').getByRole('button', { name: '閉じる' }).click();
   await expect(page.locator('dialog')).toHaveCount(0);
 }
