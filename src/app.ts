@@ -80,6 +80,8 @@ import { clear, h } from './ui/dom';
 import { RuleEditor } from './ui/RuleEditor';
 import { renderRuleList } from './ui/RuleList';
 import { SettingsView } from './ui/SettingsView';
+import { AiImportView } from './ui/AiImportView';
+import { appendImportedRules } from './core/aiImport';
 
 const SAMPLES_DIR = `${import.meta.env.BASE_URL}data/samples/`;
 
@@ -100,6 +102,7 @@ type Mode =
   | { kind: 'help' }
   | { kind: 'jump' }
   | { kind: 'samples' }
+  | { kind: 'aiImport' }
   | { kind: 'calendarExport' }
   | { kind: 'day'; date: DateStr };
 
@@ -128,6 +131,8 @@ export class App {
   private dialogKey: string | null = null;
   /** 開いている編集画面。閉じる前に未保存の変更を確かめるために持つ。 */
   private openEditor: RuleEditor | null = null;
+  /** 開いている「AIで予定を作る」。貼り付けた内容を閉じる前に確かめるために持つ。 */
+  private openAiImport: AiImportView | null = null;
   /**
    * 一覧の起点。null は「今日から」。
    *
@@ -556,6 +561,31 @@ export class App {
     this.render();
   }
 
+  private openAiImportMode(): void {
+    if (!this.confirmDiscard()) return;
+    this.mode = { kind: 'aiImport' };
+    this.render();
+  }
+
+  /**
+   * AI の回答から組んだルールを登録する（docs/SPEC.md §9.5）。
+   *
+   * 既存のルールには触れず、後ろへ足すだけ。保存の直前に読み直すのは
+   * saveRule と同じ理由（別のタブが増やしたルールを消さないため）。
+   */
+  private registerAiRules(rules: readonly Rule[]): void {
+    this.state.rules = appendImportedRules(loadState(this.store).rules, rules);
+    this.persistRules();
+    this.openAiImport = null;
+    this.mode = { kind: 'calendar' };
+    this.notify(
+      rules.length === 1
+        ? `「${rules[0]?.title ?? ''}」を登録しました。`
+        : `${rules.length} 件の予定を登録しました。`,
+    );
+    this.render();
+  }
+
   private exportJson(): void {
     this.download(
       JSON.stringify(buildExportFile(this.state), null, 2),
@@ -843,6 +873,9 @@ export class App {
       case 'samples':
         void this.openSamples();
         return;
+      case 'aiImport':
+        this.openAiImportMode();
+        return;
       case 'settings':
         this.mode = { kind: 'settings' };
         this.render();
@@ -963,6 +996,24 @@ export class App {
       );
     }
 
+    if (mode.kind === 'aiImport') {
+      const view = new AiImportView(
+        this.state.calendars,
+        this.scheduleContext(this.businessCalendars()),
+        this.today,
+        {
+          copyText: copyToClipboard,
+          onRegister: (rules) => this.registerAiRules(rules),
+          onClose: () => {
+            if (!this.confirmDiscard()) return;
+            this.backToCalendar();
+          },
+        },
+      );
+      this.openAiImport = view;
+      return view.element;
+    }
+
     if (mode.kind === 'calendarExport') {
       return renderCalendarExport(
         {
@@ -1028,6 +1079,7 @@ export class App {
     if (mode.kind === 'rules') {
       return renderRuleList(this.state.rules, calendarDefs, {
         onLoadSamples: () => void this.openSamples(),
+        onOpenAiImport: () => this.openAiImportMode(),
         onAdd: () => this.startAdd(),
         onEdit: (ruleId) => this.startEdit(ruleId),
         onDuplicate: (ruleId) => this.startDuplicate(ruleId),
@@ -1064,7 +1116,9 @@ export class App {
       return;
     }
 
-    const isSameEditor = key === this.dialogKey && this.mode.kind === 'edit';
+    // 入力途中の画面は作り直さない。貼り付けた回答や確認の表示が消えるため。
+    const isSameEditor =
+      key === this.dialogKey && (this.mode.kind === 'edit' || this.mode.kind === 'aiImport');
     if (this.dialog !== null && isSameEditor) return;
 
     const content = this.buildDialogContent(this.mode);
@@ -1083,6 +1137,7 @@ export class App {
       this.dialog = null;
       // 編集画面は閉じるので、閉じる前の確認先としては手放す。
       if (this.mode.kind !== 'edit') this.openEditor = null;
+      if (this.mode.kind !== 'aiImport') this.openAiImport = null;
       previous.element.remove();
     }
 
@@ -1099,6 +1154,11 @@ export class App {
    * 前後の予定まで組んだ内容が消える。変更があるときだけ尋ねる。
    */
   private confirmDiscard(): boolean {
+    if (this.mode.kind === 'aiImport') {
+      const view = this.openAiImport;
+      if (view === null || !view.isDirty()) return true;
+      return globalThis.confirm('貼り付けた内容はまだ登録されていません。閉じますか？');
+    }
     if (this.mode.kind !== 'edit') return true;
     const editor = this.openEditor;
     if (editor === null || !editor.isDirty()) return true;
@@ -1108,6 +1168,7 @@ export class App {
   /** ブラウザ側の操作（Esc・背景クリック）で閉じられたときの後始末。 */
   private onDialogClosed(): void {
     this.openEditor = null;
+    this.openAiImport = null;
     if (this.dialog === null) return;
     this.dialog.element.remove();
     this.dialog = null;
@@ -1423,6 +1484,8 @@ export class App {
         { class: 'empty-prompt-actions' },
         button('最初のルールを作る', () => this.startAdd(), 'button button-primary'),
         button('完成例を見る', () => void this.openSamples(), 'button'),
+        // 設定項目を覚える前に、言葉で説明して作れる入口も見せる。
+        button('AIで作る', () => this.openAiImportMode(), 'button'),
         // やりたいことから引ける索引があることを、最初の画面で見せる。
         button('使い方を見る', () => this.openMode('help'), 'button button-quiet'),
       ),
@@ -1536,6 +1599,20 @@ export class App {
     this.pendingFocusDate = null;
     if (date === null) return;
     this.root.querySelector<HTMLElement>(`.cell-day[data-date="${date}"]`)?.focus();
+  }
+}
+
+/**
+ * クリップボードへ写す。権限が無い・非対応の環境では false を返し、
+ * 画面の側でその場から選んでコピーしてもらう。
+ */
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    if (globalThis.navigator?.clipboard?.writeText === undefined) return false;
+    await globalThis.navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
   }
 }
 

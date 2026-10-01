@@ -946,6 +946,7 @@ button {
 
 .preview-list li {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: 0.35rem;
   font-size: 0.82rem;
@@ -974,6 +975,8 @@ button {
   margin: 0.15rem 0 0.3rem;
   padding: 0 0 0 0.9rem;
   border-left: 2px solid var(--border);
+  /* 本体の行の横に詰めず、必ず下の段へ送る。狭い画面で日付が折れて読めなくなる。 */
+  flex-basis: 100%;
 }
 
 .preview-related-item {
@@ -1853,6 +1856,143 @@ button {
   background: currentcolor;
 }
 
+
+/* --- AIで予定を作る（§9.5） ---------------------------------------------- */
+
+.ai-import,
+.ai-review,
+.ai-errors {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.ai-import > .field-hint {
+  font-size: 0.8rem;
+}
+
+/* 手順は番号付きで縦に並べる。スマートフォンでも上から順に追えるようにする。 */
+.ai-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  counter-reset: ai-step;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.ai-step {
+  counter-increment: ai-step;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.ai-step-title,
+.ai-result-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.ai-step-title::before {
+  content: counter(ai-step);
+  display: inline-grid;
+  place-items: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  margin-right: 0.45rem;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 0.8rem;
+}
+
+.ai-step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.ai-example {
+  margin: 0;
+  padding: 0.45rem 0.6rem;
+  border-left: 3px solid var(--border-strong);
+  background: var(--bg-sunken);
+  font-size: 0.82rem;
+  white-space: pre-line;
+}
+
+.ai-import-input,
+.ai-copy-text {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  resize: vertical;
+}
+
+.ai-copy-box,
+.ai-copy-status {
+  margin: 0;
+}
+
+.ai-copy-status {
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+}
+
+.ai-copy-status:empty {
+  display: none;
+}
+
+.ai-issues,
+.ai-technical {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.ai-technical {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+.ai-preview-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  overflow-wrap: anywhere;
+}
+
+.ai-preview-item p {
+  margin: 0;
+}
+
+.ai-preview-item .rule-dot {
+  margin-top: 0;
+}
+
+.ai-preview-label {
+  margin-top: 0.3rem !important;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
 
 /* --- サンプルの追加 ------------------------------------------------------ */
 

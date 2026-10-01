@@ -12,6 +12,8 @@ import { h } from './dom';
 
 export type RuleListHandlers = {
   onLoadSamples: () => void;
+  /** 普段使っている AI に設定を作ってもらう。省略時はボタンを出さない。 */
+  onOpenAiImport?: () => void;
   onAdd: () => void;
   onEdit: (ruleId: string) => void;
   /** 似た設定を作るとき、一から組み直さずに済むようにする。 */
@@ -154,6 +156,9 @@ export function renderRuleList(
         // 空のときしか出していなかったため、使い始めると到達できなくなっていた。
         button('＋ 新規ルール', () => handlers.onAdd(), 'button button-sm button-primary'),
         button('サンプル', () => handlers.onLoadSamples(), 'button button-sm'),
+        handlers.onOpenAiImport === undefined
+          ? null
+          : button('AIで作る', () => handlers.onOpenAiImport?.(), 'button button-sm'),
         button('設定', () => handlers.onOpenSettings(), 'button button-sm button-quiet'),
       ),
     ),
@@ -176,6 +181,9 @@ export function renderRuleList(
           { class: 'empty-prompt-actions' },
           button('最初のルールを作る', () => handlers.onAdd(), 'button button-primary'),
           button('完成例を見る', () => handlers.onLoadSamples()),
+          handlers.onOpenAiImport === undefined
+            ? null
+            : button('AIで作る', () => handlers.onOpenAiImport?.(), 'button button-quiet'),
         ),
       ),
       h(

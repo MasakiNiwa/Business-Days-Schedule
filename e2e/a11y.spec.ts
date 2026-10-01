@@ -88,6 +88,29 @@ test.describe('axe-core', () => {
     await analyze(page, 'dialog');
   });
 
+  test('AIで予定を作る（入力・確認・エラー）', async ({ page }) => {
+    await page.goto('');
+    await page.locator('.empty-prompt').getByRole('button', { name: 'AIで作る' }).click();
+    await analyze(page, 'dialog');
+
+    const reply = JSON.stringify({
+      format: 'business-days-schedule-ai-import',
+      schemaVersion: 1,
+      rules: [{ title: '支払', recurrence: { type: 'monthlyByDay', days: [25] }, adjust: { mode: 'prev' } }],
+    });
+    const input = page.getByLabel('AIから返ってきた内容を貼り付け');
+    await input.fill(reply);
+    await page.getByRole('button', { name: '内容を確認' }).click();
+    await expect(page.locator('dialog .ai-review')).toBeVisible();
+    await analyze(page, 'dialog');
+
+    await page.getByRole('button', { name: '貼り直す' }).click();
+    await input.fill(reply.replace('"prev"', '"later"'));
+    await page.getByRole('button', { name: '内容を確認' }).click();
+    await expect(page.locator('dialog .ai-errors')).toBeVisible();
+    await analyze(page, 'dialog');
+  });
+
   test('日付の詳細', async ({ page }) => {
     await seedSamples(page);
     await page.locator('.cell.is-today').first().click();
