@@ -103,7 +103,7 @@ describe('buildFixRequest', () => {
     expect(result.ok).toBe(false);
     const text = buildFixRequest(result.issues);
     expect(text).toContain('Business Days Schedule で読み込めませんでした');
-    expect(text).toContain('rules[0].adjust.mode は "none" / "prev" / "next" / "nearest" / "both" のいずれかにしてください');
+    expect(text).toContain('rules[0].adjust.mode は "none" / "prev" / "next" / "nearest" / "both" / "skip" のいずれかにしてください');
     expect(text).toContain('具体的な日付は計算せず');
   });
 

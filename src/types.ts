@@ -130,8 +130,23 @@ export type FiscalRelativeRecurrence = {
   day: number | 'last';
 };
 
+/**
+ * 毎営業日 / N営業日ごと。
+ *
+ * 「毎営業日の残高確認」「5営業日ごとの資金繰り確認」のように、暦ではなく
+ * 営業日の並びで回る仕事のため。必ず営業日に出るので休業日の補正は効かない。
+ */
+export type BusinessDaysRecurrence = {
+  type: 'businessDays';
+  /** 1 = 毎営業日、5 = 5営業日ごと。 */
+  interval: number;
+  /** interval >= 2 のとき、数え始める日。省略時は period.start、それも無ければ既定値。 */
+  anchor?: DateStr;
+};
+
 export type Recurrence =
   | WeeklyRecurrence
+  | BusinessDaysRecurrence
   | MonthlyByDayRecurrence
   | MonthlyByWeekdayRecurrence
   | MonthlyByBusinessDayRecurrence
@@ -144,8 +159,9 @@ export type Recurrence =
 /**
  * both … 休業日なら前営業日と翌営業日の両方に表示する。
  *        取引先ごとに前倒し・後ろ倒しが分かれる入金予定などを、1つのルールで扱うため。
+ * skip … 休業日ならその回は行わない。「毎週月曜の定例、祝日の週は休み」のため。
  */
-export type AdjustMode = 'none' | 'prev' | 'next' | 'nearest' | 'both';
+export type AdjustMode = 'none' | 'prev' | 'next' | 'nearest' | 'both' | 'skip';
 
 export type Adjustment = {
   mode: AdjustMode;
@@ -162,7 +178,16 @@ export type Adjustment = {
  */
 export type NoticeTiming =
   /** 本体から何日か。負なら前、正なら後。0 は本体と同じ日なので認めない。 */
-  | { kind: 'offset'; offset: number; unit: 'business' | 'calendar' }
+  | {
+      kind: 'offset';
+      offset: number;
+      unit: 'business' | 'calendar';
+      /**
+       * 暦日で数えた先が休業日だったとき。省略と 'none' はそのままの日に置く。
+       * 「期限の7日前、休日なら前営業日」のため。営業日で数えるときは使わない。
+       */
+      onClosed?: 'next' | 'prev' | 'none';
+    }
   /**
    * 本体の属する週から数えた、指定の曜日。
    * 「金曜締め → 翌週水曜に報告書提出」のような、暦の週で回る仕事のため。
@@ -219,6 +244,11 @@ export type Notice = {
    * 実際の日付が食い違ったら警告に出す。
    */
   role?: NoticeRole;
+  /**
+   * この前後予定を数える営業日カレンダー。省略時は本体と同じ。
+   * 「支払日は銀行の営業日、社内承認は自社の営業日で3日前」のため。
+   */
+  calendarId?: string;
   /** @deprecated 旧形式。読み込み時に timing へ均す。 */
   offset?: number;
   /** @deprecated 旧形式。読み込み時に timing へ均す。 */

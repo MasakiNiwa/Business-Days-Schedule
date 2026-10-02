@@ -57,6 +57,9 @@ export function describeRecurrence(recurrence: Recurrence): string {
       return `${recurrence.interval}週ごと${days}`;
     }
 
+    case 'businessDays':
+      return recurrence.interval <= 1 ? '毎営業日' : `${recurrence.interval}営業日ごと`;
+
     case 'monthlyByDay': {
       const days = joinList(
         recurrence.days.map((day) => (day === 'last' ? '末日' : `${day}日`)),
@@ -103,8 +106,8 @@ function describeFiscalOffset(offset: number): string {
 }
 
 export function describeAdjustment(adjust: Adjustment, recurrence?: Recurrence): string {
-  // 第N営業日は定義上すでに営業日なので、補正の説明を出すとかえって紛らわしい。
-  if (recurrence?.type === 'monthlyByBusinessDay') return '';
+  // 第N営業日・毎営業日は定義上すでに営業日なので、補正の説明を出すとかえって紛らわしい。
+  if (recurrence?.type === 'monthlyByBusinessDay' || recurrence?.type === 'businessDays') return '';
   const scope = adjust.keepInMonth ? '（当月内）' : '';
   switch (adjust.mode) {
     case 'none':
@@ -117,6 +120,9 @@ export function describeAdjustment(adjust: Adjustment, recurrence?: Recurrence):
       return `休業日なら近い営業日${scope}`;
     case 'both':
       return `休業日なら前後の営業日の両方${scope}`;
+    case 'skip':
+      // 動かさないので「当月内」は意味を持たない。
+      return '休業日ならその回は行わない';
   }
 }
 
@@ -158,8 +164,14 @@ const WEEKDAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'] as cons
  */
 export function describeTiming(timing: NoticeTiming): string {
   switch (timing.kind) {
-    case 'offset':
-      return describeNotice(timing.offset, timing.unit);
+    case 'offset': {
+      const base = describeNotice(timing.offset, timing.unit);
+      // 暦日で数えて休業日だったときの扱い。営業日で数えるなら常に営業日なので言わない。
+      if (timing.unit !== 'calendar' || timing.onClosed === undefined || timing.onClosed === 'none') {
+        return base;
+      }
+      return `${base} / 休業日なら${timing.onClosed === 'next' ? '翌営業日へ' : '前営業日へ'}`;
+    }
     case 'weekday': {
       const week =
         WEEK_LABELS[String(timing.weeks)] ??
@@ -188,6 +200,19 @@ export function describeTiming(timing: NoticeTiming): string {
       return `${month}の${nth}`;
     }
   }
+}
+
+/**
+ * 前後予定を本体と別の営業日カレンダーで数えるときの添え書き。
+ * 本体と同じ（または指定なし）なら空文字。
+ */
+export function describeNoticeCalendar(
+  notice: { calendarId?: string },
+  ruleCalendarId: string,
+  calendarName: (id: string) => string | undefined,
+): string {
+  if (notice.calendarId === undefined || notice.calendarId === ruleCalendarId) return '';
+  return `（${calendarName(notice.calendarId) ?? notice.calendarId}で数える）`;
 }
 
 /** 有効期間の説明。無期限なら空文字。 */

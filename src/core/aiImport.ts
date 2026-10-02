@@ -33,7 +33,7 @@ import type {
   Weekday,
 } from '../types';
 import { isValidDateStr } from './dateUtil';
-import { describePeriod, describeRule, describeTiming } from './describe';
+import { describeNoticeCalendar, describePeriod, describeRule, describeTiming } from './describe';
 import { normalizeRule, timingOf } from './notice';
 import { previewSeries } from './schedule';
 import type { PreviewSeries, ScheduleContext } from './schedule';
@@ -254,10 +254,11 @@ const RULE_FIELDS = new Set([
 ]);
 /** アプリ側で付け直すので、あっても読まない項目。 */
 const IGNORED_RULE_FIELDS = new Set(['id', 'enabled', 'createdAt', 'updatedAt']);
-const NOTICE_FIELDS = new Set(['label', 'timing', 'role']);
+const NOTICE_FIELDS = new Set(['label', 'timing', 'role', 'calendarId']);
 
 const RECURRENCE_FIELDS: Record<Recurrence['type'], readonly string[]> = {
   weekly: ['type', 'interval', 'weekdays', 'anchor'],
+  businessDays: ['type', 'interval', 'anchor'],
   monthlyByDay: ['type', 'interval', 'months', 'days', 'overflow'],
   monthlyByWeekday: ['type', 'interval', 'months', 'nth', 'weekday'],
   monthlyByBusinessDay: ['type', 'interval', 'months', 'nth'],
@@ -265,7 +266,7 @@ const RECURRENCE_FIELDS: Record<Recurrence['type'], readonly string[]> = {
 };
 
 const TIMING_FIELDS: Record<NoticeTiming['kind'], readonly string[]> = {
-  offset: ['kind', 'offset', 'unit'],
+  offset: ['kind', 'offset', 'unit', 'onClosed'],
   weekday: ['kind', 'weeks', 'weekday', 'onClosed'],
   monthlyBusinessDay: ['kind', 'months', 'nth'],
 };
@@ -280,7 +281,7 @@ export const AI_COLORS: readonly ColorToken[] = [
   'pink',
   'gray',
 ];
-const ADJUST_MODES: readonly AdjustMode[] = ['none', 'prev', 'next', 'nearest', 'both'];
+const ADJUST_MODES: readonly AdjustMode[] = ['none', 'prev', 'next', 'nearest', 'both', 'skip'];
 
 /** 第N営業日として指定できる上限。1か月の営業日数を超える指定は意味がない。 */
 export const MAX_BUSINESS_NTH = 23;
@@ -461,6 +462,19 @@ function readMonths(record: Record<string, unknown>, path: string, out: Collecto
   return months === null ? null : (months as Month[]);
 }
 
+/** 繰り返しの起点の日付。無ければ undefined、読めなければ null（エラーを書き留める）。 */
+function readAnchor(record: Record<string, unknown>, path: string, out: Collector): DateStr | undefined | null {
+  if (!has(record, 'anchor')) return undefined;
+  const raw = own(record, 'anchor');
+  if (typeof raw === 'string' && isValidDateStr(raw)) return raw;
+  out.error(
+    `${path}.anchor`,
+    `AIから返された「繰り返しの基準日」（${show(raw)}）は日付として読めません。`,
+    `${path}.anchor は実在する日付を "YYYY-MM-DD" 形式で指定してください。`,
+  );
+  return null;
+}
+
 const isWeekday = (item: unknown): boolean => isInt(item) && item >= 0 && item <= 6;
 
 function readRecurrence(value: unknown, path: string, out: Collector): Recurrence | null {
@@ -485,23 +499,24 @@ function readRecurrence(value: unknown, path: string, out: Collector): Recurrenc
   rejectUnknown(value, RECURRENCE_FIELDS[type], path, '繰り返し方', out);
 
   switch (type) {
+    case 'businessDays': {
+      const interval = readInterval(value, path, out);
+      const anchor = readAnchor(value, path, out);
+      if (interval === null || anchor === null) return null;
+      if (interval >= 2 && anchor === undefined) {
+        out.warn(
+          `${path}.anchor`,
+          '「N営業日ごと」の数え始めの日が指定されていないため、どの日から数えるかはアプリの既定で決まります。下の日付で確かめてください。',
+          `${path}.anchor に、数え始める日（"YYYY-MM-DD"）を指定してください。利用者が起点を伝えていなければ、利用者に尋ねてください。`,
+        );
+      }
+      return { type, interval, ...(anchor === undefined ? {} : { anchor }) };
+    }
     case 'weekly': {
       const interval = readInterval(value, path, out);
       const weekdays = readIntList(own(value, 'weekdays'), `${path}.weekdays`, '曜日', isWeekday, '0（日）〜 6（土）の整数', out);
-      let anchor: DateStr | undefined;
-      if (has(value, 'anchor')) {
-        const raw = own(value, 'anchor');
-        if (typeof raw === 'string' && isValidDateStr(raw)) anchor = raw;
-        else {
-          out.error(
-            `${path}.anchor`,
-            `AIから返された「隔週の基準日」（${show(raw)}）は日付として読めません。`,
-            `${path}.anchor は実在する日付を "YYYY-MM-DD" 形式で指定してください。`,
-          );
-          return null;
-        }
-      }
-      if (interval === null || weekdays === null) return null;
+      const anchor = readAnchor(value, path, out);
+      if (interval === null || weekdays === null || anchor === null) return null;
       if (interval >= 2 && anchor === undefined) {
         out.warn(
           `${path}.anchor`,
@@ -595,8 +610,8 @@ function readRecurrence(value: unknown, path: string, out: Collector): Recurrenc
 }
 
 function readAdjust(value: unknown, recurrence: Recurrence | null, path: string, out: Collector): Adjustment | null {
-  // 第N営業日は定義上すでに営業日なので、休業日の扱いは効かない。編集画面と同じく none に均す。
-  const ignored = recurrence?.type === 'monthlyByBusinessDay';
+  // 第N営業日・毎営業日は定義上すでに営業日なので、休業日の扱いは効かない。編集画面と同じく none に均す。
+  const ignored = recurrence?.type === 'monthlyByBusinessDay' || recurrence?.type === 'businessDays';
   if (value === undefined) {
     if (ignored) return { mode: 'none', keepInMonth: false };
     out.error(
@@ -626,8 +641,8 @@ function readAdjust(value: unknown, recurrence: Recurrence | null, path: string,
     if (mode !== 'none') {
       out.warn(
         `${path}.mode`,
-        '「第N営業日」は必ず営業日になるため、休業日の扱いは使いません。',
-        `type が "monthlyByBusinessDay" のときは ${path}.mode を "none" にしてください。`,
+        '「第N営業日」「毎営業日」は必ず営業日になるため、休業日の扱いは使いません。',
+        `type が "${recurrence?.type ?? ''}" のときは ${path}.mode を "none" にしてください。`,
       );
     }
     return { mode: 'none', keepInMonth: false };
@@ -660,8 +675,23 @@ function readTiming(value: unknown, path: string, out: Collector): NoticeTiming 
     case 'offset': {
       const offset = readInt(own(value, 'offset'), `${path}.offset`, '本体から何日前・何日後か', { min: -LIMITS.noticeOffset, max: LIMITS.noticeOffset, notZero: true }, out);
       const unit = readEnum(own(value, 'unit'), ['business', 'calendar'] as const, `${path}.unit`, '日数の数え方（営業日／暦日）', out);
+      let onClosed: 'next' | 'prev' | 'none' | undefined;
+      if (has(value, 'onClosed')) {
+        const read = readEnum(own(value, 'onClosed'), ['next', 'prev', 'none'] as const, `${path}.onClosed`, '数えた先が休業日のときの扱い', out);
+        if (read === null) return null;
+        onClosed = read;
+      }
       if (offset === null || unit === null) return null;
-      return { kind, offset, unit };
+      if (onClosed !== undefined && unit === 'business') {
+        // 営業日で数えた先は必ず営業日なので効かない。意味は変わらないので落として知らせる。
+        out.warn(
+          `${path}.onClosed`,
+          '営業日で数える前後の予定は必ず営業日になるため、「休業日のときの扱い」は使いません。',
+          `${path}.unit が "business" のときは onClosed を出力しないでください。`,
+        );
+        onClosed = undefined;
+      }
+      return { kind, offset, unit, ...(onClosed === undefined ? {} : { onClosed }) };
     }
     case 'weekday': {
       const weeks = readInt(own(value, 'weeks'), `${path}.weeks`, '何週前・何週後か', { min: -LIMITS.noticeWeeks, max: LIMITS.noticeWeeks }, out);
@@ -708,7 +738,12 @@ function readText(
   return value.trim();
 }
 
-function readNotices(value: unknown, path: string, out: Collector): Notice[] | null {
+function readNotices(
+  value: unknown,
+  path: string,
+  calendars: readonly BusinessCalendar[],
+  out: Collector,
+): Notice[] | null {
   if (value === undefined) return [];
   if (!Array.isArray(value)) {
     out.error(path, 'AIから返された「前後の予定」の形式が正しくありません。', `${path} は配列にしてください（無ければ [] か省略）。`);
@@ -736,11 +771,30 @@ function readNotices(value: unknown, path: string, out: Collector): Notice[] | n
       if (read === null) failed = true;
       else role = read;
     }
+    let calendarId: string | undefined;
+    if (has(item, 'calendarId')) {
+      const raw = own(item, 'calendarId');
+      const ids = calendars.map((calendar) => calendar.id);
+      if (typeof raw === 'string' && ids.includes(raw)) calendarId = raw;
+      else {
+        out.error(
+          `${at}.calendarId`,
+          `AIから返された前後の予定の営業日カレンダー（${show(raw)}）はこのアプリにありません。`,
+          `${at}.calendarId は ${quoteList(ids)} のいずれかにしてください（本体と同じなら省略）。`,
+        );
+        failed = true;
+      }
+    }
     if (typeof label !== 'string' || timing === null) {
       failed = true;
       return;
     }
-    notices.push({ label, timing, ...(role === undefined ? {} : { role }) });
+    notices.push({
+      label,
+      timing,
+      ...(role === undefined ? {} : { role }),
+      ...(calendarId === undefined ? {} : { calendarId }),
+    });
   });
   return failed ? null : notices;
 }
@@ -832,7 +886,7 @@ function readRule(value: unknown, index: number, ctx: AiImportContext, out: Coll
 
   const recurrence = readRecurrence(own(value, 'recurrence'), `${path}.recurrence`, out);
   const adjust = readAdjust(own(value, 'adjust'), recurrence, `${path}.adjust`, out);
-  const notices = readNotices(own(value, 'notices'), `${path}.notices`, out);
+  const notices = readNotices(own(value, 'notices'), `${path}.notices`, ctx.calendars, out);
   const period = readPeriod(own(value, 'period'), `${path}.period`, out);
 
   if (
@@ -984,7 +1038,14 @@ export function buildImportPreview(
     rule,
     summary: describeRule(rule),
     calendarName: calendars.find((calendar) => calendar.id === rule.calendarId)?.name ?? rule.calendarId,
-    notices: rule.notices.map((notice) => `${describeTiming(timingOf(notice))}: ${notice.label}`),
+    notices: rule.notices.map(
+      (notice) =>
+        `${describeTiming(timingOf(notice))}: ${notice.label}${describeNoticeCalendar(
+          notice,
+          rule.calendarId,
+          (id) => calendars.find((calendar) => calendar.id === id)?.name,
+        )}`,
+    ),
     period: describePeriod(rule.period),
     series: previewSeries(rule, from, count, ctx),
   }));

@@ -44,9 +44,10 @@ export type ValidationIssue = {
 
 const WEEKDAYS = new Set([0, 1, 2, 3, 4, 5, 6]);
 const NTH_WEEKDAYS = new Set([1, 2, 3, 4, 5, -1]);
-const ADJUST_MODES = new Set(['none', 'prev', 'next', 'nearest', 'both']);
+const ADJUST_MODES = new Set(['none', 'prev', 'next', 'nearest', 'both', 'skip']);
 const RECURRENCE_TYPES = new Set([
   'weekly',
+  'businessDays',
   'monthlyByDay',
   'monthlyByWeekday',
   'monthlyByBusinessDay',
@@ -96,6 +97,12 @@ function validateRecurrence(recurrence: Recurrence, issues: ValidationIssue[]): 
           issues.push({ path: 'recurrence.weekdays', message: `曜日が不正です: ${weekday}`, severity: 'error' });
         }
       }
+      if (recurrence.anchor !== undefined && !isValidDateStr(recurrence.anchor)) {
+        issues.push({ path: 'recurrence.anchor', message: '基準日の形式が不正です', severity: 'error' });
+      }
+      break;
+    }
+    case 'businessDays': {
       if (recurrence.anchor !== undefined && !isValidDateStr(recurrence.anchor)) {
         issues.push({ path: 'recurrence.anchor', message: '基準日の形式が不正です', severity: 'error' });
       }
@@ -342,6 +349,9 @@ export function validateRule(rule: Rule): ValidationIssue[] {
           if (timing['unit'] !== 'business' && timing['unit'] !== 'calendar') {
             bad('単位が不正です');
           }
+          if (timing['onClosed'] !== undefined && !['next', 'prev', 'none'].includes(String(timing['onClosed']))) {
+            bad('休業日のときの扱いが不正です');
+          }
           break;
         }
         case 'weekday': {
@@ -378,6 +388,10 @@ export function validateRule(rule: Rule): ValidationIssue[] {
       const role = notice['role'];
       if (role !== undefined && role !== 'before' && role !== 'after') {
         issues.push({ path: `notices[${index}].role`, message: '前後の指定が不正です', severity: 'error' });
+      }
+      const noticeCalendar = notice['calendarId'];
+      if (noticeCalendar !== undefined && (!isStringValue(noticeCalendar) || noticeCalendar === '')) {
+        issues.push({ path: `notices[${index}].calendarId`, message: '営業日カレンダーの指定が不正です', severity: 'error' });
       }
       if (!isStringValue(notice['label']) || String(notice['label']).length > LIMITS.titleLength) {
         issues.push({ path: `notices[${index}].label`, message: 'ラベルが不正です', severity: 'error' });
