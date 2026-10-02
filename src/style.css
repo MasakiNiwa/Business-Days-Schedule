@@ -18,6 +18,8 @@
   --danger-fg: #a3261e;
   --notice-bg: #fff8e1;
   --notice-fg: #7a5c00;
+  /* 〈AIで作る〉の色。主ボタンの青と見分けがつく紫。 */
+  --ai: #7c3aed;
 
   --color-blue: #2f6fed;
   --color-green: #1f9254;
@@ -50,6 +52,7 @@
     --danger-fg: #f4a8a1;
     --notice-bg: #33290f;
     --notice-fg: #e8cf8a;
+    --ai: #b794f6;
 
     --color-blue: #5b8def;
     --color-green: #3fae74;
@@ -78,6 +81,7 @@
     --danger-fg: #f4a8a1;
     --notice-bg: #33290f;
     --notice-fg: #e8cf8a;
+    --ai: #b794f6;
 
     --color-blue: #5b8def;
     --color-green: #3fae74;
@@ -227,6 +231,49 @@ button {
 }
 
 /* --- 通知バナー -------------------------------------------------------- */
+
+/* 操作を添えた知らせ。一覧の途中で消しても見えるよう、画面の下に浮かせる。 */
+.banner.banner-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1rem;
+  transform: translateX(-50%);
+  z-index: 45;
+  margin: 0;
+  width: max-content;
+  max-width: calc(100vw - 2rem);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
+  /* 色は通常の知らせと同じ淡い地。下の一覧が透けないよう、不透明な地の上に重ねる。 */
+  background-color: var(--bg);
+  background-image: linear-gradient(
+    color-mix(in srgb, var(--accent) 12%, transparent),
+    color-mix(in srgb, var(--accent) 12%, transparent)
+  );
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+@media (max-width: 720px) {
+  .banner.banner-toast {
+    bottom: calc(4.75rem + env(safe-area-inset-bottom));
+  }
+}
+
+/* 知らせに添える操作（「元に戻す」）。文の続きとして読めるよう、行の中に置く。 */
+.banner-action {
+  margin-left: 0.6rem;
+  padding: 0.1rem 0.6rem;
+  border: 1px solid currentcolor;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.85em;
+  font-weight: 600;
+}
+
+.banner-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 .banner {
   margin: 0 0 0.6rem;
@@ -667,6 +714,98 @@ button {
 .button-quiet {
   background: transparent;
   color: var(--fg-muted);
+}
+
+/*
+ * 〈AIで作る〉。設定項目を知らなくても始められる入口なので、他の操作と見分けが
+ * つくようにする。主ボタン（塗り）とは競わせず、色付きの枠と淡い地にとどめる。
+ * 文字は本文色に寄せてコントラストを保つ。印は飾りなので読み上げない。
+ */
+.button-ai {
+  border-color: color-mix(in srgb, var(--ai) 70%, transparent);
+  background: color-mix(in srgb, var(--ai) 12%, var(--bg));
+  color: color-mix(in srgb, var(--ai) 55%, var(--fg));
+  font-weight: 600;
+}
+
+.button-ai::before {
+  content: '✦' / '';
+  margin-right: 0.3em;
+  color: var(--ai);
+}
+
+.button-ai:hover {
+  background: color-mix(in srgb, var(--ai) 20%, var(--bg));
+}
+
+/* --- ルール一覧からの削除 ------------------------------------------------ */
+
+/* 広い画面では行の右端に常に出す。消す操作なので控えめに、触れたときだけ赤くする。 */
+.rule-delete {
+  flex: none;
+  align-self: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-muted);
+  padding: 0.3rem 0.6rem;
+  font-size: 0.9rem;
+}
+
+.rule-delete:hover,
+.rule-delete:focus-visible {
+  color: var(--danger-fg);
+  background: var(--danger-bg);
+}
+
+.rule-delete:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/*
+ * 狭い画面では、行を左へ払ったときだけ右端から出す。並んでいるボタンと
+ * 押し間違えないよう、ふだんは画面の外に置いておく。
+ * キーボードで削除ボタンに来たときも出す（払えない人のため）。
+ */
+@media (max-width: 720px) {
+  .rules {
+    overflow-x: clip;
+  }
+
+  .rule:has(.rule-delete) {
+    position: relative;
+    transition: transform 0.18s ease-out;
+  }
+
+  .rule.is-revealed,
+  .rule:has(.rule-delete:focus-visible) {
+    transform: translateX(-5.5rem);
+  }
+
+  .rule-delete {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: -5.5rem;
+    width: 5rem;
+    border-radius: 6px;
+    background: var(--danger-fg);
+    color: var(--bg);
+    font-weight: 600;
+  }
+
+  .rule-delete:hover,
+  .rule-delete:focus-visible {
+    background: var(--danger-fg);
+    color: var(--bg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rule:has(.rule-delete) {
+    transition: none;
+  }
 }
 
 .button-danger {
@@ -1933,6 +2072,16 @@ button {
   background: var(--bg-sunken);
   font-size: 0.82rem;
   white-space: pre-line;
+}
+
+.ai-example p {
+  margin: 0;
+}
+
+.ai-example-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--fg-muted);
 }
 
 .ai-import-input,

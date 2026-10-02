@@ -134,7 +134,12 @@ export class App {
   private settingsView: SettingsView | null = null;
   private exportView: HTMLElement | null = null;
   private mode: Mode = { kind: 'calendar' };
-  private flash: { text: string; tone: 'info' | 'error' } | null = null;
+  private flash: {
+    text: string;
+    tone: 'info' | 'error';
+    /** 知らせに添える操作（「元に戻す」など）。 */
+    action?: { label: string; run: () => void };
+  } | null = null;
   /** 矢印キーで月をまたいだあと、描き直しの後にフォーカスを戻す先。 */
   private pendingFocusDate: DateStr | null = null;
   private dialog: DialogController | null = null;
@@ -502,6 +507,43 @@ export class App {
     this.persistRules();
     this.mode = { kind: 'calendar' };
     this.notify(`「${rule.title}」を削除しました。`);
+    this.render();
+  }
+
+  /**
+   * 一覧から消す。確認はせず、その場で〈元に戻す〉を出す。
+   *
+   * 払う（または削除ボタンを押す）操作で消すつもりなのは分かっているので、
+   * 確認を重ねると手数が増えるだけになる。間違えたときは戻せればよい。
+   */
+  private deleteRuleFromList(ruleId: string): void {
+    // 保存の直前に読み直す。別のタブが増やしたルールを消さないため。
+    const saved = loadState(this.store).rules;
+    const index = saved.findIndex((item) => item.id === ruleId);
+    const rule = saved[index];
+    if (rule === undefined) return;
+    this.state.rules = saved.filter((item) => item.id !== ruleId);
+    this.persistRules();
+    this.flash = {
+      text: `「${rule.title}」を削除しました。`,
+      tone: 'info',
+      action: { label: '元に戻す', run: () => this.restoreRule(rule, index) },
+    };
+    this.render();
+    // 行ごと消えて焦点の行き場が無くなるので、〈元に戻す〉へ移す。読み進めた位置は動かさない。
+    this.root.querySelector<HTMLElement>('.banner-action')?.focus({ preventScroll: true });
+  }
+
+  /** 消したルールを元の位置へ戻す。既に同じ id があれば何もしない。 */
+  private restoreRule(rule: Rule, index: number): void {
+    const saved = loadState(this.store).rules;
+    if (!saved.some((item) => item.id === rule.id)) {
+      const next = [...saved];
+      next.splice(Math.min(index, next.length), 0, rule);
+      this.state.rules = next;
+      this.persistRules();
+    }
+    this.notify(`「${rule.title}」を元に戻しました。`);
     this.render();
   }
 
@@ -948,6 +990,7 @@ export class App {
           onEdit: (ruleId) => this.startEdit(ruleId),
           onDuplicate: (ruleId) => this.startDuplicate(ruleId),
           onToggle: (ruleId, enabled) => this.toggleRule(ruleId, enabled),
+          onDelete: (ruleId) => this.deleteRuleFromList(ruleId),
           onRenameGroup: (group, next) => this.renameGroupTo(group, next),
           onDeleteGroup: (group) => this.deleteGroup(group),
         });
@@ -1062,6 +1105,7 @@ export class App {
             this.backToCalendar();
           },
         },
+        collectGroups(this.state.rules),
       );
       this.openAiImport = view;
       return view.element;
@@ -1487,7 +1531,7 @@ export class App {
         button('最初のルールを作る', () => this.startAdd(), 'button button-primary'),
         button('完成例を見る', () => void this.openSamples(), 'button'),
         // 設定項目を覚える前に、言葉で説明して作れる入口も見せる。
-        button('AIで作る', () => this.openAiImportMode(), 'button'),
+        button('AIで作る', () => this.openAiImportMode(), 'button button-ai'),
         // やりたいことから引ける索引があることを、最初の画面で見せる。
         button('使い方を見る', () => this.openMode('help'), 'button button-quiet'),
       ),
@@ -1563,8 +1607,16 @@ export class App {
       banners.append(
         h(
           'p',
-          { class: `banner${flash.tone === 'error' ? ' banner-error' : ' banner-ok'}` },
+          {
+            class: `banner${flash.tone === 'error' ? ' banner-error' : ' banner-ok'}${
+              // 操作を添えた知らせは、どこまで読み進めていても見えるよう画面の下に出す。
+              flash.action === undefined ? '' : ' banner-toast'
+            }`,
+          },
           flash.text,
+          flash.action === undefined
+            ? null
+            : button(flash.action.label, flash.action.run, 'banner-action'),
         ),
       );
     }

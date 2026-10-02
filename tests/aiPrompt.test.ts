@@ -20,9 +20,42 @@ describe('buildAiPrompt', () => {
     expect(prompt).toContain('"schemaVersion": 1');
   });
 
-  it('日付を計算させない・勝手に補わせないことを明記する', () => {
+  it('日付を計算させない・黙って決めさせないことを明記する', () => {
     expect(prompt).toContain('具体的な日付を計算しないでください');
-    expect(prompt).toContain('勝手に補わず');
+    // まとめの表でも日付を書かせない。書くと AI の計算違いを信じさせてしまう。
+    expect(prompt).toContain('表の中でも「10月23日」のような日付は書かず');
+    expect(prompt).toContain('黙って決めないでください');
+  });
+
+  it('利用者に設定の知識を求めず、業務の言葉で聞き取らせる', () => {
+    expect(prompt).toContain('利用者は、このアプリで設定できる内容をよく知りません');
+    expect(prompt).toContain('設定項目の名前や JSON の話はしないでください');
+    // 出す前に、まとめを見せて確かめさせる。
+    expect(prompt).toContain('「この内容で作りますか？」と確かめてください');
+  });
+
+  it('自分の予定を伝えるだけでなく、業務の相談にも乗らせる', () => {
+    expect(prompt).toContain('業務の相談に乗る');
+    expect(prompt).toContain('必要になりそうな予定と、その準備・事後確認（前後の予定）を提案します');
+    // 法定期限は公式の案内で確かめるよう添えさせる。それらしい期限を作らせない。
+    expect(prompt).toContain('公式の案内で確かめてください');
+    expect(prompt).toContain('それらしい期限を作らないでください');
+  });
+
+  it('会社の決算月を伝える', () => {
+    expect(prompt).toContain('この会社の決算月はアプリの設定では 3月 です');
+    const september = buildAiPrompt([{ ...companyCalendarDef, fiscalYearEndMonth: 9 }, bankCalendarDef]);
+    expect(september).toContain('決算月はアプリの設定では 9月 です');
+  });
+
+  it('既に使っているグループ名を伝える（無ければ触れない）', () => {
+    expect(prompt).not.toContain('既に使っているグループ');
+    const withGroups = buildAiPrompt({ calendars, groups: ['税務', '支払・振込', '税務', ''] });
+    expect(withGroups).toContain('利用者が既に使っているグループ: 「税務」、「支払・振込」。');
+  });
+
+  it('最後に、利用者へ話しかけるところから始めさせる', () => {
+    expect(prompt.trimEnd().endsWith('「進め方」の1のとおり利用者に話しかけてください。')).toBe(true);
   });
 
   it('手元の営業日カレンダーを選べる値として示す', () => {

@@ -9,6 +9,7 @@ import { UNGROUPED, groupLabel, groupOf } from '../core/group';
 import type { BusinessCalendar, Rule } from '../types';
 import { button } from './controls';
 import { h } from './dom';
+import { attachHorizontalSwipe } from './swipe';
 
 export type RuleListHandlers = {
   onLoadSamples: () => void;
@@ -19,6 +20,11 @@ export type RuleListHandlers = {
   /** 似た設定を作るとき、一から組み直さずに済むようにする。 */
   onDuplicate: (ruleId: string) => void;
   onToggle: (ruleId: string, enabled: boolean) => void;
+  /**
+   * 一覧から直接消す。編集画面を開いてから消すのは手数が多い。
+   * 省略時は削除の操作を出さない。
+   */
+  onDelete?: (ruleId: string) => void;
   /** 省略時はボタンを出さない（画面の切り替えから行けるとき）。 */
   onOpenSettings?: () => void;
   /** グループ名をまとめて付け替える。1件ずつ編集させると取りこぼすため。 */
@@ -54,7 +60,7 @@ function renderRule(
   toggle.checked = rule.enabled;
   toggle.addEventListener('change', () => handlers.onToggle(rule.id, toggle.checked));
 
-  return h(
+  const item = h(
     'li',
     { class: `rule${rule.enabled ? '' : ' is-disabled'}` },
     h('span', { class: `rule-dot color-${rule.color}`, 'aria-hidden': 'true' }),
@@ -85,6 +91,51 @@ function renderRule(
       button('編集', () => handlers.onEdit(rule.id), 'button button-sm button-quiet'),
       button('複製', () => handlers.onDuplicate(rule.id), 'button button-sm button-quiet'),
     ),
+  );
+
+  const onDelete = handlers.onDelete;
+  if (onDelete !== undefined) {
+    const remove = button('削除', () => onDelete(rule.id), 'rule-delete');
+    remove.setAttribute('aria-label', `「${rule.title}」を削除`);
+    item.append(remove);
+    attachSwipeToReveal(item);
+  }
+  return item;
+}
+
+/**
+ * 狭い画面では、行を左へ払うと削除ボタンが出る（右へ払うと戻る）。
+ *
+ * 行ごとにボタンを並べると、狭い画面では編集・複製と押し間違えやすい。
+ * 払う操作をはさむことで、消すつもりの操作だと分かる。広い画面では
+ * ボタンとして常に出ている（CSS で出し分ける）。
+ */
+function attachSwipeToReveal(item: HTMLElement): void {
+  const setRevealed = (revealed: boolean): void => {
+    if (revealed) {
+      // 開くのは1行だけ。前に開いたものは閉じる。
+      for (const other of item.parentElement?.querySelectorAll('.rule.is-revealed') ?? []) {
+        if (other !== item) other.classList.remove('is-revealed');
+      }
+    }
+    item.classList.toggle('is-revealed', revealed);
+  };
+  attachHorizontalSwipe(item, {
+    onSwipeLeft: () => setRevealed(true),
+    onSwipeRight: () => setRevealed(false),
+  });
+  // 開いている行の、削除ボタン以外を押したら閉じるだけにする。
+  // そのまま編集などが動くと、閉じるつもりの指で別の操作をしてしまう。
+  item.addEventListener(
+    'click',
+    (event) => {
+      if (!item.classList.contains('is-revealed')) return;
+      if ((event.target as Element | null)?.closest('.rule-delete') !== null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setRevealed(false);
+    },
+    { capture: true },
   );
 }
 
@@ -157,10 +208,10 @@ export function renderRuleList(
         // ルールが増えたあとでもサンプルを足せるよう、常に置く。
         // 空のときしか出していなかったため、使い始めると到達できなくなっていた。
         button('＋ 新規ルール', () => handlers.onAdd(), 'button button-sm button-primary'),
-        button('サンプル', () => handlers.onLoadSamples(), 'button button-sm'),
         handlers.onOpenAiImport === undefined
           ? null
-          : button('AIで作る', () => handlers.onOpenAiImport?.(), 'button button-sm'),
+          : button('AIで作る', () => handlers.onOpenAiImport?.(), 'button button-sm button-ai'),
+        button('サンプル', () => handlers.onLoadSamples(), 'button button-sm'),
         handlers.onOpenSettings === undefined
           ? null
           : button('設定', () => handlers.onOpenSettings?.(), 'button button-sm button-quiet'),
@@ -187,7 +238,7 @@ export function renderRuleList(
           button('完成例を見る', () => handlers.onLoadSamples()),
           handlers.onOpenAiImport === undefined
             ? null
-            : button('AIで作る', () => handlers.onOpenAiImport?.(), 'button button-quiet'),
+            : button('AIで作る', () => handlers.onOpenAiImport?.(), 'button button-ai'),
         ),
       ),
     );
@@ -270,3 +321,4 @@ function closeActions(handlers: RuleListHandlers): HTMLElement | null {
     button('閉じる', () => onClose(), 'button button-primary'),
   );
 }
+
