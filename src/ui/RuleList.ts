@@ -3,7 +3,7 @@
  * M3 から追加・編集・削除・有効/無効の切り替えができる。
  */
 
-import { describePeriod, describeRule, describeTiming } from '../core/describe';
+import { describeNoticeCalendar, describePeriod, describeRule, describeTiming } from '../core/describe';
 import { timingOf } from '../core/notice';
 import { UNGROUPED, groupLabel, groupOf } from '../core/group';
 import type { BusinessCalendar, Rule } from '../types';
@@ -48,7 +48,15 @@ function renderRule(
   if (group !== UNGROUPED) meta.push(h('span', { class: 'rule-group-tag' }, group));
   for (const notice of rule.notices) {
     meta.push(
-      h('span', { class: 'rule-notice' }, `${describeTiming(timingOf(notice))}: ${notice.label}`),
+      h(
+        'span',
+        { class: 'rule-notice' },
+        `${describeTiming(timingOf(notice))}: ${notice.label}${describeNoticeCalendar(
+          notice,
+          rule.calendarId,
+          (id) => calendars.get(id)?.name,
+        )}`,
+      ),
     );
   }
   if (period !== '') meta.push(h('span', { class: 'rule-period' }, period));

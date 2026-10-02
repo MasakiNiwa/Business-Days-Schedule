@@ -5,11 +5,12 @@
  * 頭の中で追いにくいため、入力するそばから実際の日付を見せることで誤設定を防ぐ。
  */
 
-import { describeRule, describeTiming } from '../core/describe';
+import { describeNoticeCalendar, describeRule, describeTiming } from '../core/describe';
 import { createNotice, normalizeRule, roleOf, timingOf } from '../core/notice';
 import { createRule } from '../core/storage';
 import { todayInTokyo, weekdayOf } from '../core/dateUtil';
 import { previewSeries } from '../core/schedule';
+import { skipsAdjustment } from '../core/recurrence';
 import type { ScheduleContext } from '../core/schedule';
 import { LIMITS, validateRule } from '../core/validate';
 import type {
@@ -46,12 +47,21 @@ const WEEKDAY_NAMES = ['日', '月', '火', '水', '木', '金', '土'] as const
 
 type RecurrenceKind = Recurrence['type'];
 
+/** よく使う繰り返し方。常に見せる。 */
 const KIND_LABELS: { value: RecurrenceKind; label: string }[] = [
   { value: 'monthlyByDay', label: '毎月N日' },
   { value: 'monthlyByBusinessDay', label: '第N営業日' },
   { value: 'monthlyByWeekday', label: '第N曜日' },
   { value: 'weekly', label: '毎週' },
+];
+
+/**
+ * 使う人が限られる繰り返し方。折りたたみの中に置く。
+ * 全部を並べると、初めての人がどれを選べばよいかで止まる。
+ */
+const EXTRA_KIND_LABELS: { value: RecurrenceKind; label: string }[] = [
   { value: 'fiscalRelative', label: '決算月基準' },
+  { value: 'businessDays', label: '毎営業日・N営業日ごと' },
 ];
 
 /** 決算月基準でよく使う形。数えるより選ぶほうが早い。 */
@@ -71,6 +81,7 @@ function defaultDrafts(current: Recurrence): Record<RecurrenceKind, Recurrence> 
     monthlyByWeekday: { type: 'monthlyByWeekday', interval: 1, nth: [1], weekday: 2 },
     monthlyByBusinessDay: { type: 'monthlyByBusinessDay', interval: 1, nth: [5] },
     fiscalRelative: { type: 'fiscalRelative', offsetMonths: [2], day: 'last' },
+    businessDays: { type: 'businessDays', interval: 1 },
   };
   drafts[current.type] = current;
   return drafts;
@@ -81,6 +92,9 @@ export type RuleEditorHandlers = {
   onCancel: () => void;
   onDelete?: (ruleId: string) => void;
 };
+
+/** 日付を動かす補正か。動かさないもの（補正なし・その回は行わない）では「月をまたがない」は意味を持たない。 */
+const movesDate = (mode: Rule['adjust']['mode']): boolean => mode !== 'none' && mode !== 'skip';
 
 /** グループ名の入力候補。id は datalist と結ぶために使う。 */
 const GROUP_LIST_ID = 'rule-group-options';
@@ -126,6 +140,13 @@ const ROLE_OPTIONS = [
   { value: 'after' as const, label: '後（フォロー）' },
 ];
 
+/** 暦日で数えた先が休業日のとき。既定は「そのまま」なので先頭に置く。 */
+const OFFSET_ON_CLOSED_OPTIONS = [
+  { value: 'none' as const, label: 'その日のまま' },
+  { value: 'prev' as const, label: '前営業日へ戻す' },
+  { value: 'next' as const, label: '翌営業日へ送る' },
+];
+
 const ON_CLOSED_OPTIONS = [
   { value: 'next' as const, label: '翌営業日へ送る' },
   { value: 'prev' as const, label: '前営業日へ戻す' },
@@ -158,7 +179,13 @@ type TimingState = {
    * 日付の設定を触っていないのに別の予定として扱われる。
    */
   role: NoticeRole;
-  offset: { size: number; unit: 'business' | 'calendar'; role: NoticeRole };
+  offset: {
+    size: number;
+    unit: 'business' | 'calendar';
+    role: NoticeRole;
+    /** 暦日で数えた先が休業日のとき。営業日で数えるときは使わない。 */
+    onClosed: 'next' | 'prev' | 'none';
+  };
   weekday: { weeks: number; weekday: Weekday; onClosed: 'next' | 'prev' | 'none' };
   monthlyBusinessDay: { months: number; size: number; fromEnd: boolean };
 };
@@ -168,7 +195,7 @@ function defaultTimingState(role: NoticeRole): TimingState {
   return {
     kind: 'offset',
     role,
-    offset: { size: 3, unit: 'business', role },
+    offset: { size: 3, unit: 'business', role, onClosed: 'none' },
     weekday: { weeks: role === 'before' ? -1 : 1, weekday: 3, onClosed: 'next' },
     monthlyBusinessDay: { months: role === 'before' ? 0 : 1, size: 5, fromEnd: false },
   };
@@ -184,6 +211,7 @@ function timingStateOf(timing: NoticeTiming, role: NoticeRole): TimingState {
         size: Math.abs(timing.offset),
         unit: timing.unit,
         role: timing.offset < 0 ? 'before' : 'after',
+        onClosed: timing.onClosed ?? 'none',
       };
       break;
     case 'weekday':
@@ -204,8 +232,12 @@ function timingStateOf(timing: NoticeTiming, role: NoticeRole): TimingState {
 function timingOfState(state: TimingState): NoticeTiming {
   switch (state.kind) {
     case 'offset': {
-      const { size, unit, role } = state.offset;
-      return { kind: 'offset', offset: role === 'before' ? -size : size, unit };
+      const { size, unit, role, onClosed } = state.offset;
+      const offset = role === 'before' ? -size : size;
+      // 営業日で数えるときは必ず営業日なので持たない。「そのまま」も持たない（既定と同じ）。
+      return unit === 'calendar' && onClosed !== 'none'
+        ? { kind: 'offset', offset, unit, onClosed }
+        : { kind: 'offset', offset, unit };
     }
     case 'weekday':
       return { kind: 'weekday', ...state.weekday };
@@ -533,7 +565,10 @@ export class RuleEditor {
 
   private buildRecurrence(): HTMLElement {
     const tabs = h('div', { class: 'tabs', role: 'group', 'aria-label': '繰り返しの種類' });
-    for (const kind of KIND_LABELS) {
+    const extraTabs = h('div', { class: 'tabs', role: 'group', 'aria-label': 'ほかの繰り返しの種類' });
+    const allTabs = (): Element[] => [...tabs.querySelectorAll('.tab'), ...extraTabs.querySelectorAll('.tab')];
+    for (const kind of [...KIND_LABELS, ...EXTRA_KIND_LABELS]) {
+      const extra = EXTRA_KIND_LABELS.includes(kind);
       const tab = h(
         'button',
         {
@@ -546,21 +581,29 @@ export class RuleEditor {
       tab.addEventListener('click', () => {
         this.drafts[this.draft.recurrence.type] = this.draft.recurrence;
         this.draft.recurrence = this.drafts[kind.value];
-        for (const other of tabs.querySelectorAll('.tab')) {
+        for (const other of allTabs()) {
           other.setAttribute('aria-pressed', other === tab ? 'true' : 'false');
         }
         this.renderRecurrence();
         this.syncAdjustVisibility();
         this.refresh();
       });
-      tabs.append(tab);
+      (extra ? extraTabs : tabs).append(tab);
     }
 
+    // 使う人が限られるものは畳む。選んでいるときは開いて、何を選んでいるかを見せる。
+    const extraOpen = EXTRA_KIND_LABELS.some((kind) => kind.value === this.draft.recurrence.type);
     return h(
       'section',
       { class: 'editor-section' },
       h('h3', { class: 'editor-heading' }, '2. いつ行いますか？（繰り返し）'),
       tabs,
+      h(
+        'details',
+        { class: 'advanced-options recurrence-extra', open: extraOpen },
+        h('summary', {}, 'ほかの繰り返し方（決算月基準・毎営業日）'),
+        extraTabs,
+      ),
       this.recurrenceBody,
     );
   }
@@ -585,7 +628,53 @@ export class RuleEditor {
       case 'fiscalRelative':
         this.recurrenceBody.append(...this.fiscalRelativeFields(recurrence));
         break;
+      case 'businessDays':
+        this.recurrenceBody.append(...this.businessDaysFields(recurrence));
+        break;
     }
+  }
+
+  /** 毎営業日・N営業日ごと。必ず営業日に出るので、休業日の扱いは問わない。 */
+  private businessDaysFields(recurrence: Recurrence & { type: 'businessDays' }): HTMLElement[] {
+    const anchorInput = dateInput(recurrence.anchor ?? this.draft.period.start, (value) => {
+      if (value === null) delete recurrence.anchor;
+      else recurrence.anchor = value;
+      this.refresh();
+    });
+    const anchorField = field(
+      '数え始める日',
+      anchorInput,
+      'この日（休業日なら次の営業日）を1回目として数えます。',
+    );
+    anchorField.hidden = recurrence.interval < 2;
+    /**
+     * 「N営業日ごと」は数え始めの日で回る日が決まる。決めずに保存すると、
+     * 既定の遠い過去から数えることになり、どの日に出るかが読めない。
+     * 間隔を2以上にした時点で、今日を入れておく（見えるので直せる）。
+     */
+    const ensureAnchor = (): void => {
+      if (recurrence.interval < 2 || recurrence.anchor !== undefined || this.draft.period.start !== null) return;
+      recurrence.anchor = this.today;
+      anchorInput.value = this.today;
+    };
+    return [
+      field(
+        '間隔',
+        h(
+          'div',
+          { class: 'inline' },
+          numberInput(recurrence.interval, (value) => {
+            recurrence.interval = value;
+            anchorField.hidden = value < 2;
+            ensureAnchor();
+            this.refresh();
+          }, { min: 1, max: 60 }),
+          h('span', { class: 'unit' }, '営業日ごと'),
+        ),
+        '1 = 毎営業日、5 = 5営業日ごと。休業日は数えません。',
+      ),
+      anchorField,
+    ];
   }
 
   /** 決算月基準（§5.2 (e)）。決算月そのものは営業日カレンダーの設定から取る。 */
@@ -950,7 +1039,7 @@ export class RuleEditor {
 
   /** 第N営業日は定義上すでに営業日なので、補正の設定自体を持たせない。 */
   private adjustApplies(): boolean {
-    return this.draft.recurrence.type !== 'monthlyByBusinessDay';
+    return !skipsAdjustment(this.draft.recurrence);
   }
 
   private buildAdjust(): HTMLElement {
@@ -969,6 +1058,7 @@ export class RuleEditor {
         { value: 'next', label: '翌営業日へ（後ろ倒し）' },
         { value: 'both', label: '前後の営業日の両方へ' },
         { value: 'nearest', label: '近い方の営業日へ' },
+        { value: 'skip', label: 'その回は行わない' },
         { value: 'none', label: '補正しない' },
       ],
       this.draft.adjust.mode,
@@ -976,16 +1066,16 @@ export class RuleEditor {
         this.draft.adjust.mode = value;
         // 自分で選んだ値は下書きにも残す。種類を往復しても、これが戻る。
         this.adjustDraft = { ...this.draft.adjust };
-        keepInMonth.hidden = value === 'none';
+        keepInMonth.hidden = !movesDate(value);
         this.refresh();
       },
     );
-    keepInMonth.hidden = this.draft.adjust.mode === 'none';
+    keepInMonth.hidden = !movesDate(this.draft.adjust.mode);
 
     const inapplicable = h(
       'p',
       { class: 'field-hint' },
-      '「第N営業日」は常に営業日のため、補正の設定はありません。',
+      '「第N営業日」「毎営業日」は常に営業日のため、補正の設定はありません。',
     );
 
     const controls = h(
@@ -994,7 +1084,7 @@ export class RuleEditor {
       field(
         '休業日の場合',
         modeSelect,
-        '「前後の営業日の両方へ」は、取引先ごとに前倒し・後ろ倒しが分かれるときに使います。1つの基準日から前後2件が表示されます。',
+        '「前後の両方へ」は取引先ごとに向きが分かれる入金予定に、「その回は行わない」は祝日の週は休む定例などに使います。',
       ),
       keepInMonth,
     );
@@ -1039,7 +1129,7 @@ export class RuleEditor {
     const modeSelect = this.adjustControls?.querySelector('select');
     if (modeSelect) modeSelect.value = adjust.mode;
     const keepInMonth = this.adjustControls?.querySelector<HTMLElement>('.checkbox');
-    if (keepInMonth) keepInMonth.hidden = adjust.mode === 'none';
+    if (keepInMonth) keepInMonth.hidden = !movesDate(adjust.mode);
     const checkbox = keepInMonth?.querySelector('input');
     if (checkbox) checkbox.checked = adjust.keepInMonth;
   }
@@ -1122,6 +1212,7 @@ export class RuleEditor {
         );
 
         rows.append(this.buildTimingRow(state, ordinal, touch));
+        rows.append(this.buildNoticeDetails(index, state, ordinal, touch));
 
         // 直す場所が分かるよう、エラーはその予定の欄の直下に出す。
         const slot = h('div', { class: 'notice-issues' });
@@ -1186,6 +1277,61 @@ export class RuleEditor {
     clear(this.previewDetails);
     this.previewDetails.append(h('summary', {}, '次の10回をすべて見る'), this.buildPreview());
     return this.previewDetails;
+  }
+
+  /**
+   * 前後予定ごとの詳細。使う人が限られるので畳んでおく。設定してあれば開く。
+   *
+   * - 数える営業日カレンダー: 「支払日は銀行、社内承認は自社の営業日で数える」のため
+   * - 暦日で数えた先が休業日のとき: 「期限の7日前、休日なら前営業日」のため
+   */
+  private buildNoticeDetails(
+    index: number,
+    state: TimingState,
+    ordinal: string,
+    onChange: () => void,
+  ): HTMLElement {
+    const notice = this.draft.notices[index];
+    const calendarOptions = [
+      { value: '', label: '本体と同じ' },
+      ...this.calendars.map((calendar) => ({ value: calendar.id, label: calendar.name })),
+    ];
+    const calendarField = subField(
+      '数える営業日カレンダー',
+      named(
+        select(calendarOptions, notice?.calendarId ?? '', (value) => {
+          const current = this.draft.notices[index];
+          if (current === undefined) return;
+          if (value === '') delete current.calendarId;
+          else current.calendarId = value;
+          onChange();
+        }),
+        `${ordinal}: 数える営業日カレンダー`,
+      ),
+    );
+    const onClosedField = subField(
+      '数えた先が休業日なら',
+      named(
+        select(OFFSET_ON_CLOSED_OPTIONS, state.offset.onClosed, (value) => {
+          state.offset.onClosed = value;
+          onChange();
+        }),
+        `${ordinal}: 暦日で数えた先が休業日のとき`,
+      ),
+    );
+    onClosedField.classList.add('notice-on-closed');
+    onClosedField.hidden = !(state.kind === 'offset' && state.offset.unit === 'calendar');
+
+    return h(
+      'details',
+      {
+        class: 'advanced-options notice-details',
+        open: notice?.calendarId !== undefined || state.offset.onClosed !== 'none',
+      },
+      h('summary', {}, '詳細（数える営業日カレンダー・休業日のとき）'),
+      // 「数えた先が休業日なら」は暦日で数えるときだけ出す。営業日で数えれば必ず営業日になる。
+      h('div', { class: 'row notice-row' }, calendarField, onClosedField),
+    );
   }
 
   /** 1件追加する。id を先に決める（順番ではなくこれが外部カレンダーの識別子になる）。 */
@@ -1351,8 +1497,12 @@ export class RuleEditor {
    * 無理に畳むと符号が反転し、画面と保存値が食い違う。
    */
   private syncNotices(): void {
+    const items = this.element === undefined ? [] : [...this.element.querySelectorAll('.notice-item')];
     this.draft.notices.forEach((notice, index) => {
       const state = this.timingStateFor(notice);
+      // 単位を切り替えても欄を作り直さないので、ここで出し分けだけ合わせる。
+      const onClosed = items[index]?.querySelector<HTMLElement>('.notice-on-closed');
+      if (onClosed) onClosed.hidden = !(state.kind === 'offset' && state.offset.unit === 'calendar');
       const hint = this.noticeHints[index];
       const slot = this.noticeIssueSlots[index];
       const problem = timingStateIssue(state);
@@ -1368,7 +1518,13 @@ export class RuleEditor {
       }
       const timing = timingOfState(state);
       this.draft.notices[index] = { ...notice, timing, role: roleOfState(state) };
-      if (hint !== undefined) hint.textContent = `→ 本体の${describeTiming(timing)}`;
+      if (hint !== undefined) {
+        hint.textContent = `→ 本体の${describeTiming(timing)}${describeNoticeCalendar(
+          notice,
+          this.draft.calendarId,
+          (id) => this.calendars.find((calendar) => calendar.id === id)?.name,
+        )}`;
+      }
     });
   }
 

@@ -215,6 +215,19 @@ export function noticeDateOf(
 }
 
 /**
+ * その前後予定を数える営業日カレンダー。指定が無い、または見つからないときは本体と同じ。
+ * 「支払日は銀行の営業日、社内承認は自社の営業日で数える」のため。
+ */
+function noticeCalendarOf(
+  notice: Notice,
+  ruleCalendar: BusinessDayCalendar,
+  ctx: ScheduleContext,
+): BusinessDayCalendar {
+  if (notice.calendarId === undefined) return ruleCalendar;
+  return ctx.calendars.get(notice.calendarId) ?? ruleCalendar;
+}
+
+/**
  * 前後予定を1件ぶん組み立てる。展開とプレビューで同じ計算を使う。
  * 別々に書くと、片方だけ直したときに画面と書き出しが食い違う。
  */
@@ -326,6 +339,8 @@ function expandRule(
       : adjustToBusinessDays(rawDate, rule.adjust, calendar);
 
     if (adjusted.length === 0) {
+      // 「休業日ならその回は行わない」は意図どおりなので知らせない。
+      if (rule.adjust.mode === 'skip' && !noAdjust) continue;
       warnings.push({
         ruleId: rule.id,
         rawDate,
@@ -354,7 +369,8 @@ function expandRule(
   for (const occurrence of byEffectiveDate.values()) {
     occurrences.push(occurrence);
     rule.notices.forEach((notice, noticeIndex) => {
-      const built = buildRelated(rule, occurrence, notice, noticeIndex, calendar);
+      const noticeCalendar = noticeCalendarOf(notice, calendar, ctx);
+      const built = buildRelated(rule, occurrence, notice, noticeIndex, noticeCalendar);
       if (built === null) {
         // 長期休業などで営業日を数えきれないと日付が出せない。黙って消すと
         // 「設定したのに出ない」を追えなくなるので、警告として残す。
@@ -365,7 +381,7 @@ function expandRule(
           noticeRole: roleOf(notice),
           // 日付が出せなかったぶん、設定が指している週や月を範囲とする。
           // 本体の日付だけで絞ると、その月を見ている人に届かない。
-          scope: spanOf(occurrence.date, noticeWindow(occurrence.date, timingOf(notice), calendar)),
+          scope: spanOf(occurrence.date, noticeWindow(occurrence.date, timingOf(notice), noticeCalendar)),
           message: `「${rule.title}」の${describeTiming(timingOf(notice))}（${
             notice.label
           }）は ${occurrence.date} を起点に日付を決められませんでした`,
@@ -519,7 +535,7 @@ export function previewSeries(
       // 前後の予定は、展開結果から拾わずこの本体から直接数える。
       // 拾い方だと、探索範囲の境目をまたぐもの（8月の本体に対する9月のフォローなど）が
       // 切り落とされ、実際のカレンダーや書き出しと食い違ってしまう。
-      result.push({ main: occurrence, ...relatedOf(rule, occurrence, calendar) });
+      result.push({ main: occurrence, ...relatedOf(rule, occurrence, calendar, ctx) });
       if (result.length >= count) break;
     }
     cursor = addMonths(cursor, 12);
@@ -535,6 +551,7 @@ function relatedOf(
   rule: Rule,
   main: Occurrence,
   calendar: BusinessDayCalendar | undefined,
+  ctx: ScheduleContext,
 ): Omit<PreviewSeries, 'main'> {
   if (calendar === undefined) return { related: [], unresolved: [], warnings: [] };
   const related: Occurrence[] = [];
@@ -542,7 +559,7 @@ function relatedOf(
   const warnings: ExpandWarning[] = [];
   rule.notices.forEach((notice, noticeIndex) => {
     // 展開と同じ組み立てを使う。別々に書くと画面と書き出しが食い違う。
-    const built = buildRelated(rule, main, notice, noticeIndex, calendar);
+    const built = buildRelated(rule, main, notice, noticeIndex, noticeCalendarOf(notice, calendar, ctx));
     if (built === null) {
       unresolved.push({ notice, ...unresolvedReason(notice, main.date) });
       return;

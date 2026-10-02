@@ -6,6 +6,7 @@
  *   next    … 休業日なら進んで最初の営業日へ
  *   nearest … 近い方の営業日へ。距離が同じなら prev を優先する
  *   both    … 前営業日と翌営業日の両方へ。1つの基準日から2件の発生日が生まれる
+ *   skip    … 休業日ならその回は行わない（空配列を返す。呼び出し側は警告しない）
  *
  * keepInMonth が true の場合、補正結果が基準日と別の月になるときは逆方向を採用する。
  */
@@ -62,6 +63,7 @@ export function adjustToBusinessDays(
   if (adjustment.mode === 'none' || calendar.isBusinessDay(rawDate)) {
     return [{ date: rawDate, shifted: false, direction: null }];
   }
+  if (adjustment.mode === 'skip') return [];
 
   const candidates = candidatesFor(rawDate, adjustment.mode, calendar);
   const rawMonth = monthKeyOf(rawDate);

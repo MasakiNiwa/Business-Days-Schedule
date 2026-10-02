@@ -7,6 +7,7 @@
  */
 
 import type {
+  BusinessDaysRecurrence,
   DateRange,
   DateStr,
   FiscalRelativeRecurrence,
@@ -80,6 +81,52 @@ function expandWeekly(
       if (mod(weekIndex, interval) !== 0) continue;
     }
     result.push(date);
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// businessDays（毎営業日 / N営業日ごと）
+// ---------------------------------------------------------------------------
+
+/**
+ * 営業日の並びで数える。N営業日ごとのときは、基準日（それが休業日なら
+ * 次の営業日）を 0 番目として、N の倍数番目だけを通す。
+ *
+ * 位相は暦日ではなく営業日で数える。暦日で数えると、祝日をはさむたびに
+ * 「5営業日ごと」の間隔が崩れる。
+ */
+function expandBusinessDays(
+  recurrence: BusinessDaysRecurrence,
+  range: DateRange,
+  anchorDate: DateStr,
+  calendar: BusinessDayCalendar,
+): DateStr[] {
+  const interval = normalizeInterval(recurrence.interval);
+  const result: DateStr[] = [];
+  if (interval === 1) {
+    for (const date of eachDate(range.start, range.end)) {
+      if (calendar.isBusinessDay(date)) result.push(date);
+    }
+    return result;
+  }
+
+  const anchor = recurrence.anchor ?? anchorDate;
+  // 基準日から範囲の先頭までの営業日数。範囲が基準日より前なら負の数になる。
+  let index = 0;
+  if (anchor <= range.start) {
+    for (const date of eachDate(anchor, addDays(range.start, -1))) {
+      if (calendar.isBusinessDay(date)) index += 1;
+    }
+  } else {
+    for (const date of eachDate(range.start, addDays(anchor, -1))) {
+      if (calendar.isBusinessDay(date)) index -= 1;
+    }
+  }
+  for (const date of eachDate(range.start, range.end)) {
+    if (!calendar.isBusinessDay(date)) continue;
+    if (mod(index, interval) === 0) result.push(date);
+    index += 1;
   }
   return result;
 }
@@ -283,6 +330,9 @@ export function expandRecurrence(
     case 'weekly':
       dates = expandWeekly(recurrence, range, anchorDate);
       break;
+    case 'businessDays':
+      dates = expandBusinessDays(recurrence, range, anchorDate, ctx.calendar);
+      break;
     case 'monthlyByDay':
       dates = expandMonthlyByDay(recurrence, range, anchorDate);
       break;
@@ -300,7 +350,7 @@ export function expandRecurrence(
   return unique.filter((date) => date >= range.start && date <= range.end);
 }
 
-/** monthlyByBusinessDay は定義上すでに営業日なので、営業日補正を適用しない。 */
+/** 第N営業日・毎営業日は定義上すでに営業日なので、営業日補正を適用しない。 */
 export function skipsAdjustment(recurrence: Recurrence): boolean {
-  return recurrence.type === 'monthlyByBusinessDay';
+  return recurrence.type === 'monthlyByBusinessDay' || recurrence.type === 'businessDays';
 }

@@ -169,6 +169,19 @@ export function noticeDateDetail(
       timing.onClosed === 'next' ? calendar.snap(target, 'next') : calendar.snap(target, 'prev');
     return { date: moved, movedFrom: moved === null ? null : target };
   }
+  if (
+    timing.kind === 'offset' &&
+    timing.unit === 'calendar' &&
+    timing.onClosed !== undefined &&
+    timing.onClosed !== 'none'
+  ) {
+    // 暦日で数えた先が休業日なら、指定の向きの営業日へ寄せる。
+    // 寄せる前の日も返す（「7日前の◯日が休業日のため」と添えるため）。
+    const target = addDays(effectiveDate, timing.offset);
+    if (calendar.isBusinessDay(target)) return { date: target, movedFrom: null };
+    const moved = calendar.snap(target, timing.onClosed);
+    return { date: moved, movedFrom: moved === null ? null : target };
+  }
   return { date: plainNoticeDate(effectiveDate, timing, calendar), movedFrom: null };
 }
 
