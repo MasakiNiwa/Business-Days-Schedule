@@ -71,7 +71,7 @@ describe('AiImportView', () => {
     const { root, handlers } = setup();
     click(root, 'AIへの依頼文をコピー');
     await vi.waitFor(() => expect(root.querySelector('.ai-copy-status')?.textContent).toContain('コピーしました'));
-    expect(handlers.copyText).toHaveBeenCalledWith(buildAiPrompt(calendars));
+    expect(handlers.copyText).toHaveBeenCalledWith(buildAiPrompt({ calendars, groups: [] }));
   });
 
   it('写せない環境では、その場で選んでコピーできるようにする', async () => {
@@ -80,7 +80,7 @@ describe('AiImportView', () => {
     await vi.waitFor(() => expect(root.querySelector('.ai-copy-status')?.textContent).toContain('コピーできませんでした'));
     const box = root.querySelector<HTMLDetailsElement>('.ai-copy-box');
     expect(box?.open).toBe(true);
-    expect(box?.querySelector('textarea')?.value).toBe(buildAiPrompt(calendars));
+    expect(box?.querySelector('textarea')?.value).toBe(buildAiPrompt({ calendars, groups: [] }));
   });
 
   it('正しい回答なら、このアプリの計算で直近の日付を見せる（まだ登録しない）', () => {

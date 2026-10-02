@@ -30,8 +30,20 @@ export type AiImportHandlers = {
   onClose: () => void;
 };
 
-const EXAMPLE_REQUEST =
-  '毎月25日が支払日です。休業日なら前営業日にします。\n3営業日前に振込データ作成、翌営業日に支払確認を行います。';
+/**
+ * 伝え方の例。自分の予定をそのまま伝えるだけでなく、業務の相談から始めても
+ * よいことを見せる。設定に詳しくない人ほど、何を言えばよいかで止まるため。
+ */
+const EXAMPLES: readonly { label: string; text: string }[] = [
+  {
+    label: '自分の予定を伝える',
+    text: '毎月25日が支払日です。休業日なら前営業日にします。\n3営業日前に振込データ作成、翌営業日に支払確認を行います。',
+  },
+  {
+    label: '業務の相談から始める',
+    text: '経理の月次業務で、毎月必要になる予定を提案してください。3月決算の小さな会社です。',
+  },
+];
 
 /** 写せなかったときに、その場で選んでコピーしてもらうための欄。 */
 function manualCopyBox(summary: string, text: string): { box: HTMLDetailsElement; area: HTMLTextAreaElement } {
@@ -55,8 +67,10 @@ export class AiImportView {
     private readonly ctx: ScheduleContext,
     private readonly today: string,
     private readonly handlers: AiImportHandlers,
+    /** 既に使っているグループ名。AI に同じ名前を使ってもらうため依頼文に入れる。 */
+    groups: readonly string[] = [],
   ) {
-    this.prompt = buildAiPrompt(calendars);
+    this.prompt = buildAiPrompt({ calendars, groups });
 
     this.input = h('textarea', {
       class: 'input ai-import-input',
@@ -77,9 +91,16 @@ export class AiImportView {
         h(
           'p',
           { class: 'field-hint' },
-          'コピーした依頼文をAIに貼り付け、そのあと作りたい予定を普通の言葉で伝えてください。例:',
+          'コピーした依頼文をAIに貼り付けると、AIが質問しながら案内します。設定の知識は要りません。作りたい予定をそのまま伝えても、業務の相談から始めてもかまいません。',
         ),
-        h('p', { class: 'ai-example' }, EXAMPLE_REQUEST),
+        ...EXAMPLES.map((example) =>
+          h(
+            'div',
+            { class: 'ai-example' },
+            h('p', { class: 'ai-example-label' }, example.label),
+            h('p', { class: 'ai-example-text' }, example.text),
+          ),
+        ),
       ),
       h(
         'li',
