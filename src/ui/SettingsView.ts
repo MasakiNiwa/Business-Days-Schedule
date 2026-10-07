@@ -343,7 +343,9 @@ export class SettingsView {
     const rows: [string, string][] = [
       ['アプリ', 'Business Days Schedule'],
       ['版', longVersion()],
-      ['ビルド日時', BUILD_INFO.builtAt === '' ? '不明' : BUILD_INFO.builtAt],
+      ['公開日', BUILD_INFO.releasedAt === '' ? '不明' : BUILD_INFO.releasedAt],
+      // 祝日データの週次更新でも作り直すので、公開日とは別に出す。
+      ['ビルド日時（祝日データの更新でも変わります）', BUILD_INFO.builtAt === '' ? '不明' : BUILD_INFO.builtAt],
       ['コミット', BUILD_INFO.commit],
     ];
     return h(

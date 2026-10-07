@@ -1,6 +1,7 @@
 {
   "name": "business-days-schedule",
-  "version": "1.16.0",
+  "version": "1.16.1",
+  "releaseDate": "2026-10-07",
   "private": true,
   "type": "module",
   "scripts": {

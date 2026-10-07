@@ -268,7 +268,7 @@ export function renderCalendarExport(
     formatHint.textContent =
       draft.format === 'ics'
         ? 'iCalendar 形式。Google カレンダー・Outlook・Apple カレンダーのいずれでも取り込めます。迷ったらこちら。'
-        : 'CSV 形式。Google カレンダーの取り込みと、表計算ソフトで中身を確かめたいとき向けです。Outlook.com では CSV の取り込みができないため、その場合は iCalendar を使ってください。';
+        : 'CSV 形式。表計算ソフトで一覧として確かめたいとき向けです。カレンダーへ取り込むときは iCalendar を使ってください（Google カレンダー・Outlook ともに iCalendar で取り込めます）。';
   };
   setFormatHint();
 
@@ -315,7 +315,7 @@ export function renderCalendarExport(
     field('形式', select(
       [
         { value: 'ics', label: 'iCalendar (.ics) — 推奨' },
-        { value: 'csv', label: 'CSV (.csv) — Google カレンダー / 表計算' },
+        { value: 'csv', label: 'CSV (.csv) — 表計算で確かめる' },
       ],
       draft.format,
       (value) => {

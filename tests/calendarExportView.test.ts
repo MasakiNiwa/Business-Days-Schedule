@@ -137,7 +137,9 @@ describe('renderCalendarExport', () => {
     expect(element.textContent).toContain('迷ったらこちら');
     element.querySelector<HTMLSelectElement>('select')!.value = 'csv';
     element.querySelector('select')?.dispatchEvent(new Event('change'));
-    expect(element.textContent).toContain('Outlook.com では CSV の取り込みができない');
+    // CSV は表計算で確かめる用。取り込みは iCalendar へ案内する（識別子が無く二重になりやすい）。
+    expect(element.textContent).toContain('表計算ソフトで一覧として確かめたいとき向け');
+    expect(element.textContent).toContain('カレンダーへ取り込むときは iCalendar を使ってください');
   });
 
   it('準備日とフォローを別々に外せる', () => {
