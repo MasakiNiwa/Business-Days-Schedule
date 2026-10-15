@@ -21,12 +21,19 @@ export const APP_TAGLINE = `${APP_TAGLINE_LEAD}${APP_TAGLINE_REST}`;
 
 export type BuildInfo = {
   version: string;
+  /** その版を公開した日（YYYY-MM-DD）。アプリの日付として出すのはこちら。 */
+  releasedAt: string;
+  /**
+   * ビルドした日時。祝日データの週次更新で作り直すたびに変わるので、
+   * 「いつの版か」の目印には使わない（設定の詳細にだけ出す）。
+   */
   builtAt: string;
   commit: string;
 };
 
 export const BUILD_INFO: BuildInfo = {
   version: typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.0.0',
+  releasedAt: typeof __APP_RELEASED_AT__ === 'string' ? __APP_RELEASED_AT__ : '',
   builtAt: typeof __APP_BUILT_AT__ === 'string' ? __APP_BUILT_AT__ : '',
   commit: typeof __APP_COMMIT__ === 'string' ? __APP_COMMIT__ : 'unknown',
 };
@@ -36,8 +43,13 @@ export function shortVersion(info: BuildInfo = BUILD_INFO): string {
   return `v${info.version}`;
 }
 
-/** 設定に出す詳しい表記。「v1.0.0（2026-09-05 ビルド / a1b2c3d）」 */
+/**
+ * 詳しい表記。「v1.0.0（2026-09-05 公開 / a1b2c3d）」
+ *
+ * 日付は版を出した日。ビルド日時にすると、祝日データだけを更新した週次の
+ * 再公開でも日付が進み、アプリが更新されたように見えてしまう。
+ */
 export function longVersion(info: BuildInfo = BUILD_INFO): string {
-  const date = info.builtAt === '' ? '不明' : info.builtAt.slice(0, 10);
-  return `v${info.version}（${date} ビルド / ${info.commit}）`;
+  const date = info.releasedAt === '' ? '公開日不明' : `${info.releasedAt} 公開`;
+  return `v${info.version}（${date} / ${info.commit}）`;
 }
