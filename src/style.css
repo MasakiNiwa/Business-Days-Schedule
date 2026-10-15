@@ -2094,16 +2094,19 @@ button {
 }
 
 .ai-copy-box,
-.ai-copy-status {
+.ai-copy-status,
+.ai-file-status {
   margin: 0;
 }
 
-.ai-copy-status {
+.ai-copy-status,
+.ai-file-status {
   font-size: 0.8rem;
   color: var(--fg-muted);
 }
 
-.ai-copy-status:empty {
+.ai-copy-status:empty,
+.ai-file-status:empty {
   display: none;
 }
 
@@ -2148,6 +2151,60 @@ button {
   font-size: 0.78rem;
   font-weight: 600;
   color: var(--fg-muted);
+}
+
+/* 手順は見出しを押して開閉する。開いたときは3つの見出しだけで流れが分かるようにする。 */
+.ai-step-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.ai-step-summary::-webkit-details-marker {
+  display: none;
+}
+
+/* 開閉の向きを示す印。開いているときは下向き。 */
+.ai-step-summary::after {
+  content: '';
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: 0.2rem;
+  border-right: 2px solid var(--fg-muted);
+  border-bottom: 2px solid var(--fg-muted);
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+}
+
+.ai-step-details[open] > .ai-step-summary::after {
+  transform: rotate(45deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-step-summary::after {
+    transition: none;
+  }
+}
+
+.ai-step-summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.ai-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-top: 0.6rem;
+}
+
+.ai-step-body .field-hint {
+  margin: 0;
 }
 
 /* 頼むことは折り返して並べる。5つあるのでスマートフォンでは2段になる。 */

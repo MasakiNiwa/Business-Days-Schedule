@@ -160,10 +160,24 @@ describe('buildAiPrompt: 頼むことと渡す登録内容', () => {
     expect(result).toMatchObject({ ok: true, updates: [] });
   });
 
-  it('最初の依頼があれば、そこから始めさせる', () => {
-    const prompt = buildAiPrompt({ calendars, request: '  毎月10日に源泉税の納付があります。  ' });
-    expect(prompt).toContain('# 利用者の最初の依頼\n毎月10日に源泉税の納付があります。\n');
-    expect(prompt.trimEnd().endsWith('足りないことは「進め方」のとおり質問してください。')).toBe(true);
+});
+
+describe('buildAiPrompt: 回答の受け取り方', () => {
+  it('ファイルで受け取るときは、JSON ファイルを頼み、作れなければコードブロックで出させる', () => {
+    const prompt = buildAiPrompt({ calendars, replyAs: 'file' });
+    expect(prompt).toContain('JSON ファイル（例: business-days-schedule.json）として出力してください');
+    expect(prompt).toContain('ファイルを作れない場合は、```json のコードブロック1つにまとめてください');
+    expect(prompt).toContain('〈AIの回答を取り込む〉の〈ファイルから読み込む〉で選んでください');
+    expect(prompt).not.toContain('この回答をそのまま貼ってください');
+  });
+
+  it('既定は貼り付けで受け取る', () => {
+    expect(buildAiPrompt({ calendars })).toContain('〈AIの回答を取り込む〉に、この回答をそのまま貼ってください');
+    expect(buildAiPrompt({ calendars, replyAs: 'paste' })).toBe(buildAiPrompt({ calendars }));
+  });
+
+  it('ファイルで頼んでも、例はそのまま取り込める', () => {
+    expect(readAiReply(buildAiPrompt({ calendars, replyAs: 'file' }), { calendars }).ok).toBe(true);
   });
 });
 

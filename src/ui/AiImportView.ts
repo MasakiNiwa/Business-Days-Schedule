@@ -4,7 +4,10 @@
  * 1. 頼むこと（作る・直す・点検・引き継ぎ資料・質問）と、AI に渡す登録内容を選び、
  *    組み立てた依頼文をコピーして、利用者が自分の AI に貼る
  * 2. AI と話す
- * 3. 返ってきた回答をここへ貼る → 確認（直すものは変更前と変更後）→ 登録
+ * 3. 返ってきた回答をここへ貼る（JSON ファイルなら読み込む）→ 確認
+ *    （直すものは変更前と変更後）→ 登録
+ *
+ * 3つの手順は見出しを押して開閉する。開いたときは全部閉じて、流れを先に見せる。
  *
  * 登録内容を渡すかどうかは利用者が選ぶ。既定では、頼むことに必要なものだけを入れ、
  * メモは入れない。何をどれだけ渡すかは、コピーする前に画面で見せる。
@@ -28,7 +31,7 @@ import {
   readAiReply,
 } from '../core/aiImport';
 import type { AiImportIssue, ImportPreviewItem, RuleUpdate, UpdatePreviewItem } from '../core/aiImport';
-import { AI_REQUEST_LIMIT, buildAiPrompt, buildFixRequest } from '../core/aiPrompt';
+import { buildAiPrompt, buildFixRequest } from '../core/aiPrompt';
 import { collectGroups } from '../core/group';
 import type { ScheduleContext } from '../core/schedule';
 import type { BusinessCalendar, Rule } from '../types';
@@ -56,8 +59,6 @@ type PurposeGuide = {
    * 「作る」では、自分の予定を伝えるだけでなく業務の相談から始めてもよいことを見せる。
    */
   examples: readonly { label: string; text: string }[];
-  /** 最初に伝えることの入力欄の例。 */
-  placeholder: string;
   /** 手順3の説明。設定データが返ってくるとは限らない頼みごとで添える。 */
   pasteHint?: string;
   /** 登録済みの予定が無いと頼めないか。 */
@@ -81,7 +82,6 @@ const PURPOSES: Record<AiPurpose, PurposeGuide> = {
         text: '経理の月次業務で、毎月必要になる予定を提案してください。3月決算の小さな会社です。',
       },
     ],
-    placeholder: '例: 毎月25日が支払日です。休業日なら前営業日にします。',
     needsRules: false,
   },
   revise: {
@@ -92,7 +92,6 @@ const PURPOSES: Record<AiPurpose, PurposeGuide> = {
     examples: [
       { label: '直したいことを伝える', text: '「支払」の振込データ作成を、3営業日前から5営業日前に変えたいです。' },
     ],
-    placeholder: '例: 「支払」の振込データ作成を5営業日前に変えたい',
     needsRules: true,
   },
   review: {
@@ -101,7 +100,6 @@ const PURPOSES: Record<AiPurpose, PurposeGuide> = {
     talkTitle: 'AIの点検結果を見る',
     talkHint: 'AIが気づいた点を表で示します。直したいものがあれば、そのまま頼めます。',
     examples: [{ label: '直してもらう', text: '点検結果の1番と3番を直してください。' }],
-    placeholder: '例: 月次の締めまわりを重点的に見てください',
     needsRules: true,
   },
   handover: {
@@ -112,7 +110,6 @@ const PURPOSES: Record<AiPurpose, PurposeGuide> = {
     examples: [
       { label: '頼み方の例', text: '4月から経理を担当する後任者向けに、月次の業務が分かる資料にしてください。' },
     ],
-    placeholder: '例: 後任者向けに、月次の業務が分かる資料にしてください',
     pasteHint: '資料はAIの画面でそのまま使えます。予定を作ったり直したりする設定データが返ってきたときだけ、ここに貼り付けます。',
     needsRules: true,
   },
@@ -122,7 +119,6 @@ const PURPOSES: Record<AiPurpose, PurposeGuide> = {
     talkTitle: 'AIに質問する',
     talkHint: 'アプリが計算した日付をもとに、AIが答えます。渡した期間より先の日付は、アプリのカレンダーで確かめてください。',
     examples: [{ label: '質問の例', text: '来月いちばん予定が多い週はいつですか？' }],
-    placeholder: '例: 来月いちばん予定が多い週はいつですか？',
     pasteHint: '答えはAIの画面で読めます。予定を作ったり直したりする設定データが返ってきたときだけ、ここに貼り付けます。',
     needsRules: true,
   },
@@ -130,6 +126,17 @@ const PURPOSES: Record<AiPurpose, PurposeGuide> = {
 
 /** 依頼文がこれより長いと、貼り付けられない AI もあると知らせる。 */
 const LONG_PROMPT = 40_000;
+
+/**
+ * 手順1つぶんの枠。見出しを押して開閉する。
+ *
+ * 開いたときは3つの手順の見出しだけを並べ、全体の流れ（依頼文を作る → AI と話す →
+ * 回答を取り込む）を先に見せる。中身まで全部開いていると、最初の手順だけで画面が埋まる。
+ */
+function stepItem(title: HTMLElement, body: HTMLElement): { item: HTMLLIElement; details: HTMLDetailsElement } {
+  const details = h('details', { class: 'ai-step-details' }, h('summary', { class: 'ai-step-summary' }, title), body);
+  return { item: h('li', { class: 'ai-step' }, details), details };
+}
 
 /** 写せなかったときに、その場で選んでコピーしてもらうための欄。 */
 function manualCopyBox(summary: string, text: string): { box: HTMLDetailsElement; area: HTMLTextAreaElement } {
@@ -149,13 +156,13 @@ export class AiImportView {
   private readonly groups: string[];
   private purpose: AiPurpose = 'create';
   private share: AiShareOptions = defaultShareOptions('create');
-  private request = '';
   private prompt = '';
+  /** AI に設定データを JSON ファイルで出してもらうか。 */
+  private replyAs: 'paste' | 'file' = 'paste';
 
   // 手順1で、選び直すたびに書き換えるところ。
   private readonly purposeButtons = new Map<AiPurpose, HTMLButtonElement>();
   private readonly purposeHint = h('p', { class: 'field-hint ai-purpose-hint' });
-  private readonly requestInput: HTMLTextAreaElement;
   private readonly shareBox = h('div', { class: 'ai-share-options' });
   private shareInputs: {
     rules: HTMLInputElement;
@@ -169,9 +176,15 @@ export class AiImportView {
   private readonly promptArea: HTMLTextAreaElement;
   private readonly promptBox: HTMLDetailsElement;
   private readonly copyStatus = h('p', { class: 'ai-copy-status', role: 'status', 'aria-live': 'polite' });
+  private readonly replyAsFile: HTMLLabelElement;
   // 手順2・3の、頼むことで変わるところ。
-  private readonly talkStep = h('li', { class: 'ai-step' });
+  private readonly talkTitle = h('h3', { class: 'ai-step-title' });
+  private readonly talkBody = h('div', { class: 'ai-step-body' });
   private readonly pasteHint = h('p', { class: 'field-hint ai-paste-hint' });
+  private readonly fileInput: HTMLInputElement;
+  private readonly fileStatus = h('p', { class: 'ai-file-status', role: 'status', 'aria-live': 'polite' });
+  /** 手順ごとの開閉。3つとも閉じた状態で始める。 */
+  private readonly stepDetails: HTMLDetailsElement[] = [];
 
   constructor(
     private readonly calendars: readonly BusinessCalendar[],
@@ -188,15 +201,6 @@ export class AiImportView {
     const { box, area } = manualCopyBox('依頼文を表示', '');
     this.promptBox = box;
     this.promptArea = area;
-    this.requestInput = h('textarea', {
-      class: 'input ai-request-input',
-      rows: 2,
-      maxlength: AI_REQUEST_LIMIT,
-    });
-    this.requestInput.addEventListener('input', () => {
-      this.request = this.requestInput.value;
-      this.refreshPrompt();
-    });
 
     this.input = h('textarea', {
       class: 'input ai-import-input',
@@ -206,24 +210,48 @@ export class AiImportView {
       spellcheck: 'false',
     });
 
-    this.steps = h(
-      'ol',
-      { class: 'ai-steps' },
-      this.buildCopyStep(),
-      this.talkStep,
+    this.replyAsFile = checkbox('AIの回答（設定データ）を JSON ファイルで受け取る', false, (asFile) => {
+      this.replyAs = asFile ? 'file' : 'paste';
+      this.refreshPrompt();
+    });
+    this.replyAsFile.classList.add('ai-reply-as-file');
+
+    // ファイルの選択欄は隠し、ボタンから開く。選んだ中身は貼り付け欄へ入れて同じ経路で確かめる。
+    this.fileInput = h('input', {
+      type: 'file',
+      class: 'ai-file-input',
+      accept: '.json,application/json,.txt,text/plain',
+      hidden: true,
+    });
+    this.fileInput.setAttribute('aria-label', 'AIの回答のファイル');
+    this.fileInput.addEventListener('change', () => void this.readFile());
+
+    const copyStep = stepItem(h('h3', { class: 'ai-step-title' }, 'AIへの依頼文を作る'), this.buildCopyStep());
+    const talkStep = stepItem(this.talkTitle, this.talkBody);
+    const pasteStep = stepItem(
+      h('h3', { class: 'ai-step-title' }, 'AIの回答を取り込む'),
       h(
-        'li',
-        { class: 'ai-step' },
-        h('h3', { class: 'ai-step-title' }, 'AIの回答を貼り付け'),
+        'div',
+        { class: 'ai-step-body' },
         this.pasteHint,
         field('AIから返ってきた内容を貼り付け', this.input),
         h(
           'div',
           { class: 'ai-step-actions' },
           button('内容を確認', () => this.check(), 'button button-primary'),
+          button('ファイルから読み込む', () => this.fileInput.click(), 'button'),
+          this.fileInput,
+        ),
+        this.fileStatus,
+        h(
+          'p',
+          { class: 'field-hint' },
+          'AIが設定データをファイル（.json）で返してきたときは、保存してから〈ファイルから読み込む〉で選びます。',
         ),
       ),
     );
+    this.stepDetails.push(copyStep.details, talkStep.details, pasteStep.details);
+    this.steps = h('ol', { class: 'ai-steps' }, copyStep.item, talkStep.item, pasteStep.item);
 
     this.element = h(
       'section',
@@ -244,9 +272,9 @@ export class AiImportView {
     this.choosePurpose('create');
   }
 
-  /** 貼り付けた内容や書きかけの依頼があれば、閉じる前に確かめる。 */
+  /** 貼り付けた内容があれば、閉じる前に確かめる。 */
   isDirty(): boolean {
-    return this.input.value.trim() !== '' || this.request.trim() !== '';
+    return this.input.value.trim() !== '';
   }
 
   /** 今の選び方で組み立てた依頼文。コピーする文と同じもの。 */
@@ -283,24 +311,26 @@ export class AiImportView {
         ),
       'button button-primary',
     );
+    const share = h(
+      'details',
+      { class: 'advanced-options ai-share' },
+      h('summary', {}, 'AIに渡す内容'),
+      this.shareBox,
+    );
+    // 何を渡すかは、コピーする前に必ず目に入るよう開いておく。
+    share.open = true;
     return h(
-      'li',
-      { class: 'ai-step' },
-      h('h3', { class: 'ai-step-title' }, 'AIへの依頼文をコピー'),
+      'div',
+      { class: 'ai-step-body' },
       field('AIに頼むこと', purposes),
       this.purposeHint,
       hasRules
         ? null
         : h('p', { class: 'field-hint' }, '「今の予定を直す」などは、予定を登録すると選べます。'),
-      field('最初に伝えること（任意）', this.requestInput, '書いておくと、AIはそこから始めます。AIの画面で伝えてもかまいません。'),
-      h(
-        'details',
-        { class: 'advanced-options ai-share' },
-        h('summary', {}, 'AIに渡す内容'),
-        this.shareBox,
-      ),
+      share,
       this.shareSummary,
       this.shareNote,
+      this.replyAsFile,
       h('div', { class: 'ai-step-actions' }, copy),
       this.copyStatus,
       this.promptBox,
@@ -316,7 +346,6 @@ export class AiImportView {
       choice.setAttribute('aria-pressed', key === purpose ? 'true' : 'false');
     }
     this.purposeHint.textContent = guide.hint;
-    this.requestInput.placeholder = guide.placeholder;
     this.syncShareOptions();
     this.renderTalkStep();
     this.pasteHint.textContent = guide.pasteHint ?? '';
@@ -379,6 +408,8 @@ export class AiImportView {
     const inputs = this.shareInputs;
     if (inputs === null) return;
     inputs.rules.checked = this.share.rules;
+    // 登録済みの予定が無ければ、渡すものが無い。
+    inputs.rules.disabled = this.rules.length === 0;
     inputs.notes.checked = this.share.notes;
     inputs.notes.disabled = !this.share.rules;
     inputs.calendars.checked = this.share.calendars;
@@ -389,9 +420,9 @@ export class AiImportView {
 
   private renderTalkStep(): void {
     const guide = PURPOSES[this.purpose];
-    clear(this.talkStep);
-    this.talkStep.append(
-      h('h3', { class: 'ai-step-title' }, guide.talkTitle),
+    this.talkTitle.textContent = guide.talkTitle;
+    clear(this.talkBody);
+    this.talkBody.append(
       h('p', { class: 'field-hint' }, guide.talkHint),
       ...guide.examples.map((example) =>
         h(
@@ -417,7 +448,7 @@ export class AiImportView {
       groups: this.groups,
       purpose: this.purpose,
       shared,
-      request: this.request,
+      replyAs: this.replyAs,
     });
     this.promptArea.value = this.prompt;
 
@@ -699,11 +730,56 @@ export class AiImportView {
     card.append(h('p', { class: 'ai-preview-label' }, `次の${item.series.length}回`), renderPreviewList(item.series));
   }
 
+  /** 選んだファイルを読み、貼り付けたときと同じように確かめる。 */
+  private async readFile(): Promise<void> {
+    const file = this.fileInput.files?.[0];
+    // 同じファイルを選び直しても change が起きるよう、選択は毎回空に戻す。
+    this.fileInput.value = '';
+    if (file === undefined) return;
+    // 1文字は UTF-8 で最大4バイト。これを超えるものは中身を読まずに断る。
+    if (file.size > AI_IMPORT_LIMITS.inputLength * 4) {
+      this.fileStatus.textContent = '';
+      clear(this.result);
+      this.showErrors([
+        {
+          severity: 'error',
+          path: '',
+          message: 'ファイルが大きすぎます。AIが出力した設定データのファイル（.json）を選んでください。',
+          fix: `出力が長すぎます。設定データの JSON だけを出力してください。予定は1回に ${AI_IMPORT_LIMITS.rules} 件までにしてください。`,
+        },
+      ]);
+      return;
+    }
+    let text: string;
+    try {
+      text = await readText(file);
+    } catch {
+      this.fileStatus.textContent = 'ファイルを読み込めませんでした。もう一度選ぶか、中身を貼り付けてください。';
+      return;
+    }
+    this.input.value = text;
+    this.fileStatus.textContent = `「${file.name}」を読み込みました。`;
+    this.check();
+  }
+
   private backToInput(): void {
     clear(this.result);
     this.steps.hidden = false;
     this.closeActions.hidden = false;
+    const paste = this.stepDetails[2];
+    if (paste !== undefined) paste.open = true;
     this.input.focus();
     scrollIntoView(this.input, 'center');
   }
+}
+
+/** ファイルを文字として読む。Blob#text が無い環境では FileReader を使う。 */
+function readText(file: File): Promise<string> {
+  if (typeof file.text === 'function') return file.text();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => resolve(String(reader.result ?? '')));
+    reader.addEventListener('error', () => reject(reader.error ?? new Error('read failed')));
+    reader.readAsText(file);
+  });
 }

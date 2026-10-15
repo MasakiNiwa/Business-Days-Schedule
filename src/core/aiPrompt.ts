@@ -49,12 +49,12 @@ export type AiPromptContext = {
   purpose?: AiPurpose;
   /** 利用者が渡すと選んだ登録内容（src/core/aiContext.ts）。 */
   shared?: AiSharedData;
-  /** 利用者が最初に伝えたいこと。あれば、AI はそこから始める。 */
-  request?: string;
+  /**
+   * 設定データの受け取り方。'file' なら JSON ファイルで出してもらう
+   * （ファイルを作れない AI では、これまでどおりコードブロックで出してもらう）。
+   */
+  replyAs?: 'paste' | 'file';
 };
-
-/** 最初の依頼として埋め込む文字数の上限。依頼文が長くなりすぎないように。 */
-export const AI_REQUEST_LIMIT = 2000;
 
 const INTRO_SECOND =
   '利用者は、このアプリで設定できる内容をよく知りません。設定の知識はこの文の後半にまとめてあるので、あなたが代わりに理解し、利用者には業務の言葉だけで話しかけてください。';
@@ -70,7 +70,16 @@ const KEEP_TALKING =
   '貼り付けたあとで直したくなったら、続けてこの会話で頼んでもらえば、作り直した設定データを出してください。';
 
 const PASTE_BACK_UPDATE =
-  '利用者が了承したら設定データを出し、「アプリの〈AIの回答を貼り付け〉に、この回答をそのまま貼ってください。変更前と変更後、日付はアプリが見せます」と添えてください。';
+  '利用者が了承したら設定データを出し、「アプリの〈AIの回答を取り込む〉に、この回答をそのまま貼ってください。変更前と変更後、日付はアプリが見せます」と添えてください。';
+
+/** 設定データを渡したあとの案内（貼り付け）を、ファイルで受け取るときの言い方へ変える。 */
+const FILE_HANDOFF: readonly [string, string][] = [
+  ['利用者が了承したら設定データを出し、', '利用者が了承したら設定データを JSON ファイルで出し、'],
+  [
+    '「アプリの〈AIの回答を取り込む〉に、この回答をそのまま貼ってください。',
+    '「ファイルを保存して、アプリの〈AIの回答を取り込む〉の〈ファイルから読み込む〉で選んでください。',
+  ],
+];
 
 /** 頼むことごとの、役割と進め方。 */
 function purposeSection(purpose: AiPurpose): string {
@@ -91,7 +100,7 @@ ${INTRO_SECOND}
 3. ${NO_SILENT_DEFAULTS}
 4. 役立ちそうなら、準備の作業（例: 3営業日前に振込データ作成）や事後の確認（例: 翌営業日に入金確認）も提案してください。
 5. 設定データを出す前に、作る予定を表（予定名・いつ・休業日にあたったとき・前後の予定）でまとめ、「この内容で作りますか？」と確かめてください。
-6. 利用者が了承したら設定データを出し、「アプリの〈AIの回答を貼り付け〉に、この回答をそのまま貼ってください。日付はアプリが計算して見せます」と添えてください。
+6. 利用者が了承したら設定データを出し、「アプリの〈AIの回答を取り込む〉に、この回答をそのまま貼ってください。日付はアプリが計算して見せます」と添えてください。
 7. ${KEEP_TALKING}`;
     case 'revise':
       return `あなたは、予定管理アプリ「Business Days Schedule」に登録済みの予定を直すのを手伝う相談相手です。経理・総務・人事などのバックオフィス業務に詳しい立場で、利用者を案内してください。
@@ -228,18 +237,17 @@ export function buildAiPrompt(
   const context: AiPromptContext = Array.isArray(input) ? { calendars: input } : (input as AiPromptContext);
   const { calendars, shared } = context;
   const purpose = context.purpose ?? 'create';
-  const request = (context.request ?? '').trim().slice(0, AI_REQUEST_LIMIT);
+  const asFile = context.replyAs === 'file';
+  let role = purposeSection(purpose);
+  if (asFile) for (const [from, to] of FILE_HANDOFF) role = role.replaceAll(from, to);
+  const outputLines = asFile
+    ? `- 設定データは、JSON ファイル（例: business-days-schedule.json）として出力してください。ファイルの中身は下の形の JSON だけにし、説明はファイルの外に書きます。予定が複数あっても、1つの JSON の "rules" に並べます。
+- ファイルを作れない場合は、\`\`\`json のコードブロック1つにまとめてください。利用者はそれを貼り付けて取り込めます。`
+    : `- 設定データは \`\`\`json のコードブロック1つにまとめてください。予定が複数あっても、1つの JSON の "rules" に並べます。`;
   const dateRule =
     shared?.occurrences === undefined
       ? '- 表の中でも「10月23日」のような日付は書かず、「毎月25日（休業日なら前営業日）」のようにルールで書いてください。'
       : '- 日付を書くときは、下の「予定の一覧」（アプリが計算したもの）にある日付だけを使ってください。一覧に無い日付は書かず、「アプリのカレンダーで確かめてください」と伝えてください。ルールを説明するときは「毎月25日（休業日なら前営業日）」のようにルールで書いてください。';
-  const ending =
-    request === ''
-      ? '準備ができたら、「進め方」の1のとおり利用者に話しかけてください。'
-      : `# 利用者の最初の依頼
-${request}
-
-準備ができたら、上の「利用者の最初の依頼」に応えるところから始めてください。足りないことは「進め方」のとおり質問してください。`;
   const groups = [...new Set(context.groups ?? [])].filter((group) => group !== '');
   const calendarLines = calendars.map((calendar) => `  - "${calendar.id}" … ${calendar.name}`).join('\n');
   const fiscalMonth = calendars[0]?.fiscalYearEndMonth ?? DEFAULT_FISCAL_YEAR_END_MONTH;
@@ -248,7 +256,7 @@ ${request}
       ? ''
       : `\n- 利用者が既に使っているグループ: ${groups.map((group) => `「${group}」`).join('、')}。合うものがあれば同じ名前を使ってください。`;
 
-  return `${purposeSection(purpose)}
+  return `${role}
 
 # 業務知識を使うときの注意
 - 税金・社会保険などの期限を提案するときは、一般的な決まり（例: 源泉所得税の納付は翌月10日）として設定し、「法改正や会社ごとの事情で変わることがあります。最新の情報は国税庁・日本年金機構などの公式の案内で確かめてください」と添えてください。
@@ -265,7 +273,7 @@ ${dateRule}
   - 条件付きの予定（「金額が100万円を超えたときだけ」など）
 
 ${sharedSection(purpose, shared)}# 設定データの出し方
-- 設定データは \`\`\`json のコードブロック1つにまとめてください。予定が複数あっても、1つの JSON の "rules" に並べます。
+${outputLines}
 - 一度に作る予定は ${AI_IMPORT_LIMITS.rules} 件までです。
 - コードブロックの外に短い説明を書いてもかまいません。${shared?.rules === undefined ? '' : UPDATE_RULES}
 
@@ -366,7 +374,7 @@ ${calendarLines}
 ${JSON.stringify(EXAMPLE, null, 2)}
 \`\`\`
 
-${ending}`;
+準備ができたら、「進め方」の1のとおり利用者に話しかけてください。`;
 }
 
 /**
