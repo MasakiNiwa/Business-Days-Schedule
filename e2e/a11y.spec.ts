@@ -99,6 +99,7 @@ test.describe('axe-core', () => {
     await page.goto('');
     await page.locator('.empty-prompt').getByRole('button', { name: 'AIで作る' }).click();
     await analyze(page, 'dialog');
+    await page.locator('dialog summary', { hasText: 'AIの回答を取り込む' }).click();
 
     const reply = JSON.stringify({
       format: 'business-days-schedule-ai-import',
@@ -122,8 +123,9 @@ test.describe('axe-core', () => {
     await seedSamples(page);
     await page.getByRole('button', { name: 'ルール', exact: true }).first().click();
     await page.getByRole('button', { name: 'AIで作る' }).first().click();
+    await page.locator('dialog summary', { hasText: 'AIへの依頼文を作る' }).click();
     await page.locator('dialog').getByRole('button', { name: '予定について質問' }).click();
-    await page.locator('dialog').getByText('AIに渡す内容').click();
+    // 渡す内容は最初から開いている。
     await expect(page.locator('dialog .ai-share-options')).toBeVisible();
     await analyze(page, 'dialog');
   });

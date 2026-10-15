@@ -60,10 +60,31 @@ function paste(root: HTMLElement, text: string): void {
 }
 
 describe('AiImportView', () => {
+  it('開いたときは3つの手順を閉じて並べ、流れを先に見せる', () => {
+    const { root } = setup();
+    const steps = [...root.querySelectorAll<HTMLDetailsElement>('.ai-step > details.ai-step-details')];
+    expect(steps).toHaveLength(3);
+    expect(steps.map((step) => step.open)).toEqual([false, false, false]);
+    // 見出しは開閉の取っ手の中にある。
+    expect(steps.map((step) => step.querySelector('summary .ai-step-title')?.textContent)).toEqual([
+      'AIへの依頼文を作る',
+      'AIに予定を伝える',
+      'AIの回答を取り込む',
+    ]);
+  });
+
+  it('〈貼り直す〉で戻るときは、取り込みの手順を開く', () => {
+    const { root } = setup();
+    paste(root, reply([payment]));
+    click(root, '内容を確認');
+    click(root, '貼り直す');
+    expect(root.querySelectorAll<HTMLDetailsElement>('details.ai-step-details')[2]?.open).toBe(true);
+  });
+
   it('3つの手順を順に並べる', () => {
     const { root } = setup();
     const steps = [...root.querySelectorAll('.ai-step-title')].map((node) => node.textContent);
-    expect(steps).toEqual(['AIへの依頼文をコピー', 'AIに予定を伝える', 'AIの回答を貼り付け']);
+    expect(steps).toEqual(['AIへの依頼文を作る', 'AIに予定を伝える', 'AIの回答を取り込む']);
     // 貼り付け欄には名前がある。
     const input = root.querySelector<HTMLTextAreaElement>('.ai-import-input');
     expect(root.querySelector(`label[for="${input?.id ?? ''}"]`)?.textContent).toBe('AIから返ってきた内容を貼り付け');
@@ -239,8 +260,8 @@ describe('AiImportView: 頼むことと渡す内容を選ぶ', () => {
     expect(root.querySelector('.ai-share-summary')?.textContent).toContain('渡す登録内容: なし');
     expect(root.querySelector('.ai-share-summary')?.textContent).toMatch(/依頼文は約 [\d,]+ 文字です。/);
     expect(root.querySelector<HTMLElement>('.ai-share-note')?.hidden).toBe(true);
-    // 渡す内容は畳んでおく。
-    expect(root.querySelector<HTMLDetailsElement>('details.ai-share')?.open).toBe(false);
+    // 何を渡すかは、コピーする前に目に入るよう開いておく。
+    expect(root.querySelector<HTMLDetailsElement>('details.ai-share')?.open).toBe(true);
   });
 
   it('「今の予定を直す」では予定を渡し、メモは選んだときだけ渡す', async () => {
@@ -299,15 +320,6 @@ describe('AiImportView: 頼むことと渡す内容を選ぶ', () => {
     expect(root.querySelector('.ai-share-summary')?.textContent).toContain('予定の一覧（2026-10-01〜2026-10-31）');
   });
 
-  it('最初に伝えることを書くと依頼文に入り、閉じる前に確かめる', () => {
-    const { root, view } = setupWith([saved]);
-    const request = root.querySelector<HTMLTextAreaElement>('.ai-request-input')!;
-    request.value = '毎月10日に源泉税の納付があります。';
-    request.dispatchEvent(new Event('input'));
-    expect(view.promptText).toContain('# 利用者の最初の依頼\n毎月10日に源泉税の納付があります。');
-    expect(view.isDirty()).toBe(true);
-  });
-
   it('直す指示は、変更前と変更後を見せてから反映する', () => {
     const { root, handlers } = setupWith([saved]);
     paste(root, reply([{ ...ruleSnapshot(saved, false), adjust: { mode: 'next' } }]));
@@ -352,5 +364,57 @@ describe('AiImportView: 頼むことと渡す内容を選ぶ', () => {
     paste(root, reply([{ ...ruleSnapshot(saved, false), rev: '00000000', title: '支払（本社）' }]));
     click(root, '内容を確認');
     expect(root.querySelector('.ai-preview-update .issue-warning')?.textContent).toContain('反映すると、その変更は上書きされます');
+  });
+});
+
+describe('AiImportView: 回答を JSON ファイルで受け取る', () => {
+  function chooseFile(root: HTMLElement, file: File): void {
+    const input = root.querySelector<HTMLInputElement>('input.ai-file-input');
+    if (input === null) throw new Error('ファイルの選択欄が見つかりません');
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    input.dispatchEvent(new Event('change'));
+  }
+
+  it('選ぶと、依頼文で JSON ファイルを頼む', () => {
+    const { root, view } = setup();
+    expect(view.promptText).not.toContain('JSON ファイル（例: business-days-schedule.json）');
+    const option = root.querySelector<HTMLInputElement>('.ai-reply-as-file input')!;
+    option.checked = true;
+    option.dispatchEvent(new Event('change'));
+    expect(view.promptText).toContain('JSON ファイル（例: business-days-schedule.json）として出力してください');
+    expect(view.promptText).toContain('〈ファイルから読み込む〉で選んでください');
+    // 選び直せば元の頼み方に戻る。
+    option.checked = false;
+    option.dispatchEvent(new Event('change'));
+    expect(view.promptText).toBe(buildAiPrompt({ calendars, groups: [] }));
+  });
+
+  it('ファイルを読み込むと、貼り付けたときと同じように確かめる', async () => {
+    const { root, handlers } = setup();
+    const json = JSON.stringify({ format: AI_IMPORT_FORMAT, schemaVersion: 1, rules: [payment] });
+    chooseFile(root, new File([json], 'business-days-schedule.json', { type: 'application/json' }));
+    await vi.waitFor(() =>
+      expect(root.querySelector('.ai-result-title')?.textContent).toBe('AIから次の予定が作成されました（1 件）'),
+    );
+    expect(root.querySelector('.ai-file-status')?.textContent).toBe('「business-days-schedule.json」を読み込みました。');
+    // 中身は貼り付け欄にも入る（〈貼り直す〉で見直せる）。
+    expect(root.querySelector<HTMLTextAreaElement>('.ai-import-input')?.value).toBe(json);
+    click(root, 'この内容で登録');
+    expect(handlers.onRegister).toHaveBeenCalledTimes(1);
+  });
+
+  it('読み込めないファイルは、理由を出して登録しない', async () => {
+    const { root, handlers } = setup();
+    chooseFile(root, new File(['{ "format": "business-days-schedule-ai-import", "rules": ['], 'broken.json'));
+    await vi.waitFor(() => expect(root.querySelector('.ai-result-title')?.textContent).toBe('AIの回答を読み込めませんでした'));
+    expect(handlers.onRegister).not.toHaveBeenCalled();
+  });
+
+  it('大きすぎるファイルは、中身を読まずに断る', async () => {
+    const { root } = setup();
+    const huge = new File(['x'.repeat(400_001)], 'huge.json');
+    chooseFile(root, huge);
+    await vi.waitFor(() => expect(root.querySelector('.ai-issues')?.textContent).toContain('ファイルが大きすぎます'));
+    expect(root.querySelector<HTMLTextAreaElement>('.ai-import-input')?.value).toBe('');
   });
 });
