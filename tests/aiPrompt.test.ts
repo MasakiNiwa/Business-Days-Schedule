@@ -7,8 +7,10 @@
 
 import { describe, expect, it } from 'vitest';
 import { AI_IMPORT_FORMAT, readAiReply, validateAiImport } from '../src/core/aiImport';
+import { buildSharedData, defaultShareOptions } from '../src/core/aiContext';
+import type { AiPurpose } from '../src/core/aiContext';
 import { buildAiPrompt, buildFixRequest } from '../src/core/aiPrompt';
-import { bankCalendarDef, companyCalendarDef } from './helpers';
+import { bankCalendarDef, companyCalendarDef, makeRule, scheduleContext } from './helpers';
 
 const calendars = [companyCalendarDef, bankCalendarDef];
 
@@ -87,6 +89,81 @@ describe('buildAiPrompt', () => {
   it('手元のデータはカレンダー名以外を含めない', () => {
     // ルールの中身などは渡さない。引数としても受け取らない。
     expect(buildAiPrompt([{ id: 'x', name: '本社' }])).toContain('"x" … 本社');
+  });
+});
+
+describe('buildAiPrompt: 頼むことと渡す登録内容', () => {
+  const rules = [
+    makeRule({
+      id: 'pay',
+      title: '支払',
+      calendarId: 'bank',
+      note: '取引先A社',
+      recurrence: { type: 'monthlyByDay', interval: 1, days: [25], overflow: 'clamp' },
+      adjust: { mode: 'prev', keepInMonth: false },
+    }),
+  ];
+  const promptFor = (purpose: AiPurpose, overrides: Partial<ReturnType<typeof defaultShareOptions>> = {}) =>
+    buildAiPrompt({
+      calendars,
+      purpose,
+      shared: buildSharedData({ rules, calendars }, { ...defaultShareOptions(purpose), ...overrides }, scheduleContext, '2026-10-15'),
+    });
+
+  it('既定（新しく作る・何も渡さない）は、これまでの依頼文と同じ', () => {
+    expect(promptFor('create')).toBe(buildAiPrompt({ calendars }));
+  });
+
+  it('頼むことごとに、役割と進め方を変える', () => {
+    expect(promptFor('revise')).toContain('「どの予定を、どう直したいですか？」');
+    expect(promptFor('review')).toContain('点検した結果を重要なものから表');
+    expect(promptFor('review')).toContain('問題を作らないでください');
+    expect(promptFor('handover')).toContain('引き継ぎ資料を作る');
+    expect(promptFor('question')).toContain('「予定について、何を知りたいですか？」');
+    // どれも日付を計算させない決まりは同じ。
+    for (const purpose of ['revise', 'review', 'handover', 'question'] as const) {
+      expect(promptFor(purpose)).toContain('具体的な日付を計算しないでください');
+      expect(promptFor(purpose).trimEnd().endsWith('「進め方」の1のとおり利用者に話しかけてください。')).toBe(true);
+    }
+  });
+
+  it('登録済みの予定は1行に1件で渡し、直し方の決まりを添える', () => {
+    const prompt = promptFor('revise');
+    expect(prompt).toContain('## 登録済みの予定（1 件。');
+    expect(prompt).toContain('"id":"pay"');
+    expect(prompt).toContain('"id" と "rev" をそのまま写し');
+    expect(prompt).toContain('変えない予定は出力しないでください');
+    expect(prompt).toContain('予定を消すことはできません');
+    // メモは選ばなければ渡さない。
+    expect(prompt).not.toContain('取引先A社');
+    expect(prompt).toContain('メモは渡していません');
+    expect(promptFor('revise', { notes: true })).toContain('取引先A社');
+  });
+
+  it('予定を渡さなければ、直し方の決まりも入れない', () => {
+    expect(promptFor('create')).not.toContain('登録済みの予定を直すとき');
+    expect(promptFor('revise', { rules: false })).toContain('登録済みの予定は渡されていません');
+  });
+
+  it('予定の一覧を渡すときは、一覧の日付だけを使わせる', () => {
+    const prompt = promptFor('question');
+    expect(prompt).toContain('## 予定の一覧（2026-10-01〜2026-12-31。アプリが営業日カレンダーで計算した日付');
+    expect(prompt).toContain('2026-10-23（金） 支払（本来は 2026-10-25（日）。休業日のため前へ）');
+    expect(prompt).toContain('「予定の一覧」（アプリが計算したもの）にある日付だけを使ってください');
+    expect(prompt).not.toContain('表の中でも「10月23日」のような日付は書かず');
+  });
+
+  it('依頼文を貼り返されても、渡した登録内容を設定データと取り違えない', () => {
+    const prompt = promptFor('handover');
+    const result = readAiReply(prompt, { calendars, existingRules: rules });
+    // 候補になるのは例の JSON だけ（新しい予定として読める）。
+    expect(result).toMatchObject({ ok: true, updates: [] });
+  });
+
+  it('最初の依頼があれば、そこから始めさせる', () => {
+    const prompt = buildAiPrompt({ calendars, request: '  毎月10日に源泉税の納付があります。  ' });
+    expect(prompt).toContain('# 利用者の最初の依頼\n毎月10日に源泉税の納付があります。\n');
+    expect(prompt.trimEnd().endsWith('足りないことは「進め方」のとおり質問してください。')).toBe(true);
   });
 });
 

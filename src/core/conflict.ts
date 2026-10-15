@@ -57,3 +57,23 @@ export function upsertRule(saved: readonly Rule[], rule: Rule): Rule[] {
   if (index === -1) return [...saved, rule];
   return saved.map((item) => (item.id === rule.id ? rule : item));
 }
+
+/**
+ * ルールの中身を表す短い印（docs/SPEC.md §9.5）。
+ *
+ * 外部 AI へ登録済みのルールを渡すときに添え、直した設定データにそのまま
+ * 写して返してもらう。返ってきた印が今の中身と違えば、AI に渡したあとで
+ * アプリ側が書き換えられている（古い内容をもとに直している）と分かる。
+ *
+ * 改ざんを防ぐためのものではない。取り違えに気づくためだけなので、
+ * 短く比べやすい FNV-1a（32bit）で足りる。
+ */
+export function ruleRevision(rule: Rule): string {
+  const text = ruleFingerprint(rule);
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}

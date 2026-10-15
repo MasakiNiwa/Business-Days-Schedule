@@ -9,7 +9,11 @@
  *   1. 回答から JSON を1つ取り出す（parseAiReply）
  *   2. 決めた形どおりかを厳しく確かめ、知っている項目だけを拾って Rule を組む
  *      （validateAiImport）
- *   3. 既存のルールに触れずに足す（appendImportedRules）
+ *   3. 新しいルールは既存のルールに触れずに足し、登録済みのルールを直す指示は
+ *      id で突き合わせて置き換える（applyAiImport）
+ *
+ * 登録済みのルールを直せるのは、id が手元のルールと一致するときだけ。
+ * 渡したあとでアプリ側が書き換えられていれば（rev が違えば）警告する。
  *
  * までを受け持つ。日付は AI に計算させない。AI が返すのは「毎月25日・休業日なら
  * 前営業日」というルールそのものであり、何日になるかは既存の営業日計算が決める。
@@ -34,7 +38,8 @@ import type {
 } from '../types';
 import { isValidDateStr } from './dateUtil';
 import { describeNoticeCalendar, describePeriod, describeRule, describeTiming } from './describe';
-import { normalizeRule, timingOf } from './notice';
+import { ruleFingerprint, ruleRevision } from './conflict';
+import { freshNoticeId, normalizeRule, timingOf } from './notice';
 import { previewSeries } from './schedule';
 import type { PreviewSeries, ScheduleContext } from './schedule';
 import { createRule, newRuleId } from './storage';
@@ -253,8 +258,13 @@ const RULE_FIELDS = new Set([
   'period',
 ]);
 /** アプリ側で付け直すので、あっても読まない項目。 */
-const IGNORED_RULE_FIELDS = new Set(['id', 'enabled', 'createdAt', 'updatedAt']);
-const NOTICE_FIELDS = new Set(['label', 'timing', 'role', 'calendarId']);
+const IGNORED_RULE_FIELDS = new Set(['enabled', 'createdAt', 'updatedAt']);
+/**
+ * 登録済みのルールを直すときの印。id で対象を決め、rev で「渡したときの内容」かを確かめる。
+ * 手元のルールを渡していない（existingRules が無い）ときは、id も読まない。
+ */
+const UPDATE_RULE_FIELDS = new Set(['id', 'rev']);
+const NOTICE_FIELDS = new Set(['id', 'label', 'timing', 'role', 'calendarId']);
 
 const RECURRENCE_FIELDS: Record<Recurrence['type'], readonly string[]> = {
   weekly: ['type', 'interval', 'weekdays', 'anchor'],
@@ -292,12 +302,27 @@ const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
 export type AiImportContext = {
   /** 選べる営業日カレンダー。利用者の手元にあるものだけを許す。 */
   calendars: readonly BusinessCalendar[];
+  /**
+   * 登録済みのルール。渡すと、id の付いた予定を「このルールを直す」指示として読む。
+   * 渡さなければ id は読まず、すべて新しい予定として扱う。
+   */
+  existingRules?: readonly Rule[];
   /** 作成日時。テストで固定するために受け取る。 */
   now?: Date;
 };
 
+/** 登録済みのルールを直す指示1件。 */
+export type RuleUpdate = {
+  before: Rule;
+  after: Rule;
+  /** 中身が変わるか。AI が変えずに返してきたものは false。 */
+  changed: boolean;
+  /** AI に渡したあとで、アプリ側のルールが書き換えられているか。 */
+  stale: boolean;
+};
+
 export type AiImportResult =
-  | { ok: true; rules: Rule[]; issues: AiImportIssue[] }
+  | { ok: true; rules: Rule[]; updates: RuleUpdate[]; issues: AiImportIssue[] }
   | { ok: false; issues: AiImportIssue[] };
 
 /** 値を AI 向けの文に埋め込むときの書き方。長いものは切る。 */
@@ -763,6 +788,15 @@ function readNotices(
       return;
     }
     rejectUnknown(item, [...NOTICE_FIELDS], at, '前後の予定', out);
+    let id: string | undefined;
+    if (has(item, 'id')) {
+      const raw = own(item, 'id');
+      if (typeof raw === 'string' && raw.length <= 64 && !CONTROL_CHARS.test(raw)) id = raw;
+      else {
+        out.error(`${at}.id`, 'AIから返された前後の予定の印（id）が正しくありません。', `${at}.id は、渡した一覧の前後の予定の "id" をそのまま写してください（新しい前後の予定なら省略）。`);
+        failed = true;
+      }
+    }
     const label = readText(own(item, 'label'), `${at}.label`, '前後の予定の名前', LIMITS.titleLength, true, out);
     const timing = readTiming(own(item, 'timing'), `${at}.timing`, out);
     let role: NoticeRole | undefined;
@@ -790,6 +824,7 @@ function readNotices(
       return;
     }
     notices.push({
+      ...(id === undefined ? {} : { id }),
       label,
       timing,
       ...(role === undefined ? {} : { role }),
@@ -823,7 +858,46 @@ function readPeriod(value: unknown, path: string, out: Collector): Rule['period'
   return { start, end };
 }
 
-function readRule(value: unknown, index: number, ctx: AiImportContext, out: Collector): Rule | null {
+type ReadRuleResult = { kind: 'add'; rule: Rule } | { kind: 'update'; update: RuleUpdate };
+
+/**
+ * 直す指示の前後予定に id を振り直す。
+ *
+ * 元のルールにある id だけをそのまま使う（外部カレンダーの UID が変わらないように）。
+ * 新しい前後予定には、元のルールで使っていた id と重ならない新しい id を振る。
+ * 消した前後予定の id を別の予定へ回すと、取り込み先で取り違えられる。
+ */
+function carryNoticeIds(notices: readonly Notice[], before: Rule): Notice[] {
+  const known = new Set(before.notices.map((notice) => notice.id).filter((id): id is string => id !== undefined));
+  const used = new Set(known);
+  const kept = new Set<string>();
+  return notices.map((notice) => {
+    const { id, ...rest } = notice;
+    if (id !== undefined && known.has(id) && !kept.has(id)) {
+      kept.add(id);
+      return notice;
+    }
+    const fresh = freshNoticeId(used);
+    used.add(fresh);
+    return { id: fresh, ...rest };
+  });
+}
+
+/** 新しい予定の前後予定からは id を外す（アプリが振る）。 */
+function dropNoticeIds(notices: readonly Notice[], path: string, out: Collector): Notice[] {
+  if (notices.some((notice) => notice.id !== undefined)) {
+    out.warn(`${path}.notices`, '新しい予定の前後の予定に付いていた印（id）は使いません。', `新しく作る予定の notices には "id" を付けないでください。`);
+  }
+  return notices.map(({ id: _id, ...rest }) => rest);
+}
+
+function readRule(
+  value: unknown,
+  index: number,
+  ctx: AiImportContext,
+  out: Collector,
+  targeted: Set<string>,
+): ReadRuleResult | null {
   const path = `rules[${index}]`;
   out.subject = `${index + 1}件目`;
   if (!isPlainObject(value)) {
@@ -835,9 +909,40 @@ function readRule(value: unknown, index: number, ctx: AiImportContext, out: Coll
     out.subject = `${index + 1}件目「${rawTitle.trim().slice(0, 40)}」`;
   }
 
+  // 登録済みのルールを直す指示か。手元のルールを渡されていなければ id は読まない。
+  const updating = ctx.existingRules !== undefined;
+  let before: Rule | undefined;
+  if (updating && has(value, 'id')) {
+    const rawId = own(value, 'id');
+    before = typeof rawId === 'string' ? ctx.existingRules?.find((rule) => rule.id === rawId) : undefined;
+    if (before === undefined) {
+      out.error(
+        `${path}.id`,
+        'AIから返された予定は、登録済みの予定を直すものとして印（id）が付いていますが、その予定がアプリに見つかりません。',
+        `${path}.id ${show(rawId)} は登録済みの予定にありません。登録済みの予定を直すときは、渡した一覧の "id" をそのまま写してください。新しく作る予定には "id" を付けないでください。`,
+      );
+    } else if (targeted.has(before.id)) {
+      out.error(
+        `${path}.id`,
+        'AIから返された内容に、同じ登録済みの予定を直すものが2つ以上あります。',
+        `"id": ${show(before.id)} の予定は1回だけ出力してください。`,
+      );
+    } else {
+      targeted.add(before.id);
+    }
+  }
+
   for (const key of Object.keys(value)) {
     if (RULE_FIELDS.has(key)) continue;
-    if (IGNORED_RULE_FIELDS.has(key)) {
+    if (updating && UPDATE_RULE_FIELDS.has(key)) continue;
+    // 一時停止中かどうかは、渡した一覧に添えてあるだけ。写して返されても読まない。
+    if (before !== undefined && key === 'enabled') continue;
+    if (key === 'rev') {
+      // 手元のルールを渡していないときの rev は、id と同じく意味を持たない。
+      out.warn(`${path}.rev`, '「rev」はアプリ側で決めるため、AIから返された値は使いません。', `${path}.rev は出力しないでください。`);
+      continue;
+    }
+    if (IGNORED_RULE_FIELDS.has(key) || key === 'id') {
       out.warn(
         `${path}.${key}`,
         `「${key}」はアプリ側で決めるため、AIから返された値は使いません。`,
@@ -853,18 +958,23 @@ function readRule(value: unknown, index: number, ctx: AiImportContext, out: Coll
   }
 
   const title = readText(rawTitle, `${path}.title`, '予定の名前', LIMITS.titleLength, true, out);
-  const group = readText(own(value, 'group'), `${path}.group`, 'グループ', LIMITS.groupLength, false, out);
+  // 直すときは、空文字で「グループを外す」ことを表せる。省略は「そのまま」。
+  const rawGroup = own(value, 'group');
+  const group =
+    before !== undefined && rawGroup === ''
+      ? ''
+      : readText(rawGroup, `${path}.group`, 'グループ', LIMITS.groupLength, false, out);
   const rawNote = own(value, 'note');
   let note: string | undefined;
   if (rawNote !== undefined) {
     // メモは改行を許す。長さと型だけを見る。
     if (typeof rawNote !== 'string' || rawNote.length > LIMITS.noteLength) {
       out.error(`${path}.note`, `AIから返された「メモ」が文字ではないか、長すぎます（${LIMITS.noteLength}文字まで）。`, `${path}.note は ${LIMITS.noteLength} 文字以内の文字列にしてください。`);
-    } else if (rawNote.trim() !== '') note = rawNote.trim();
+    } else note = rawNote.trim();
   }
 
   const calendarIds = ctx.calendars.map((calendar) => calendar.id);
-  let calendarId = calendarIds[0] ?? 'company';
+  let calendarId = before?.calendarId ?? calendarIds[0] ?? 'company';
   if (has(value, 'calendarId')) {
     const raw = own(value, 'calendarId');
     if (typeof raw === 'string' && calendarIds.includes(raw)) calendarId = raw;
@@ -878,7 +988,7 @@ function readRule(value: unknown, index: number, ctx: AiImportContext, out: Coll
     }
   }
 
-  let color: ColorToken = 'blue';
+  let color: ColorToken = before?.color ?? 'blue';
   if (has(value, 'color')) {
     const read = readEnum(own(value, 'color'), AI_COLORS, `${path}.color`, '色', out);
     if (read !== null) color = read;
@@ -901,24 +1011,38 @@ function readRule(value: unknown, index: number, ctx: AiImportContext, out: Coll
   }
 
   const now = (ctx.now ?? new Date()).toISOString();
-  // 既定値はアプリが持つものを使い、AI が言ったことだけを上書きする。
-  // id は必ずこちらで作る。AI に決めさせると既存のルールと衝突しうる。
-  const rule = normalizeRule({
-    ...createRule(),
-    title,
-    color,
-    ...(group === undefined ? {} : { group }),
-    ...(note === undefined ? {} : { note }),
-    enabled: true,
-    calendarId,
-    recurrence,
-    adjust,
-    notices,
-    period,
-    skipDates: [],
-    createdAt: now,
-    updatedAt: now,
-  });
+  const rule =
+    before === undefined
+      ? // 既定値はアプリが持つものを使い、AI が言ったことだけを上書きする。
+        // id は必ずこちらで作る。AI に決めさせると既存のルールと衝突しうる。
+        normalizeRule({
+          ...createRule(),
+          title,
+          color,
+          ...(group === undefined || group === '' ? {} : { group }),
+          ...(note === undefined || note === '' ? {} : { note }),
+          enabled: true,
+          calendarId,
+          recurrence,
+          adjust,
+          notices: dropNoticeIds(notices, path, out),
+          period,
+          skipDates: [],
+          createdAt: now,
+          updatedAt: now,
+        })
+      : mergeUpdate(before, {
+          title,
+          color,
+          group,
+          note,
+          calendarId,
+          recurrence,
+          adjust,
+          notices: has(value, 'notices') ? carryNoticeIds(notices, before) : undefined,
+          period: has(value, 'period') ? period : undefined,
+          now,
+        });
 
   // 最後に、保存されているルールと同じ検証を通す。ここを通らないものは
   // 編集画面でも保存できないので、取り込みでも通さない。
@@ -926,7 +1050,68 @@ function readRule(value: unknown, index: number, ctx: AiImportContext, out: Coll
     if (issue.severity !== 'error') continue;
     out.error(`${path}.${issue.path}`, `AIから返された予定に問題があります: ${issue.message}`, `${path}.${issue.path}: ${issue.message}`);
   }
-  return rule;
+  if (before === undefined) return { kind: 'add', rule };
+
+  const rawRev = own(value, 'rev');
+  const current = ruleRevision(before);
+  let stale = false;
+  if (rawRev === undefined) {
+    out.warn(
+      `${path}.rev`,
+      'AIに渡したときの内容かどうかを確かめる印（rev）が無いため、渡したあとでアプリ側が変わっていないかは確かめられません。変更前と変更後を見比べてください。',
+      `${path}.rev に、渡した一覧の "rev" をそのまま写してください。`,
+    );
+  } else if (rawRev !== current) {
+    stale = true;
+    out.warn(
+      `${path}.rev`,
+      'この予定は、AIに内容を渡したあとでアプリ側で変更されています。反映すると、その変更は上書きされます。変更前と変更後を見比べてください。',
+      `${path}.rev が登録済みの内容と一致しません。利用者から最新の登録内容を受け取り直してから、直してください。`,
+    );
+  }
+  const changed = ruleFingerprint(rule) !== ruleFingerprint(before);
+  return { kind: 'update', update: { before, after: changed ? rule : before, changed, stale } };
+}
+
+/**
+ * 直す指示を、登録済みのルールに重ねる。
+ *
+ * AI が省いた項目は**そのまま**にする。メモを渡していないときに AI がメモを
+ * 書かずに返すのは当然で、それを「メモを消す」と読むと利用者のメモが消える。
+ * 消すときは空文字（グループ・メモ）や {"start": null, "end": null}（期間）で表す。
+ * 一時停止中かどうか・除外日・作成日時は AI に渡していないので引き継ぐ。
+ */
+function mergeUpdate(
+  before: Rule,
+  input: {
+    title: string;
+    color: ColorToken;
+    group: string | undefined;
+    note: string | undefined;
+    calendarId: string;
+    recurrence: Recurrence;
+    adjust: Adjustment;
+    notices: Notice[] | undefined;
+    period: Rule['period'] | undefined;
+    now: string;
+  },
+): Rule {
+  const { group: _group, note: _note, ...rest } = before;
+  const group = input.group ?? before.group;
+  const note = input.note ?? before.note;
+  return normalizeRule({
+    ...rest,
+    title: input.title,
+    color: input.color,
+    ...(group === undefined || group === '' ? {} : { group }),
+    ...(note === undefined || note === '' ? {} : { note }),
+    calendarId: input.calendarId,
+    recurrence: input.recurrence,
+    adjust: input.adjust,
+    notices: input.notices ?? before.notices,
+    period: input.period ?? before.period,
+    updatedAt: input.now,
+  });
 }
 
 /**
@@ -992,10 +1177,17 @@ export function validateAiImport(value: unknown, ctx: AiImportContext): AiImport
   // 形が違うときは中身を見ても的外れな指摘になるので、ここで止める。
   if (out.failed) return { ok: false, issues: out.issues };
 
-  const built = rules.map((rule, index) => readRule(rule, index, ctx, out));
+  const targeted = new Set<string>();
+  const built = rules.map((rule, index) => readRule(rule, index, ctx, out, targeted));
   out.subject = undefined;
   if (out.failed) return { ok: false, issues: out.issues };
-  return { ok: true, rules: built.filter((rule): rule is Rule => rule !== null), issues: out.issues };
+  const added: Rule[] = [];
+  const updates: RuleUpdate[] = [];
+  for (const item of built) {
+    if (item?.kind === 'add') added.push(item.rule);
+    else if (item?.kind === 'update') updates.push(item.update);
+  }
+  return { ok: true, rules: added, updates, issues: out.issues };
 }
 
 /** 貼り付けた回答を読む。取り出しと検証をまとめたもの。 */
@@ -1027,6 +1219,20 @@ export type ImportPreviewItem = {
 
 export const IMPORT_PREVIEW_COUNT = 3;
 
+const calendarNameOf = (calendars: readonly BusinessCalendar[], id: string): string =>
+  calendars.find((calendar) => calendar.id === id)?.name ?? id;
+
+function describeNotices(rule: Rule, calendars: readonly BusinessCalendar[]): string[] {
+  return rule.notices.map(
+    (notice) =>
+      `${describeTiming(timingOf(notice))}: ${notice.label}${describeNoticeCalendar(
+        notice,
+        rule.calendarId,
+        (id) => calendars.find((calendar) => calendar.id === id)?.name,
+      )}`,
+  );
+}
+
 export function buildImportPreview(
   rules: readonly Rule[],
   calendars: readonly BusinessCalendar[],
@@ -1037,18 +1243,81 @@ export function buildImportPreview(
   return rules.map((rule) => ({
     rule,
     summary: describeRule(rule),
-    calendarName: calendars.find((calendar) => calendar.id === rule.calendarId)?.name ?? rule.calendarId,
-    notices: rule.notices.map(
-      (notice) =>
-        `${describeTiming(timingOf(notice))}: ${notice.label}${describeNoticeCalendar(
-          notice,
-          rule.calendarId,
-          (id) => calendars.find((calendar) => calendar.id === id)?.name,
-        )}`,
-    ),
+    calendarName: calendarNameOf(calendars, rule.calendarId),
+    notices: describeNotices(rule, calendars),
     period: describePeriod(rule.period),
     series: previewSeries(rule, from, count, ctx),
   }));
+}
+
+/** 変更前と変更後で違う項目1つ。値は画面にそのまま出す言い方。 */
+export type RuleChange = { label: string; before: string; after: string };
+
+const COLOR_NAMES: Record<ColorToken, string> = {
+  blue: '青',
+  green: '緑',
+  red: '赤',
+  orange: 'オレンジ',
+  purple: '紫',
+  teal: '青緑',
+  pink: 'ピンク',
+  gray: 'グレー',
+};
+
+/**
+ * 直す指示で変わる項目を、利用者の言葉で並べる。
+ * 繰り返しと休業日の扱いは、ルール一覧と同じ1行の説明で比べる。
+ */
+export function describeRuleChanges(
+  before: Rule,
+  after: Rule,
+  calendars: readonly BusinessCalendar[],
+): RuleChange[] {
+  const rows: [string, string, string][] = [
+    ['名前', before.title, after.title],
+    ['いつ', describeRule(before), describeRule(after)],
+    ['営業日カレンダー', calendarNameOf(calendars, before.calendarId), calendarNameOf(calendars, after.calendarId)],
+    ['前後の予定', describeNotices(before, calendars).join('、') || 'なし', describeNotices(after, calendars).join('、') || 'なし'],
+    ['グループ', before.group || '未分類', after.group || '未分類'],
+    ['メモ', before.note ?? 'なし', after.note ?? 'なし'],
+    ['有効期間', describePeriod(before.period) || '無期限', describePeriod(after.period) || '無期限'],
+    ['色', COLOR_NAMES[before.color], COLOR_NAMES[after.color]],
+  ];
+  const changes = rows
+    .filter(([, from, to]) => from !== to)
+    .map(([label, from, to]) => ({ label, before: from, after: to }));
+  // 説明の文では同じに見えても、中身は違うことがある（前後予定の数える向きの意図など）。
+  if (changes.length === 0 && ruleFingerprint(before) !== ruleFingerprint(after)) {
+    changes.push({ label: '細かな設定', before: '変更前', after: '変更あり' });
+  }
+  return changes;
+}
+
+export type UpdatePreviewItem = ImportPreviewItem & {
+  before: Rule;
+  changes: RuleChange[];
+  stale: boolean;
+};
+
+/** 直す予定の確認用。日付は変更後のルールをこのアプリで計算したもの。 */
+export function buildUpdatePreview(
+  updates: readonly RuleUpdate[],
+  calendars: readonly BusinessCalendar[],
+  ctx: ScheduleContext,
+  from: DateStr,
+  count = IMPORT_PREVIEW_COUNT,
+): UpdatePreviewItem[] {
+  return updates
+    .filter((update) => update.changed)
+    .map((update) => {
+      const [item] = buildImportPreview([update.after], calendars, ctx, from, count) as [ImportPreviewItem];
+      return {
+        ...item,
+        before: update.before,
+        changes: describeRuleChanges(update.before, update.after, calendars),
+        stale: update.stale,
+      };
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -1070,4 +1339,37 @@ export function appendImportedRules(saved: readonly Rule[], incoming: readonly R
     return id === rule.id ? rule : { ...rule, id };
   });
   return [...saved, ...added];
+}
+
+export type ApplyResult = {
+  rules: Rule[];
+  added: number;
+  updated: number;
+  /** 確認しているあいだに別のところで消された予定。直さずに飛ばした。 */
+  missing: Rule[];
+};
+
+/**
+ * 新しいルールを足し、直すルールを置き換える。
+ *
+ * `saved` は保存の直前に読み直した一覧を渡す。直す対象が既に消されていたら、
+ * 黙って作り直さずに飛ばして知らせる（消した人の判断を覆さないため）。
+ * 変わらないもの（changed が false）は触らない。
+ */
+export function applyAiImport(
+  saved: readonly Rule[],
+  added: readonly Rule[],
+  updates: readonly RuleUpdate[],
+): ApplyResult {
+  const changed = updates.filter((update) => update.changed);
+  const byId = new Map(changed.map((update) => [update.before.id, update.after]));
+  const present = new Set(saved.map((rule) => rule.id));
+  const replaced = saved.map((rule) => byId.get(rule.id) ?? rule);
+  const missing = changed.filter((update) => !present.has(update.before.id)).map((update) => update.before);
+  return {
+    rules: appendImportedRules(replaced, added),
+    added: added.length,
+    updated: changed.length - missing.length,
+    missing,
+  };
 }

@@ -118,6 +118,16 @@ test.describe('axe-core', () => {
     await analyze(page, 'dialog');
   });
 
+  test('AIで予定を作る（頼むこと・渡す内容）', async ({ page }) => {
+    await seedSamples(page);
+    await page.getByRole('button', { name: 'ルール', exact: true }).first().click();
+    await page.getByRole('button', { name: 'AIで作る' }).first().click();
+    await page.locator('dialog').getByRole('button', { name: '予定について質問' }).click();
+    await page.locator('dialog').getByText('AIに渡す内容').click();
+    await expect(page.locator('dialog .ai-share-options')).toBeVisible();
+    await analyze(page, 'dialog');
+  });
+
   test('日付の詳細', async ({ page }) => {
     await seedSamples(page);
     await page.locator('.cell.is-today').first().click();

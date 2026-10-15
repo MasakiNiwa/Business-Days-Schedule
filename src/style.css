@@ -2150,6 +2150,83 @@ button {
   color: var(--fg-muted);
 }
 
+/* 頼むことは折り返して並べる。5つあるのでスマートフォンでは2段になる。 */
+.ai-purposes {
+  flex-wrap: wrap;
+}
+
+.ai-purpose-hint,
+.ai-paste-hint {
+  margin: 0;
+}
+
+.ai-request-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+.ai-share-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-top: 0.4rem;
+}
+
+.ai-share-options .field-hint {
+  margin: 0;
+}
+
+/* 親の選択に従う項目（メモ・一覧の期間）は一段下げる。 */
+.ai-share-sub {
+  margin-left: 1.6rem;
+}
+
+.ai-share-summary {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+}
+
+.ai-preview-badge {
+  align-self: flex-start;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  background: var(--notice-bg);
+  color: var(--notice-fg);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.ai-preview-badge-new {
+  background: var(--bg-sunken);
+  color: var(--fg-muted);
+}
+
+.ai-changes {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 0.6rem;
+  margin: 0.2rem 0 0;
+  font-size: 0.82rem;
+}
+
+.ai-changes dt {
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.ai-changes dd {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ai-change-before {
+  color: var(--fg-muted);
+  text-decoration: line-through;
+}
+
 /* --- サンプルの追加 ------------------------------------------------------ */
 
 .samples,

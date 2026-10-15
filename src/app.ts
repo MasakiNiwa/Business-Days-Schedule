@@ -83,7 +83,8 @@ import { SettingsView } from './ui/SettingsView';
 import { AiImportView } from './ui/AiImportView';
 import { renderNavBar } from './ui/NavBar';
 import type { Page } from './ui/NavBar';
-import { appendImportedRules } from './core/aiImport';
+import { applyAiImport } from './core/aiImport';
+import type { RuleUpdate } from './core/aiImport';
 
 const SAMPLES_DIR = `${import.meta.env.BASE_URL}data/samples/`;
 
@@ -624,19 +625,32 @@ export class App {
   /**
    * AI の回答から組んだルールを登録する（docs/SPEC.md §9.5）。
    *
-   * 既存のルールには触れず、後ろへ足すだけ。保存の直前に読み直すのは
-   * saveRule と同じ理由（別のタブが増やしたルールを消さないため）。
+   * 新しいルールは後ろへ足し、直す指示は id で突き合わせて置き換える。それ以外の
+   * ルールには触れない。保存の直前に読み直すのは saveRule と同じ理由
+   * （別のタブが増やしたルールを消さないため）。確認のあいだに別のタブで
+   * 消された予定は、作り直さずに知らせる。
    */
-  private registerAiRules(rules: readonly Rule[]): void {
-    this.state.rules = appendImportedRules(loadState(this.store).rules, rules);
+  private registerAiRules(rules: readonly Rule[], updates: readonly RuleUpdate[] = []): void {
+    const result = applyAiImport(loadState(this.store).rules, rules, updates);
+    this.state.rules = result.rules;
     this.persistRules();
     this.openAiImport = null;
     this.mode = { kind: 'calendar' };
-    this.notify(
-      rules.length === 1
-        ? `「${rules[0]?.title ?? ''}」を登録しました。`
-        : `${rules.length} 件の予定を登録しました。`,
-    );
+    let message: string;
+    if (result.updated === 0 && result.missing.length === 0) {
+      message =
+        rules.length === 1
+          ? `「${rules[0]?.title ?? ''}」を登録しました。`
+          : `${rules.length} 件の予定を登録しました。`;
+    } else {
+      const parts = [result.added > 0 ? `${result.added} 件を追加` : '', result.updated > 0 ? `${result.updated} 件を変更` : '']
+        .filter((part) => part !== '');
+      message = parts.length === 0 ? '予定は変更しませんでした。' : `${parts.join('、')}しました。`;
+      if (result.missing.length > 0) {
+        message += ` ${result.missing.map((rule) => `「${rule.title}」`).join('、')}は別の画面で削除されていたため、変更していません。`;
+      }
+    }
+    this.notify(message, result.missing.length > 0 ? 'error' : 'info');
     this.render();
   }
 
@@ -1099,13 +1113,13 @@ export class App {
         this.today,
         {
           copyText: copyToClipboard,
-          onRegister: (rules) => this.registerAiRules(rules),
+          onRegister: (rules, updates) => this.registerAiRules(rules, updates),
           onClose: () => {
             if (!this.confirmDiscard()) return;
             this.backToCalendar();
           },
         },
-        collectGroups(this.state.rules),
+        this.state.rules,
       );
       this.openAiImport = view;
       return view.element;

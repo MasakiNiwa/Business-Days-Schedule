@@ -9,6 +9,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../src/app';
+import { ruleSnapshot } from '../src/core/aiContext';
 import { AI_IMPORT_FORMAT } from '../src/core/aiImport';
 import { STORAGE_KEYS } from '../src/core/storage';
 import { holidays, makeRule } from './helpers';
@@ -147,5 +148,43 @@ describe('AI の回答の取り込み（アプリ全体）', () => {
     globalThis.localStorage.setItem(STORAGE_KEYS.rules, JSON.stringify(other));
     click('この内容で登録');
     expect(savedRules().map((rule) => rule.title)).toEqual(['既存の給与振込', '別タブで追加', '支払']);
+  });
+
+  it('直す指示を反映すると、その予定だけを置き換えて保存する', () => {
+    const existing = [
+      makeRule({ id: 'keep', title: '既存の給与振込' }),
+      makeRule({ id: 'pay', title: '支払', note: '取引先A社', recurrence: { type: 'monthlyByDay', interval: 1, days: [25], overflow: 'clamp' }, adjust: { mode: 'prev', keepInMonth: false } }),
+    ];
+    globalThis.localStorage.setItem(STORAGE_KEYS.rules, JSON.stringify(existing));
+    const app = new App(root, holidays);
+    app.render();
+    click('ルール');
+    click('AIで作る');
+    const keepBefore = JSON.stringify(savedRules()[0]);
+
+    paste(reply([{ ...ruleSnapshot(existing[1]!, false), title: '支払（本社）' }, payment]));
+    click('内容を確認');
+    click('この内容で反映（追加 1 件・変更 1 件）');
+
+    const after = savedRules() as unknown as { id: string; title: string; note?: string }[];
+    expect(after.map((rule) => rule.title)).toEqual(['既存の給与振込', '支払（本社）', '支払']);
+    expect(after[1]).toMatchObject({ id: 'pay', note: '取引先A社' });
+    expect(JSON.stringify(after[0])).toBe(keepBefore);
+    expect(document.body.textContent).toContain('1 件を追加、1 件を変更しました。');
+  });
+
+  it('確認のあいだに別のタブで消された予定は、作り直さずに知らせる', () => {
+    const target = makeRule({ id: 'pay', title: '支払' });
+    globalThis.localStorage.setItem(STORAGE_KEYS.rules, JSON.stringify([target]));
+    const app = new App(root, holidays);
+    app.render();
+    click('ルール');
+    click('AIで作る');
+    paste(reply([{ ...ruleSnapshot(target, false), title: '支払（本社）' }]));
+    click('内容を確認');
+    globalThis.localStorage.setItem(STORAGE_KEYS.rules, '[]');
+    click('この内容で反映（変更 1 件）');
+    expect(savedRules()).toEqual([]);
+    expect(document.body.textContent).toContain('「支払」は別の画面で削除されていたため、変更していません。');
   });
 });
