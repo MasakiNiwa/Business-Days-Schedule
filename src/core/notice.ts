@@ -31,7 +31,7 @@ export const legacyNoticeId = (index: number): string => `n${index}`;
 export const WEEK_START: Weekday = 1;
 
 /** 衝突しない新しい id。既存の `n0` 形式とぶつからないよう別の形にする。 */
-function freshNoticeId(used: ReadonlySet<string>): string {
+export function freshNoticeId(used: ReadonlySet<string>): string {
   for (let attempt = 0; ; attempt += 1) {
     const candidate = `x${Date.now().toString(36)}${attempt.toString(36)}${Math.floor(
       Math.random() * 1296,
