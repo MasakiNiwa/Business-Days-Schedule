@@ -21,7 +21,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # 版は .nvmrc の1か所で決める（最新の安定版 Node.js 26）。
+          node-version-file: .nvmrc
           cache: npm
 
       - run: npm ci
