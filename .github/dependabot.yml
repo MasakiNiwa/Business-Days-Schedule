@@ -1,0 +1,40 @@
+# 依存関係の監視（docs/SPEC.md §11.4）。
+#
+# 脆弱性の通知（Dependabot alerts）と修正の PR（security updates）は、
+# リポジトリの Settings → Code security で有効にする。ここでは、それとは別に
+# 定期的な更新の PR を出してもらう設定を置く。
+#
+# 更新の PR も CI（型チェック・単体テスト・E2E）を通ってからマージする。
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '09:00'
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    groups:
+      # 開発用の道具はまとめて上げる（PR の数を抑える）。
+      dev-dependencies:
+        dependency-type: development
+        update-types: [minor, patch]
+      # アプリに同梱する依存（ts-fsrs）は、版ごとに個別の PR で確かめる。
+    commit-message:
+      prefix: chore
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '09:00'
+      timezone: Asia/Tokyo
+    groups:
+      actions:
+        patterns: ['*']
+    commit-message:
+      prefix: chore
+      include: scope

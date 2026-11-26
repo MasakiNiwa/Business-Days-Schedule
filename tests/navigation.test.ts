@@ -52,10 +52,10 @@ function start(): App {
 }
 
 describe('画面の切り替え', () => {
-  it('4つの行き先を並べ、いまの画面に印を付ける', () => {
+  it('5つの行き先を並べ、いまの画面に印を付ける', () => {
     start();
     const labels = [...root.querySelectorAll('.app-nav button')].map((node) => node.textContent);
-    expect(labels).toEqual(['予定', 'ルール', '書き出し', '設定']);
+    expect(labels).toEqual(['予定', 'ルール', '学習', '書き出し', '設定']);
     expect(root.querySelector('.app-nav [aria-current="page"]')?.textContent).toBe('予定');
     expect(root.querySelector('.app-nav')?.getAttribute('aria-label')).toBe('画面の切り替え');
   });
@@ -139,5 +139,15 @@ describe('画面の切り替え', () => {
     click('書き出しを開く');
     expect(currentPage()).toBe('export');
     expect(document.querySelector('dialog')).toBeNull();
+  });
+
+  it('学習は画面として開き、初めて開いたときに読み込む', async () => {
+    start();
+    tab('学習').click();
+    expect(currentPage()).toBe('study');
+    // 読み込み中も画面の見出しは出す。
+    expect(root.querySelector('.study h2')?.textContent).toBe('学習');
+    await vi.waitFor(() => expect(root.querySelector('.study-stats')).not.toBeNull(), { timeout: 5000 });
+    expect(root.querySelector('.study-rule-name')?.textContent).toBe('給与振込');
   });
 });

@@ -2,7 +2,8 @@
  * 画面の切り替え（docs/SPEC.md §8.1）。
  *
  * 機能を足すたびにヘッダーへボタンを並べてきた結果、どこに何があるかが
- * 初見で分からなくなっていた。行き先を4つに絞り、常に同じ場所に出す。
+ * 初見で分からなくなっていた。行き先を絞り（予定・ルール・学習・書き出し・設定）、
+ * 常に同じ場所に出す。
  *
  * 同じ要素を、広い画面ではヘッダーの中のタブ、狭い画面では画面下に固定した
  * タブとして見せる（出し分けは CSS）。親指で届く位置に置くため。
@@ -10,12 +11,14 @@
 
 import { h } from './dom';
 
-export type Page = 'schedule' | 'rules' | 'export' | 'settings';
+export type Page = 'schedule' | 'rules' | 'study' | 'export' | 'settings';
 
 export const PAGES: readonly { page: Page; label: string; icon: string }[] = [
   // 線だけの簡素な形。色や塗りで主張させない。
   { page: 'schedule', label: '予定', icon: 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4' },
   { page: 'rules', label: 'ルール', icon: 'M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01' },
+  // 学習（§8.13）。開いた本の形。
+  { page: 'study', label: '学習', icon: 'M2 5h7a3 3 0 0 1 3 3v12a2 2 0 0 0-2-2H2zM22 5h-7a3 3 0 0 0-3 3v12a2 2 0 0 1 2-2h8z' },
   { page: 'export', label: '書き出し', icon: 'M12 15V3M7 8l5-5 5 5M4 15v5h16v-5' },
   {
     page: 'settings',
