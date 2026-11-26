@@ -1,8 +1,11 @@
 {
   "name": "business-days-schedule",
-  "version": "1.18.0",
-  "releaseDate": "2026-10-16",
+  "version": "1.19.0",
+  "releaseDate": "2026-11-26",
   "private": true,
+  "engines": {
+    "node": ">=26"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -21,14 +24,17 @@
     "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.63.0",
     "@types/node": "^26.4.1",
-    "@vitest/coverage-v8": "^5.0.0",
+    "@vitest/coverage-v8": "^5.1.2",
     "axe-core": "^4.13.0",
     "jsdom": "^30.0.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vite": "^6.0.11",
-    "vitest": "^5.0.0"
+    "vitest": "^5.1.2"
   },
   "description": "営業日を考慮した反復ルール駆動のカレンダー",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "ts-fsrs": "6.0.1"
+  }
 }

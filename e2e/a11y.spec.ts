@@ -130,6 +130,24 @@ test.describe('axe-core', () => {
     await analyze(page, 'dialog');
   });
 
+  test('学習（まとめ・復習・ルールごとの定着）', async ({ page }) => {
+    await seedSamples(page);
+    await page.locator('.app-nav').getByRole('button', { name: '学習' }).click();
+    await expect(page.locator('.study-stats')).toBeVisible();
+    await analyze(page, 'main');
+
+    await page.getByRole('button', { name: /復習を始める/ }).click();
+    await page.getByRole('button', { name: '答えを見る' }).click();
+    await expect(page.locator('.study-answer')).toBeVisible();
+    await analyze(page, 'main');
+
+    await page.locator('.study-rating-3').click();
+    await page.getByRole('button', { name: '終わる' }).click();
+    await page.locator('.study-rule summary').first().click();
+    await expect(page.locator('.study-rule .study-curve').first()).toBeVisible();
+    await analyze(page, 'main');
+  });
+
   test('日付の詳細', async ({ page }) => {
     await seedSamples(page);
     await page.locator('.cell.is-today').first().click();

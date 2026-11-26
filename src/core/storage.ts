@@ -10,6 +10,8 @@ import { createDefaultCalendars, COMPANY_CALENDAR_ID } from './businessDay';
 import { todayInTokyo } from './dateUtil';
 import { normalizeRule } from './notice';
 import { LIMITS, hasError, quarantineCalendar, validateCalendar, validateRule } from './validate';
+import { STUDY_KEY } from './studyData';
+import type { StudyState } from './studyData';
 
 export const SCHEMA_VERSION = 1;
 
@@ -85,6 +87,8 @@ export type ExportFile = {
   calendars: BusinessCalendar[];
   rules: Rule[];
   prefs: Preferences;
+  /** 学習の記録（§8.13）。無ければ省く。古い版はこの項目を読まずに無視する。 */
+  study?: StudyState;
 };
 
 /** localStorage と同じ形の最小インタフェース。テストと非対応環境の差し替えに使う。 */
@@ -275,7 +279,8 @@ export const STORAGE_KEYS = {
 } as const;
 
 export function clearState(store: KeyValueStore): void {
-  for (const key of [KEY_RULES, KEY_CALENDARS, KEY_PREFS, KEY_SCHEMA_VERSION]) {
+  // 学習の記録はルールに紐づくので、ルールと一緒に消す。
+  for (const key of [KEY_RULES, KEY_CALENDARS, KEY_PREFS, KEY_SCHEMA_VERSION, STUDY_KEY]) {
     store.removeItem(key);
   }
 }
@@ -284,13 +289,15 @@ export function clearState(store: KeyValueStore): void {
 // エクスポート / インポート (docs/SPEC.md §9.2)
 // ---------------------------------------------------------------------------
 
-export function buildExportFile(state: AppState, now: Date = new Date()): ExportFile {
+export function buildExportFile(state: AppState, now: Date = new Date(), study?: StudyState): ExportFile {
+  const hasStudy = study !== undefined && (Object.keys(study.cards).length > 0 || study.logs.length > 0);
   return {
     schemaVersion: SCHEMA_VERSION,
     exportedAt: now.toISOString(),
     calendars: state.calendars,
     rules: state.rules,
     prefs: state.prefs,
+    ...(hasStudy ? { study } : {}),
   };
 }
 

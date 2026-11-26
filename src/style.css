@@ -3252,3 +3252,369 @@ main:focus {
   width: auto;
   min-width: 8.5rem;
 }
+
+/* --- 学習（§8.13） ------------------------------------------------------- */
+
+.study {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.study > .field-hint,
+.study-section > .field-hint {
+  margin: 0;
+}
+
+.study-empty,
+.study-done {
+  margin: 0;
+}
+
+.study-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 0.5rem;
+}
+
+.study-stat {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.study-stat p {
+  margin: 0;
+}
+
+.study-stat-label,
+.study-stat-note {
+  font-size: 0.75rem;
+  color: var(--fg-muted);
+}
+
+.study-stat-value {
+  font-size: 1.35rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.study-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.study-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.study-section-title,
+.study-detail-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.study-detail-title {
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+}
+
+/* グラフ。線と棒は細く、格子は控えめに。色は本文の強調色だけを使う。 */
+.study-chart {
+  display: block;
+  width: 100%;
+  /* 描いた大きさ（viewBox）に近い幅で止める。広げると文字まで大きくなる。 */
+  max-width: 26rem;
+  height: auto;
+  overflow: visible;
+}
+
+.chart-axis,
+.chart-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.chart-target {
+  stroke: var(--fg-muted);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.chart-marker,
+.chart-guide {
+  stroke: var(--fg-muted);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+
+.chart-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.chart-bar {
+  fill: var(--accent);
+}
+
+.chart-today {
+  fill: var(--accent);
+  stroke: var(--bg);
+  stroke-width: 2;
+}
+
+.chart-tick,
+.chart-value {
+  fill: var(--fg-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-value {
+  fill: var(--fg);
+}
+
+.study-chart-wrap {
+  position: relative;
+}
+
+.chart-tooltip {
+  margin: 0.25rem 0 0;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.study-figure {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.study-figure figcaption {
+  margin: 0;
+}
+
+.study-curve-table {
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.study-curve-table th,
+.study-curve-table td {
+  padding: 0.2rem 0.75rem 0.2rem 0;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.study-forecast-list,
+.study-rules,
+.study-past,
+.study-logs,
+.study-notices {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.study-forecast-list,
+.study-past,
+.study-logs,
+.study-notices {
+  font-size: 0.85rem;
+}
+
+.study-rule {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.study-rule-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem 0.75rem;
+  padding: 0.55rem 0.75rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.study-rule-summary::-webkit-details-marker {
+  display: none;
+}
+
+.study-rule-summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.study-rule-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.study-rule-meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.6rem;
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 定着率の帯。数字も並べて出すので、帯は補助。 */
+.study-meter {
+  display: inline-block;
+  width: 4rem;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+
+.study-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.study-rule-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0 0.75rem 0.75rem;
+}
+
+.study-rule-body > p {
+  margin: 0;
+}
+
+.study-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.2rem 0.75rem;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.study-facts dt {
+  color: var(--fg-muted);
+}
+
+.study-facts dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.study-past-note {
+  color: var(--fg-muted);
+}
+
+/* 復習のカード */
+.study-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.study-card p {
+  margin: 0;
+}
+
+.study-card-count {
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+}
+
+.study-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 1.3rem;
+  overflow-wrap: anywhere;
+}
+
+.study-card .rule-group-tag {
+  align-self: flex-start;
+}
+
+.study-card-question {
+  color: var(--fg-muted);
+}
+
+.study-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 8px;
+  background: var(--bg-sunken);
+}
+
+.study-answer:focus {
+  outline: none;
+}
+
+.study-answer-desc {
+  font-weight: 600;
+}
+
+.study-answer-meta {
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+}
+
+.study-ratings {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.4rem;
+}
+
+.study-rating {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  padding: 0.5rem 0.25rem;
+}
+
+.study-rating-label {
+  font-weight: 600;
+}
+
+.study-rating-next {
+  font-size: 0.72rem;
+  color: var(--fg-muted);
+}
+
+@media (max-width: 30rem) {
+  .study-ratings {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

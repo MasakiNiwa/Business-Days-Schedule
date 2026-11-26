@@ -61,9 +61,11 @@ function renderRow(
   if (date === today) classes.push('is-today');
   if (!businessCalendar.isBusinessDay(date)) classes.push('is-closed');
 
+  // 同じ日の2件目以降は日付を出さない（見た目を詰める）。それでも押せるボタンなので、
+  // 名前は持たせる。空のままだと支援技術には名前の無いボタンになる。
   const dateButton = h(
     'button',
-    { type: 'button', class: 'list-date-button' },
+    { type: 'button', class: 'list-date-button', 'aria-label': isFirstOfDate ? undefined : date },
     isFirstOfDate ? date : '',
   );
   dateButton.addEventListener('click', () => handlers.onSelectDay(date));

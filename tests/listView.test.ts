@@ -90,6 +90,9 @@ describe('renderList', () => {
     expect(rows[0]?.className).toContain('is-group-start');
     expect(rows[1]?.className).not.toContain('is-group-start');
     expect(rows[1]?.querySelector('.list-date-button')?.textContent).toBe('');
+    // 日付を出さない行のボタンにも、名前（日付）を持たせる。
+    expect(rows[1]?.querySelector('.list-date-button')?.getAttribute('aria-label')).toBe('2026-09-30');
+    expect(rows[0]?.querySelector('.list-date-button')?.hasAttribute('aria-label')).toBe(false);
   });
 
   it('補正の向きと元の日を出す', () => {

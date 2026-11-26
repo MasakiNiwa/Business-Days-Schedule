@@ -85,6 +85,15 @@ import { renderNavBar } from './ui/NavBar';
 import type { Page } from './ui/NavBar';
 import { applyAiImport } from './core/aiImport';
 import type { RuleUpdate } from './core/aiImport';
+import {
+  loadStudyState,
+  mergeStudyStates,
+  pruneStudyState,
+  saveStudyState,
+  studyFromBackup,
+} from './core/studyData';
+// 型だけを使う。画面そのものは、学習の画面を開いたときに読み込む（renderStudy）。
+import type { StudyView } from './ui/StudyView';
 
 const SAMPLES_DIR = `${import.meta.env.BASE_URL}data/samples/`;
 
@@ -134,6 +143,12 @@ export class App {
    */
   private settingsView: SettingsView | null = null;
   private exportView: HTMLElement | null = null;
+  /**
+   * 学習の画面（§8.13）。FSRS の計算を含むので、初めて開いたときに読み込む。
+   * 'loading' は読み込み中、'failed' は読み込めなかった（オフラインで未取得など）。
+   */
+  private studyView: StudyView | null = null;
+  private studyLoad: 'idle' | 'loading' | 'failed' = 'idle';
   private mode: Mode = { kind: 'calendar' };
   private flash: {
     text: string;
@@ -656,7 +671,7 @@ export class App {
 
   private exportJson(): void {
     this.download(
-      JSON.stringify(buildExportFile(this.state), null, 2),
+      JSON.stringify(buildExportFile(this.state, new Date(), loadStudyState(this.store).state), null, 2),
       'application/json',
       exportFileName(),
     );
@@ -666,10 +681,18 @@ export class App {
 
   private async importJson(file: File, mode: 'replace' | 'merge'): Promise<void> {
     try {
-      const result = importState(JSON.parse(await file.text()), this.state, mode);
+      const raw = JSON.parse(await file.text()) as unknown;
+      const result = importState(raw, this.state, mode);
       if (!result.ok) throw new Error(result.errors.join(' / '));
       this.state = result.state;
       this.persist();
+      // 学習の記録（§8.13）。置き換えなら置き換え、追加・上書きなら新しいほうを残して合わせる。
+      const study = studyFromBackup(raw);
+      if (study !== null) {
+        const next = mode === 'replace' ? study : mergeStudyStates(loadStudyState(this.store).state, study);
+        saveStudyState(this.store, pruneStudyState(next, this.state.rules));
+      }
+      this.studyView = null;
       this.settingsView = null;
       const skipped = result.skipped.rules + result.skipped.calendars;
       this.notify(
@@ -747,12 +770,13 @@ export class App {
   }
 
   private clearAll(): void {
-    if (!globalThis.confirm('ルールとカレンダー設定をこの端末から削除します。取り消せません。')) {
+    if (!globalThis.confirm('ルール・カレンダー設定・学習の記録をこの端末から削除します。取り消せません。')) {
       return;
     }
     clearState(this.store);
     this.state = createDefaultState();
     this.settingsView = null;
+    this.studyView = null;
     this.mode = { kind: 'calendar' };
     this.notify('すべて削除しました。');
     this.render();
@@ -963,6 +987,9 @@ export class App {
       case 'rules':
         this.navigate('rules');
         return;
+      case 'study':
+        this.navigate('study');
+        return;
     }
   }
 
@@ -1027,6 +1054,9 @@ export class App {
         );
         return this.settingsView.element;
 
+      case 'study':
+        return this.renderStudy();
+
       case 'export':
         this.exportView ??= renderCalendarExport(
           {
@@ -1048,6 +1078,57 @@ export class App {
         );
         return this.exportView;
     }
+  }
+
+  /** 学習の画面。初めて開いたときに読み込み、読み込めたら描き直す。 */
+  private renderStudy(): HTMLElement {
+    const input = {
+      rules: this.state.rules,
+      calendars: this.state.calendars,
+      ctx: this.scheduleContext(this.businessCalendars()),
+      today: this.today,
+    };
+    if (this.studyView !== null) {
+      this.studyView.update(input);
+      return this.studyView.element;
+    }
+    if (this.studyLoad === 'failed') {
+      return h(
+        'section',
+        { class: 'study' },
+        h('h2', { class: 'page-title' }, '学習'),
+        h('p', { class: 'issue issue-error' }, '学習の画面を読み込めませんでした。通信を確かめて、もう一度開いてください。'),
+        h('div', { class: 'study-actions' }, button('もう一度読み込む', () => {
+          this.studyLoad = 'idle';
+          this.render();
+        }, 'button')),
+      );
+    }
+    if (this.studyLoad === 'idle') {
+      this.studyLoad = 'loading';
+      void import('./ui/StudyView')
+        .then(({ StudyView: View }) =>
+          View.create(
+            { store: this.store, now: () => new Date(), notify: (text, tone) => this.notify(text, tone) },
+            input,
+          ),
+        )
+        .then((view) => {
+          this.studyView = view;
+          this.studyLoad = 'idle';
+          if (this.page === 'study') this.render();
+        })
+        .catch(() => {
+          this.studyLoad = 'failed';
+          if (this.page === 'study') this.render();
+        });
+    }
+    return h(
+      'section',
+      { class: 'study', 'aria-busy': 'true' },
+      h('h2', { class: 'page-title' }, '学習'),
+      h('p', { class: 'field-hint', role: 'status' }, '読み込んでいます…'),
+    );
   }
 
   /** ダイアログの中身。モードによって出し分ける。 */
