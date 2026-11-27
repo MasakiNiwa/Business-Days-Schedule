@@ -28,13 +28,17 @@ test.describe('学習', () => {
     await expect(start).toBeVisible();
     const before = Number((await start.textContent())?.match(/\d+/)?.[0]);
 
-    await start.click();
-    const title = await page.locator('.study-card-title').textContent();
+    // 出題はランダムなので、決まったルールから復習する。
+    const row = page.locator('.study-rule').first();
+    const title = (await row.locator('.study-rule-name').textContent()) ?? '';
+    await row.locator('summary').click();
+    await row.getByRole('button', { name: 'このルールを今すぐ復習' }).click();
+    await expect(page.locator('.study-card-title')).toHaveText(title);
     await page.getByRole('button', { name: '答えを見る' }).click();
     // 答えの日付は、アプリの営業日計算で出す。
     await expect(page.locator('.study-answer .preview-list li').first()).toBeVisible();
     await page.locator('.study-rating-3').click();
-    await page.getByRole('button', { name: '終わる' }).click();
+    await page.getByRole('button', { name: /終わる|学習の画面へ戻る/ }).first().click();
 
     await expect(page.getByRole('button', { name: `復習を始める（${before - 1} 件）` })).toBeVisible();
     const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('bds.v1.study') ?? '{}'));
@@ -42,11 +46,25 @@ test.describe('学習', () => {
 
     await page.reload();
     await page.locator('.app-nav').getByRole('button', { name: '学習' }).click();
-    const learnedRow = page.locator('.study-rule', { hasText: title ?? '' });
+    const learnedRow = page.locator('.study-rule', { hasText: title });
     await expect(learnedRow.locator('.study-rule-value')).toHaveText(/^定着 \d+%$/);
     await learnedRow.locator('summary').click();
     await expect(learnedRow.locator('svg.study-curve')).toBeVisible();
     await expect(learnedRow.locator('.study-past li').first()).toBeVisible();
+  });
+
+  test('週の予定の問題は、10分後にもう一度出す（待たずに続けることもできる）', async ({ page }) => {
+    await seedSamples(page);
+    await page.locator('.app-nav').getByRole('button', { name: '学習' }).click();
+    await page.locator('.study-week-row', { hasText: '今週の予定' }).getByRole('button', { name: '今すぐ' }).click();
+    await expect(page.locator('.study-card-title')).toHaveText('今週の予定');
+    await page.getByRole('button', { name: '答えを見る' }).click();
+    await expect(page.locator('.study-answer')).toBeVisible();
+    await expect(page.locator('.study-rating-3')).toHaveAccessibleName('できた（次の復習は10分後）');
+    await page.locator('.study-rating-3').click();
+    await expect(page.locator('.study-waiting')).toContainText('あと約10分');
+    await page.getByRole('button', { name: '今すぐ出す' }).click();
+    await expect(page.locator('.study-card-title')).toHaveText('今週の予定');
   });
 
   test('一度開いたあとは、オフラインでも学習の画面を開ける', async ({ page, context }) => {

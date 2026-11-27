@@ -141,10 +141,25 @@ test.describe('axe-core', () => {
     await expect(page.locator('.study-answer')).toBeVisible();
     await analyze(page, 'main');
 
+    await page.getByRole('button', { name: '終わる' }).first().click();
+
+    // ルールを1つ覚えてから、忘却曲線の出た状態を見る（出題はランダムなので、決まったルールから）。
+    const row = page.locator('.study-rule').first();
+    await row.locator('summary').click();
+    await row.getByRole('button', { name: 'このルールを今すぐ復習' }).click();
+    await page.getByRole('button', { name: '答えを見る' }).click();
     await page.locator('.study-rating-3').click();
-    await page.getByRole('button', { name: '終わる' }).click();
+    await page.getByRole('button', { name: /終わる|学習の画面へ戻る/ }).first().click();
     await page.locator('.study-rule summary').first().click();
     await expect(page.locator('.study-rule .study-curve').first()).toBeVisible();
+    await analyze(page, 'main');
+
+    // 週の予定の問題と、分単位の待ち。
+    await page.locator('.study-week-row', { hasText: '今週の予定' }).getByRole('button', { name: '今すぐ' }).click();
+    await page.getByRole('button', { name: '答えを見る' }).click();
+    await analyze(page, 'main');
+    await page.locator('.study-rating-3').click();
+    await expect(page.locator('.study-waiting')).toBeVisible();
     await analyze(page, 'main');
   });
 

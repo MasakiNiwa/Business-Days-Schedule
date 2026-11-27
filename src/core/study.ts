@@ -16,10 +16,11 @@ import { DefaultScheduler, Rating } from 'ts-fsrs';
 import type { DateStr, Occurrence, Rule } from '../types';
 import { ruleRevision } from './conflict';
 import { addDays, addMonths, diffDays, parseDate, todayInTokyo } from './dateUtil';
+import { weekStartOf } from './notice';
 import { expandRules } from './schedule';
 import type { ScheduleContext } from './schedule';
-import { DEFAULT_DESIRED_RETENTION, STUDY_LOG_LIMIT } from './studyData';
-import type { StoredCard, StudyLog, StudyRating, StudyState } from './studyData';
+import { DEFAULT_DESIRED_RETENTION, STUDY_LOG_LIMIT, WEEK_KEYS, weekCardId } from './studyData';
+import type { StoredCard, StudyLog, StudyRating, StudyState, WeekKey } from './studyData';
 
 export type Scheduler = Awaited<ReturnType<typeof createScheduler>>;
 export type FsrsCard = Parameters<Scheduler['review']>[0]['card'];
@@ -51,6 +52,36 @@ export function createScheduler(desiredRetention = DEFAULT_DESIRED_RETENTION) {
     enableFuzz: false,
     maximumInterval: 3650,
   });
+}
+
+/**
+ * 週の予定の問題の仕組み。分単位の学習ステップ（1分・10分、忘れたら10分）で、
+ * その場で何度か思い出してから日単位の間隔へ移る。週の予定は毎週入れ替わるので、
+ * 長い間隔で覚えるより、その週のうちに短い間隔で頭に入れるほうが合う。
+ */
+export function createShortTermScheduler(desiredRetention = DEFAULT_DESIRED_RETENTION) {
+  return DefaultScheduler({
+    version: 'FSRS-7',
+    desiredRetention,
+    enableShortTerm: true,
+    learningSteps: ['1m', '10m'],
+    relearningSteps: ['10m'],
+    // 既定では、モデルの見積もりが学習ステップより長いとステップを飛ばす。
+    // 分単位で何度か思い出すことが目的なので、ステップを必ず踏ませる。
+    allowModelOverride: false,
+    enableFuzz: false,
+    maximumInterval: 3650,
+  });
+}
+
+/** 並びをばらばらにする（Fisher–Yates）。問題の順番を覚えてしまわないように。 */
+export function shuffle<T>(items: readonly T[], random: () => number = Math.random): T[] {
+  const result = [...items];
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const pick = Math.floor(random() * (index + 1));
+    [result[index], result[pick]] = [result[pick] as T, result[index] as T];
+  }
+  return result;
 }
 
 function toCard(stored: StoredCard): FsrsCard {
@@ -148,16 +179,52 @@ export function newLearnedOn(state: StudyState, today: DateStr): number {
 }
 
 /**
- * 今日の復習の順番。期限の来たものを期限の古い順に、そのあとに新しいものを
- * 1日の上限まで（ルール一覧の順）。一時停止中のルールは入れない。
+ * 今日の復習に入れるもの。期限の来たものと、新しいものを1日の上限まで。
+ * 一時停止中のルールは入れない。
+ *
+ * random を渡すと、並びも新しいものの選び方もばらばらにする（出題はランダム）。
+ * 渡さなければ、期限の古い順・ルール一覧の順（数を数えるとき用）。
  */
-export function buildQueue(progress: readonly RuleProgress[], state: StudyState, today: DateStr): RuleProgress[] {
+export function buildQueue(
+  progress: readonly RuleProgress[],
+  state: StudyState,
+  today: DateStr,
+  random?: () => number,
+): RuleProgress[] {
   const due = progress
     .filter((item) => item.status !== 'new' && item.status !== 'paused' && item.due)
     .sort((a, b) => Date.parse(a.card?.dueAt ?? '') - Date.parse(b.card?.dueAt ?? ''));
   const fresh = progress.filter((item) => item.status === 'new');
   const room = state.newPerDay === 0 ? fresh.length : Math.max(0, state.newPerDay - newLearnedOn(state, today));
-  return [...due, ...fresh.slice(0, room)];
+  if (random === undefined) return [...due, ...fresh.slice(0, room)];
+  return shuffle([...due, ...shuffle(fresh, random).slice(0, room)], random);
+}
+
+/**
+ * id のカードを評価する。rev は中身の印（ルールの印、または週）。
+ * fresh が真なら、保存済みのカードを使わずに新しく覚え始める（週が替わった問題）。
+ */
+function reviewCard(
+  state: StudyState,
+  scheduler: Scheduler,
+  id: string,
+  rev: string,
+  rating: StudyRating,
+  now: Date,
+  fresh = false,
+): StudyState {
+  const saved = Object.hasOwn(state.cards, id) ? state.cards[id] : undefined;
+  const stored = fresh ? undefined : saved;
+  const card = stored === undefined ? (scheduler.newCard({ now }) as FsrsCard) : toCard(stored);
+  const wasNew = stored === undefined || stored.lastReviewAt === null;
+  const before = stored === undefined ? null : retrievabilityAt(scheduler, stored, now);
+  const result = scheduler.review({ card, grade: rating, now });
+  const log: StudyLog = { ruleId: id, at: now.toISOString(), rating, wasNew, retrievability: before };
+  return {
+    ...state,
+    cards: { ...state.cards, [id]: toStored(result.card, rev) },
+    logs: [...state.logs, log].slice(-STUDY_LOG_LIMIT),
+  };
 }
 
 /** 1枚を評価する。元の状態は変えずに、新しい状態を返す。 */
@@ -168,17 +235,7 @@ export function reviewRule(
   rating: StudyRating,
   now: Date,
 ): StudyState {
-  const stored = Object.hasOwn(state.cards, rule.id) ? state.cards[rule.id] : undefined;
-  const card = stored === undefined ? (scheduler.newCard({ now }) as FsrsCard) : toCard(stored);
-  const wasNew = stored === undefined || stored.lastReviewAt === null;
-  const before = stored === undefined ? null : retrievabilityAt(scheduler, stored, now);
-  const result = scheduler.review({ card, grade: rating, now });
-  const log: StudyLog = { ruleId: rule.id, at: now.toISOString(), rating, wasNew, retrievability: before };
-  return {
-    ...state,
-    cards: { ...state.cards, [rule.id]: toStored(result.card, ruleRevision(rule)) },
-    logs: [...state.logs, log].slice(-STUDY_LOG_LIMIT),
-  };
+  return reviewCard(state, scheduler, rule.id, ruleRevision(rule), rating, now);
 }
 
 /** 「今日」「明日」「5日後」「約2か月後」のような、次の復習までの言い方。 */
@@ -191,6 +248,34 @@ export function describeDue(today: DateStr, dueDate: DateStr): string {
   return `約${Math.round((days / 365) * 10) / 10}年後`;
 }
 
+/**
+ * 次の復習までを、時刻まで見て言う。今日のうちなら「今すぐ」「10分後」「約3時間後」、
+ * 明日以降は describeDue と同じ言い方。
+ */
+export function describeDueAt(now: Date, dueAt: Date, today: DateStr): string {
+  const minutes = (dueAt.getTime() - now.getTime()) / 60_000;
+  if (minutes < 1) return '今すぐ';
+  if (minutes < 60) return `${Math.round(minutes)}分後`;
+  const dueDate = todayInTokyo(dueAt);
+  if (dueDate <= today) return `約${Math.round(minutes / 60)}時間後`;
+  return describeDue(today, dueDate);
+}
+
+function previewFor(
+  scheduler: Scheduler,
+  stored: StoredCard | undefined,
+  now: Date,
+  today: DateStr,
+): Record<StudyRating, string> {
+  const card = stored === undefined ? (scheduler.newCard({ now }) as FsrsCard) : toCard(stored);
+  const labels = {} as Record<StudyRating, string>;
+  for (const item of scheduler.preview({ card, now })) {
+    const next = item.card as unknown as { dueAt: Date };
+    labels[item.grade as StudyRating] = describeDueAt(now, next.dueAt, today);
+  }
+  return labels;
+}
+
 /** 4つの評価それぞれで、次の復習がいつになるか。ボタンに添えて見せる。 */
 export function previewNext(
   scheduler: Scheduler,
@@ -200,13 +285,114 @@ export function previewNext(
   today: DateStr,
 ): Record<StudyRating, string> {
   const stored = Object.hasOwn(state.cards, rule.id) ? state.cards[rule.id] : undefined;
-  const card = stored === undefined ? (scheduler.newCard({ now }) as FsrsCard) : toCard(stored);
-  const labels = {} as Record<StudyRating, string>;
-  for (const item of scheduler.preview({ card, now })) {
-    const next = item.card as unknown as { dueAt: Date };
-    labels[item.grade as StudyRating] = describeDue(today, todayInTokyo(next.dueAt));
+  return previewFor(scheduler, stored, now, today);
+}
+
+// ---------------------------------------------------------------------------
+// 週の予定の問題（先週・今週・来週）
+// ---------------------------------------------------------------------------
+
+/** 週は月曜始まり（前後の予定の「翌週」と同じ）。 */
+export function weekRange(key: WeekKey, today: DateStr): { start: DateStr; end: DateStr } {
+  const offset = key === 'last' ? -7 : key === 'next' ? 7 : 0;
+  const start = addDays(weekStartOf(today), offset);
+  return { start, end: addDays(start, 6) };
+}
+
+const weekRev = (start: DateStr): string => `week:${start}`;
+
+export type WeekProgress = {
+  key: WeekKey;
+  id: string;
+  start: DateStr;
+  end: DateStr;
+  /** 今の週のカード。前の週のものなら null（覚え直し）。 */
+  card: StoredCard | null;
+  status: Exclude<StudyStatus, 'paused'>;
+  retrievability: number | null;
+  /** 次に出す日時。まだ覚えていなければ null（すぐ出せる）。 */
+  dueAt: Date | null;
+};
+
+/** 保存済みのカードが、いまの週のものか。 */
+function currentWeekCard(state: StudyState, key: WeekKey, today: DateStr): StoredCard | null {
+  const id = weekCardId(key);
+  const card = Object.hasOwn(state.cards, id) ? (state.cards[id] ?? null) : null;
+  if (card === null || card.ruleRev !== weekRev(weekRange(key, today).start)) return null;
+  return card;
+}
+
+export function weekProgressOf(
+  state: StudyState,
+  scheduler: Scheduler,
+  now: Date,
+  today: DateStr,
+): WeekProgress[] {
+  return WEEK_KEYS.map((key) => {
+    const { start, end } = weekRange(key, today);
+    const card = currentWeekCard(state, key, today);
+    const learned = card !== null && card.lastReviewAt !== null;
+    return {
+      key,
+      id: weekCardId(key),
+      start,
+      end,
+      card,
+      status: learned ? (STATUS_BY_STATE[card.state] as WeekProgress['status']) ?? 'review' : 'new',
+      retrievability: learned ? retrievabilityAt(scheduler, card, now) : null,
+      dueAt: learned ? new Date(card.dueAt) : null,
+    };
+  });
+}
+
+/**
+ * 今の復習に入れる週の問題。まだ覚えていない週と、1時間以内に出すものだけ
+ * （分単位の間隔なので、何時間も先のものを待たせない）。
+ */
+export function weekQueue(progress: readonly WeekProgress[], now: Date): WeekProgress[] {
+  const soon = now.getTime() + 60 * 60_000;
+  return progress.filter((item) => item.dueAt === null || item.dueAt.getTime() <= soon);
+}
+
+export function reviewWeek(
+  state: StudyState,
+  scheduler: Scheduler,
+  key: WeekKey,
+  rating: StudyRating,
+  now: Date,
+  today: DateStr,
+): StudyState {
+  const fresh = currentWeekCard(state, key, today) === null;
+  return reviewCard(state, scheduler, weekCardId(key), weekRev(weekRange(key, today).start), rating, now, fresh);
+}
+
+export function previewNextWeek(
+  scheduler: Scheduler,
+  state: StudyState,
+  key: WeekKey,
+  now: Date,
+  today: DateStr,
+): Record<StudyRating, string> {
+  return previewFor(scheduler, currentWeekCard(state, key, today) ?? undefined, now, today);
+}
+
+/** その週の予定（本体と前後の予定）を日ごとに。一時停止中のルールは入れない。 */
+export function weekOccurrences(
+  rules: readonly Rule[],
+  ctx: ScheduleContext,
+  range: { start: DateStr; end: DateStr },
+): { date: DateStr; items: { occurrence: Occurrence; rule: Rule }[] }[] {
+  const byId = new Map(rules.map((rule) => [rule.id, rule]));
+  const { occurrences } = expandRules(rules, range, ctx);
+  const days: { date: DateStr; items: { occurrence: Occurrence; rule: Rule }[] }[] = [];
+  for (const occurrence of occurrences) {
+    const rule = byId.get(occurrence.ruleId);
+    if (rule === undefined) continue;
+    const last = days.at(-1);
+    if (last?.date === occurrence.date) last.items.push({ occurrence, rule });
+    else days.push({ date: occurrence.date, items: [{ occurrence, rule }] });
   }
-  return labels;
+  return days;
 }
 
 /** 忘却曲線。最後に評価した日から days 日ぶんの、覚えている見込み。 */

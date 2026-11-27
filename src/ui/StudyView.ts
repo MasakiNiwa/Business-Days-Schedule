@@ -2,7 +2,8 @@
  * 学習（docs/SPEC.md §8.13）。ルールを覚えるための復習と、その分析。
  *
  * - 今日の復習: ルール1つが1枚。名前を見て「いつ・休業日なら・前後の予定」を思い出し、
- *   答え（ルールの説明とアプリが計算した日付）を見て4段階で評価する
+ *   答え（ルールの説明とアプリが計算した日付）を見て4段階で評価する。出す順番はランダム
+ * - 週の予定: 先週・今週・来週の予定を思い浮かべる3つの問題。分単位の学習ステップで覚える
  * - これからの復習: 日ごとの復習の数
  * - ルールごとの定着: 覚えている見込み・忘却曲線・これからの予定・過去に実際に来た予定
  *
@@ -13,11 +14,14 @@
 import { buildImportPreview } from '../core/aiImport';
 import type { ImportPreviewItem } from '../core/aiImport';
 import { weekdayOf } from '../core/dateUtil';
+import { occurrenceTitle } from '../core/describe';
 import type { ScheduleContext } from '../core/schedule';
 import {
   buildQueue,
   createScheduler,
+  createShortTermScheduler,
   describeDue,
+  describeDueAt,
   DESIRED_RETENTION_CHOICES,
   forecast,
   forgettingCurve,
@@ -25,17 +29,35 @@ import {
   NEW_PER_DAY_CHOICES,
   pastOccurrences,
   previewNext,
+  previewNextWeek,
   progressOf,
   pruneStudyState,
   recentLogs,
   reviewRule,
+  reviewWeek,
   saveStudyState,
+  shuffle,
   STUDY_RATINGS,
   summarize,
+  WEEK_KEYS,
+  weekCardId,
+  weekOccurrences,
+  weekProgressOf,
+  weekQueue,
+  weekRange,
 } from '../core/study';
-import type { RuleProgress, Scheduler, StoredCard, StudyRating, StudyState, StudyStatus } from '../core/study';
+import type {
+  RuleProgress,
+  Scheduler,
+  StoredCard,
+  StudyRating,
+  StudyState,
+  StudyStatus,
+  WeekKey,
+  WeekProgress,
+} from '../core/study';
 import type { BusinessCalendar, DateStr, Rule } from '../types';
-import { button, field, select } from './controls';
+import { button, checkbox, field, select } from './controls';
 import { clear, h, scrollIntoView } from './dom';
 import { renderPreviewList } from './previewList';
 import type { KeyValueStore } from '../core/storage';
@@ -52,11 +74,24 @@ export type StudyDeps = {
   /** 今の時刻。テストで固定するために受け取る。 */
   now: () => Date;
   notify: (text: string, tone?: 'info' | 'error') => void;
+  /** 0〜1 の乱数。出題の順番に使う。テストで固定するために受け取る。 */
+  random?: () => number;
 };
 
+
+/** カードの id が週の予定の問題なら、その週。 */
+const weekKeyOf = (id: string): WeekKey | null => WEEK_KEYS.find((key) => weekCardId(key) === id) ?? null;
+
+/** 同じ復習の中で、分単位の間隔ならもう一度出す（この時間より先なら、今回は出さない）。 */
+const KEEP_IN_SESSION_MS = 60 * 60_000;
+
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'] as const;
+
 const withWeekday = (date: DateStr): string => `${date}（${WEEKDAYS[weekdayOf(date)] ?? ''}）`;
 const percent = (value: number): string => `${Math.round(value * 100)}%`;
+const WEEK_LABELS: Record<WeekKey, string> = { last: '先週の予定', this: '今週の予定', next: '来週の予定' };
+const shortDate = (date: DateStr): string =>
+  `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}（${WEEKDAYS[weekdayOf(date)] ?? ''}）`;
 
 const STATUS_LABELS: Record<StudyStatus, string> = {
   new: 'まだ覚えていない',
@@ -71,8 +106,10 @@ const RATING_LABELS: Record<StudyRating, string> = Object.fromEntries(
 ) as Record<StudyRating, string>;
 
 type Session = {
-  /** 残りのルールの id（先頭が今のカード）。 */
+  /** すぐ出せるカードの id（先頭が今のカード）。ルールの id か週の予定の問題の id。 */
   queue: string[];
+  /** 分単位の間隔で、時間が来たら出すカード。 */
+  pending: { id: string; dueAt: number }[];
   revealed: boolean;
   /** このセッションで評価した数。 */
   done: number;
@@ -90,11 +127,15 @@ export class StudyView {
   private input: StudyInput;
   private state: StudyState;
   private session: Session | null = null;
+  /** 待っているカードの時間が来たら描き直すためのタイマー。 */
+  private timer: ReturnType<typeof setTimeout> | null = null;
 
   private constructor(
     private readonly deps: StudyDeps,
     input: StudyInput,
     private scheduler: Scheduler,
+    /** 週の予定の問題用（分単位の学習ステップ）。 */
+    private shortScheduler: Scheduler,
     state: StudyState,
     dropped: number,
   ) {
@@ -109,8 +150,11 @@ export class StudyView {
   /** 記録を読み、FSRS-7 の計算を用意してから作る。 */
   static async create(deps: StudyDeps, input: StudyInput): Promise<StudyView> {
     const { state, dropped } = loadStudyState(deps.store);
-    const scheduler = await createScheduler(state.desiredRetention);
-    return new StudyView(deps, input, scheduler, state, dropped);
+    const [scheduler, shortScheduler] = await Promise.all([
+      createScheduler(state.desiredRetention),
+      createShortTermScheduler(state.desiredRetention),
+    ]);
+    return new StudyView(deps, input, scheduler, shortScheduler, state, dropped);
   }
 
   /** ルールや日付が変わったら描き直す。復習の途中なら、そのカードを続ける。 */
@@ -123,7 +167,9 @@ export class StudyView {
     }
     if (this.session !== null) {
       const ids = new Set(input.rules.filter((rule) => rule.enabled).map((rule) => rule.id));
-      this.session.queue = this.session.queue.filter((id) => ids.has(id));
+      const keep = (id: string): boolean => ids.has(id) || weekKeyOf(id) !== null;
+      this.session.queue = this.session.queue.filter(keep);
+      this.session.pending = this.session.pending.filter((item) => keep(item.id));
     }
     this.render();
   }
@@ -140,7 +186,19 @@ export class StudyView {
     return progressOf(this.input.rules, this.state, this.scheduler, this.deps.now(), this.input.today);
   }
 
+  private random(): number {
+    return (this.deps.random ?? Math.random)();
+  }
+
+  private weekProgress(): WeekProgress[] {
+    return weekProgressOf(this.state, this.shortScheduler, this.deps.now(), this.input.today);
+  }
+
   private render(): void {
+    if (this.timer !== null) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
     clear(this.element);
     if (this.session !== null) {
       this.renderSession(this.session);
@@ -173,6 +231,9 @@ export class StudyView {
     const progress = this.progress();
     const summary = summarize(progress, this.state, today);
     const queue = buildQueue(progress, this.state, today);
+    const weeks = this.weekProgress();
+    const weekIds = this.state.weekCards ? weekQueue(weeks, this.deps.now()).map((item) => item.id) : [];
+    const ids = [...queue.map((item) => item.rule.id), ...weekIds];
 
     const tile = (label: string, value: string, note?: string) =>
       h(
@@ -186,7 +247,7 @@ export class StudyView {
       h(
         'div',
         { class: 'study-stats' },
-        tile('今日の復習', `${summary.due} 件`),
+        tile('今日の復習', `${summary.due} 件`, weekIds.length === 0 ? undefined : `ほかに週の予定 ${weekIds.length} 問`),
         tile('新しく覚える', `${summary.newToday} 件`, this.state.newPerDay === 0 ? '上限なし' : `1日 ${this.state.newPerDay} 件まで`),
         tile('覚えたルール', `${summary.learned} / ${summary.total}`),
         tile(
@@ -198,13 +259,17 @@ export class StudyView {
     );
 
     const start = button(
-      queue.length === 0 ? '今日の復習は終わりました' : `復習を始める（${queue.length} 件）`,
-      () => this.startSession(queue.map((item) => item.rule.id)),
+      ids.length === 0 ? '今日の復習は終わりました' : `復習を始める（${ids.length} 件）`,
+      () => this.startSession(ids),
       'button button-primary study-start',
     );
-    start.disabled = queue.length === 0;
-    this.element.append(h('div', { class: 'study-actions' }, start));
+    start.disabled = ids.length === 0;
+    this.element.append(
+      h('div', { class: 'study-actions' }, start),
+      h('p', { class: 'field-hint' }, '問題はランダムな順番で出ます。'),
+    );
 
+    if (this.state.weekCards) this.element.append(this.renderWeeks(weeks));
     this.element.append(this.renderForecast(progress));
     this.element.append(this.renderRuleList(progress));
     this.element.append(this.renderSettings());
@@ -523,6 +588,11 @@ export class StudyView {
         h('summary', {}, '学習の設定'),
         field('目標の定着率', retention, '高くすると忘れにくくなりますが、復習が増えます。'),
         field('1日に新しく覚えるルール', perDay),
+        checkbox('先週・今週・来週の予定を思い浮かべる問題を出す', this.state.weekCards, (weekCards) => {
+          this.state = { ...this.state, weekCards };
+          this.persist();
+          this.render();
+        }),
         h(
           'div',
           { class: 'study-actions' },
@@ -537,7 +607,7 @@ export class StudyView {
     this.state = { ...this.state, desiredRetention: value };
     this.persist();
     // 目標が変わると、次の間隔の決め方が変わる。計算の仕組みを作り直す。
-    this.scheduler = await createScheduler(value);
+    [this.scheduler, this.shortScheduler] = await Promise.all([createScheduler(value), createShortTermScheduler(value)]);
     this.render();
   }
 
@@ -553,9 +623,9 @@ export class StudyView {
   // 復習
   // -------------------------------------------------------------------------
 
-  private startSession(ruleIds: string[]): void {
-    if (ruleIds.length === 0) return;
-    this.session = { queue: [...ruleIds], revealed: false, done: 0 };
+  private startSession(ids: string[]): void {
+    if (ids.length === 0) return;
+    this.session = { queue: shuffle(ids, () => this.random()), pending: [], revealed: false, done: 0 };
     this.render();
     this.element.querySelector<HTMLElement>('.study-card-title')?.focus();
     scrollIntoView(this.element);
@@ -571,52 +641,144 @@ export class StudyView {
     return buildImportPreview([rule], this.input.calendars, this.input.ctx, this.input.today, 3)[0] as ImportPreviewItem;
   }
 
+  /** 時間の来た「待ち」のカードを、ランダムな位置に戻す。 */
+  private promoteDue(session: Session): void {
+    const now = this.deps.now().getTime();
+    const ready = session.pending.filter((item) => item.dueAt <= now);
+    if (ready.length === 0) return;
+    session.pending = session.pending.filter((item) => item.dueAt > now);
+    for (const item of ready) this.insertRandomly(session, item.id);
+  }
+
+  /** 今のカード（先頭）の直後より後ろのどこかへ入れる。同じ問題が続けて出ないように。 */
+  private insertRandomly(session: Session, id: string): void {
+    const from = session.queue.length === 0 ? 0 : 1;
+    const at = from + Math.floor(this.random() * (session.queue.length - from + 1));
+    session.queue.splice(at, 0, id);
+  }
+
   private renderSession(session: Session): void {
-    const rule = this.input.rules.find((item) => item.id === session.queue[0]);
-    const finish = button('終わる', () => this.endSession(), 'button button-quiet');
-    if (rule === undefined) {
-      const heading = h('h2', { class: 'page-title', id: 'study-heading', tabindex: '-1' }, '今日の復習が終わりました');
-      this.element.append(
-        heading,
-        h('p', { class: 'study-done' }, `${session.done} 件を復習しました。次の復習の予定は、学習の画面で見られます。`),
-        h('div', { class: 'study-actions' }, button('学習の画面へ戻る', () => this.endSession(), 'button button-primary')),
-      );
-      heading.focus();
+    this.promoteDue(session);
+    const id = session.queue[0];
+    if (id === undefined) {
+      if (session.pending.length > 0) this.renderWaiting(session);
+      else this.renderDone(session);
       return;
     }
+    const week = weekKeyOf(id);
+    if (week !== null) {
+      this.renderWeekCard(session, week);
+      return;
+    }
+    const rule = this.input.rules.find((item) => item.id === id);
+    if (rule === undefined) {
+      session.queue.shift();
+      this.renderSession(session);
+      return;
+    }
+    this.renderRuleCard(session, rule);
+  }
 
-    const progress = progressOf([rule], this.state, this.scheduler, this.deps.now(), this.input.today)[0];
-    const card = h(
+  private renderDone(session: Session): void {
+    const heading = h('h2', { class: 'page-title', id: 'study-heading', tabindex: '-1' }, '今日の復習が終わりました');
+    this.element.append(
+      heading,
+      h('p', { class: 'study-done' }, `${session.done} 件を復習しました。次の復習の予定は、学習の画面で見られます。`),
+      h('div', { class: 'study-actions' }, button('学習の画面へ戻る', () => this.endSession(), 'button button-primary')),
+    );
+    heading.focus();
+  }
+
+  /**
+   * 分単位の間隔の問題を待っているところ。時間が来たら自動で出す。
+   * 待たずに続けたいときのために〈今すぐ出す〉も置く。
+   */
+  private renderWaiting(session: Session): void {
+    const next = [...session.pending].sort((a, b) => a.dueAt - b.dueAt)[0]!;
+    const now = this.deps.now().getTime();
+    const minutes = Math.max(1, Math.ceil((next.dueAt - now) / 60_000));
+    const week = weekKeyOf(next.id);
+    const name = week === null ? (this.input.rules.find((rule) => rule.id === next.id)?.title ?? '') : WEEK_LABELS[week];
+    const heading = h('h2', { class: 'page-title', id: 'study-heading', tabindex: '-1' }, '少し時間をおいて、もう一度');
+    this.element.append(
+      heading,
+      h(
+        'p',
+        { class: 'study-waiting' },
+        `次は「${name}」です。あと約${minutes}分で出します。少し時間をおいてから思い出すと、頭に残りやすくなります。`,
+      ),
+      h(
+        'div',
+        { class: 'study-actions' },
+        button('今すぐ出す', () => {
+          session.pending = session.pending.filter((item) => item !== next);
+          session.queue.push(next.id);
+          this.render();
+          this.element.querySelector<HTMLElement>('.study-card-title')?.focus();
+        }, 'button button-primary'),
+        button('終わる', () => this.endSession(), 'button button-quiet'),
+      ),
+    );
+    heading.focus();
+    // 時間が来たら描き直す（この画面を開いたままにしている人のため）。
+    this.timer = setTimeout(() => {
+      if (this.session === session) this.render();
+    }, Math.max(0, next.dueAt - now) + 500);
+  }
+
+  private ratingButtons(labels: Record<StudyRating, string>, onRate: (rating: StudyRating) => void): HTMLElement {
+    const ratings = h('div', { class: 'study-ratings', role: 'group', 'aria-label': '思い出せたか' });
+    for (const { rating, label } of STUDY_RATINGS) {
+      const choice = button('', () => onRate(rating), `button study-rating study-rating-${rating}`);
+      choice.append(h('span', { class: 'study-rating-label' }, label), h('span', { class: 'study-rating-next' }, `次は${labels[rating]}`));
+      choice.setAttribute('aria-label', `${label}（次の復習は${labels[rating]}）`);
+      ratings.append(choice);
+    }
+    return ratings;
+  }
+
+  /** 表のカード。答えを見るまでのところは、ルールでも週の予定でも同じ形。 */
+  private cardFrame(session: Session, title: (Node | string)[], extra: (HTMLElement | null)[], question: string): HTMLElement {
+    return h(
       'article',
       { class: 'study-card', 'aria-live': 'polite' },
-      // 「もう一度」は最後に回すので、枚数ではなく残りを出す。
-      h('p', { class: 'study-card-count' }, `残り ${session.queue.length} 件`),
-      h(
-        'h2',
-        { class: 'study-card-title', id: 'study-heading', tabindex: '-1' },
-        h('span', { class: `rule-dot color-${rule.color}`, 'aria-hidden': 'true' }),
-        rule.title,
-      ),
-      rule.group === undefined || rule.group === '' ? null : h('p', { class: 'rule-group-tag' }, rule.group),
-      progress?.changed === true
-        ? h('p', { class: 'issue issue-warning' }, '前回の復習のあとで、このルールの中身が変わりました。')
-        : null,
-      h('p', { class: 'study-card-question' }, 'いつ来る予定ですか？ 休業日にあたったら？ 前後にする作業は？'),
+      h('p', { class: 'study-card-count' }, `残り ${session.queue.length + session.pending.length} 件`),
+      h('h2', { class: 'study-card-title', id: 'study-heading', tabindex: '-1' }, ...title),
+      ...extra,
+      h('p', { class: 'study-card-question' }, question),
+    );
+  }
+
+  private revealButton(session: Session, finish: HTMLElement): HTMLElement {
+    return h(
+      'div',
+      { class: 'study-actions' },
+      button('答えを見る', () => {
+        session.revealed = true;
+        this.render();
+        this.element.querySelector<HTMLElement>('.study-answer')?.focus();
+      }, 'button button-primary'),
+      finish,
+    );
+  }
+
+  private renderRuleCard(session: Session, rule: Rule): void {
+    const finish = button('終わる', () => this.endSession(), 'button button-quiet');
+    const progress = progressOf([rule], this.state, this.scheduler, this.deps.now(), this.input.today)[0];
+    const card = this.cardFrame(
+      session,
+      [h('span', { class: `rule-dot color-${rule.color}`, 'aria-hidden': 'true' }), rule.title],
+      [
+        rule.group === undefined || rule.group === '' ? null : h('p', { class: 'rule-group-tag' }, rule.group),
+        progress?.changed === true
+          ? h('p', { class: 'issue issue-warning' }, '前回の復習のあとで、このルールの中身が変わりました。')
+          : null,
+      ],
+      'いつ来る予定ですか？ 休業日にあたったら？ 前後にする作業は？',
     );
 
     if (!session.revealed) {
-      card.append(
-        h(
-          'div',
-          { class: 'study-actions' },
-          button('答えを見る', () => {
-            session.revealed = true;
-            this.render();
-            this.element.querySelector<HTMLElement>('.study-answer')?.focus();
-          }, 'button button-primary'),
-          finish,
-        ),
-      );
+      card.append(this.revealButton(session, finish));
       this.element.append(card);
       return;
     }
@@ -646,28 +808,136 @@ export class StudyView {
     }
 
     const labels = previewNext(this.scheduler, this.state, rule, this.deps.now(), this.input.today);
-    const ratings = h('div', { class: 'study-ratings', role: 'group', 'aria-label': '思い出せたか' });
-    for (const { rating, label } of STUDY_RATINGS) {
-      const choice = button('', () => this.rate(rule, rating), `button study-rating study-rating-${rating}`);
-      choice.append(h('span', { class: 'study-rating-label' }, label), h('span', { class: 'study-rating-next' }, `次は${labels[rating]}`));
-      choice.setAttribute('aria-label', `${label}（次の復習は${labels[rating]}）`);
-      ratings.append(choice);
-    }
-    card.append(answer, h('p', { class: 'field-hint' }, '思い出せた度合いを選んでください。'), ratings, h('div', { class: 'study-actions' }, finish));
+    card.append(
+      answer,
+      h('p', { class: 'field-hint' }, '思い出せた度合いを選んでください。'),
+      this.ratingButtons(labels, (rating) => this.rateRule(rule, rating)),
+      h('div', { class: 'study-actions' }, finish),
+    );
     this.element.append(card);
   }
 
-  private rate(rule: Rule, rating: StudyRating): void {
+  /** 週の予定の問題。答えは、その週の予定（本体と前後の予定）をアプリが計算したもの。 */
+  private renderWeekCard(session: Session, key: WeekKey): void {
+    const finish = button('終わる', () => this.endSession(), 'button button-quiet');
+    const range = weekRange(key, this.input.today);
+    const card = this.cardFrame(
+      session,
+      [WEEK_LABELS[key]],
+      [h('p', { class: 'study-week-range' }, `${shortDate(range.start)} 〜 ${shortDate(range.end)}`)],
+      'この週に、何曜日に何がありますか？ 前後の作業（準備・確認）も思い浮かべてください。',
+    );
+    if (!session.revealed) {
+      card.append(this.revealButton(session, finish));
+      this.element.append(card);
+      return;
+    }
+
+    const enabled = this.input.rules.filter((rule) => rule.enabled);
+    const days = weekOccurrences(enabled, this.input.ctx, range);
+    const answer = h('div', { class: 'study-answer', tabindex: '-1' });
+    if (days.length === 0) {
+      answer.append(h('p', {}, 'この週に予定はありません。'));
+    } else {
+      const list = h('dl', { class: 'study-week' });
+      for (const day of days) {
+        list.append(
+          h('dt', { class: day.date === this.input.today ? 'is-today' : '' }, shortDate(day.date)),
+          h(
+            'dd',
+            {},
+            h('ul', {}, ...day.items.map(({ occurrence, rule }) =>
+              h(
+                'li',
+                { class: occurrence.kind === 'main' ? '' : 'is-notice' },
+                h('span', { class: `rule-dot color-${rule.color}`, 'aria-hidden': 'true' }),
+                occurrenceTitle(occurrence, rule),
+                occurrence.kind === 'main' && occurrence.shifted ? h('span', { class: 'study-past-note' }, `（本来は ${shortDate(occurrence.rawDate)}）`) : null,
+              ),
+            )),
+          ),
+        );
+      }
+      answer.append(list);
+    }
+
+    const labels = previewNextWeek(this.shortScheduler, this.state, key, this.deps.now(), this.input.today);
+    card.append(
+      answer,
+      h('p', { class: 'field-hint' }, '思い出せた度合いを選んでください。この問題は1分・10分と短い間隔で繰り返します。'),
+      this.ratingButtons(labels, (rating) => this.rateWeek(key, rating)),
+      h('div', { class: 'study-actions' }, finish),
+    );
+    this.element.append(card);
+  }
+
+  private afterRating(session: Session): void {
+    session.revealed = false;
+    session.done += 1;
+    this.persist();
+    this.render();
+    this.element.querySelector<HTMLElement>('.study-card-title, #study-heading')?.focus();
+  }
+
+  private rateRule(rule: Rule, rating: StudyRating): void {
     const session = this.session;
     if (session === null) return;
     this.state = reviewRule(this.state, this.scheduler, rule, rating, this.deps.now());
-    this.persist();
     session.queue.shift();
-    session.done += 1;
-    // 「もう一度」は、このセッションの最後にもう一度出す。
-    if (rating === 1) session.queue.push(rule.id);
-    session.revealed = false;
-    this.render();
-    this.element.querySelector<HTMLElement>('.study-card-title, #study-heading')?.focus();
+    // 「もう一度」は、このセッションのどこかでもう一度出す。
+    if (rating === 1) this.insertRandomly(session, rule.id);
+    this.afterRating(session);
+  }
+
+  private rateWeek(key: WeekKey, rating: StudyRating): void {
+    const session = this.session;
+    if (session === null) return;
+    const now = this.deps.now();
+    this.state = reviewWeek(this.state, this.shortScheduler, key, rating, now, this.input.today);
+    session.queue.shift();
+    // 分単位の間隔なら、時間が来たらこの復習の中でもう一度出す。
+    const dueAt = Date.parse(this.state.cards[weekCardId(key)]?.dueAt ?? '');
+    if (dueAt - now.getTime() <= KEEP_IN_SESSION_MS) session.pending.push({ id: weekCardId(key), dueAt });
+    this.afterRating(session);
+  }
+
+  // -------------------------------------------------------------------------
+  // 週の予定（一覧）
+  // -------------------------------------------------------------------------
+
+  private renderWeeks(weeks: readonly WeekProgress[]): HTMLElement {
+    const now = this.deps.now();
+    const list = h('ul', { class: 'study-weeks' });
+    for (const item of weeks) {
+      const status =
+        item.retrievability === null
+          ? 'まだ覚えていない'
+          : `定着 ${percent(item.retrievability)}${item.dueAt === null ? '' : ` ・ 次: ${describeDueAt(now, item.dueAt, this.input.today)}`}`;
+      list.append(
+        h(
+          'li',
+          { class: 'study-week-row' },
+          h(
+            'span',
+            { class: 'study-week-name' },
+            WEEK_LABELS[item.key],
+            h('span', { class: 'study-week-range' }, `${shortDate(item.start)}〜${shortDate(item.end)}`),
+          ),
+          h('span', { class: 'study-week-status' }, status),
+          button('今すぐ', () => this.startSession([item.id]), 'button button-sm'),
+        ),
+      );
+    }
+    return h(
+      'section',
+      { class: 'study-section' },
+      h('h3', { class: 'study-section-title' }, '週の予定'),
+      h(
+        'p',
+        { class: 'field-hint' },
+        '先週・今週・来週の予定を思い浮かべる問題です。1分・10分と短い間隔で繰り返して覚えます。週が替わると、新しい週の問題になります。',
+      ),
+      list,
+    );
   }
 }
