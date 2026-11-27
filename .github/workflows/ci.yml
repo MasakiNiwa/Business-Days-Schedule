@@ -17,9 +17,9 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           # 版は .nvmrc の1か所で決める（最新の安定版 Node.js 26）。
           node-version-file: .nvmrc
@@ -49,7 +49,7 @@ jobs:
       - name: E2E（更新案内）
         run: npm run e2e:update
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-report

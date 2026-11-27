@@ -149,5 +149,11 @@ describe('画面の切り替え', () => {
     expect(root.querySelector('.study h2')?.textContent).toBe('学習');
     await vi.waitFor(() => expect(root.querySelector('.study-stats')).not.toBeNull(), { timeout: 5000 });
     expect(root.querySelector('.study-rule-name')?.textContent).toBe('給与振込');
+    // 週の予定の問題も並ぶ。
+    expect([...root.querySelectorAll('.study-week-name')].map((node) => node.firstChild?.textContent)).toEqual([
+      '先週の予定',
+      '今週の予定',
+      '来週の予定',
+    ]);
   });
 });

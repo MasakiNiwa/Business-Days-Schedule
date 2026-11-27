@@ -6,7 +6,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMemoryStore } from '../src/core/storage';
-import { loadStudyState, STUDY_KEY } from '../src/core/studyData';
+import { createStudyState, loadStudyState, STUDY_KEY } from '../src/core/studyData';
 import { StudyView } from '../src/ui/StudyView';
 import type { StudyInput } from '../src/ui/StudyView';
 import type { Rule } from '../src/types';
@@ -30,9 +30,19 @@ function input(rules: Rule[] = [payment, closing]): StudyInput {
   return { rules, calendars: [companyCalendarDef, bankCalendarDef], ctx: scheduleContext, today };
 }
 
-async function open(rules?: Rule[], store = createMemoryStore()) {
+/** 0.999 を返す乱数だと、並べ替えは元の順のまま・差し込みは末尾になる（テストを読みやすくする）。 */
+const keepOrder = () => 0.999;
+
+/** ルールの問題だけを見るときは、週の予定の問題を止めておく。 */
+function rulesOnlyStore() {
+  const store = createMemoryStore();
+  store.setItem(STUDY_KEY, JSON.stringify({ ...createStudyState(), weekCards: false }));
+  return store;
+}
+
+async function open(rules?: Rule[], store = rulesOnlyStore(), random: () => number = keepOrder) {
   const notify = vi.fn();
-  const view = await StudyView.create({ store, now: () => clock, notify }, input(rules));
+  const view = await StudyView.create({ store, now: () => clock, notify, random }, input(rules));
   document.body.replaceChildren(view.element);
   return { view, store, notify, root: view.element };
 }
@@ -85,9 +95,11 @@ describe('学習の画面: 復習', () => {
     expect(answer?.querySelector('.preview-list .preview-date')?.textContent).toBe('2026-12-25');
     expect(answer?.textContent).toContain('前回は 2026-11-25（水）');
 
-    const ratings = [...root.querySelectorAll('.study-rating')].map((node) => node.getAttribute('aria-label'));
-    expect(ratings[0]).toBe('もう一度（次の復習は今日）');
-    expect(ratings[2]).toMatch(/^できた（次の復習は\d+日後）$/);
+    // 名前は見えている文字のまま（別の名前を付けない）。
+    expect(root.querySelector('.study-rating[aria-label]')).toBeNull();
+    const ratings = [...root.querySelectorAll('.study-rating')].map((node) => node.textContent);
+    expect(ratings[0]).toBe('もう一度次は今すぐ');
+    expect(ratings[2]).toMatch(/^できた次は\d+日後$/);
 
     click(root, /^できた/);
     expect(loadStudyState(store).state.cards['pay']?.reps).toBe(1);
@@ -217,5 +229,73 @@ describe('学習の画面: 設定', () => {
     store.setItem(STUDY_KEY, '{ broken');
     const { notify } = await open(undefined, store);
     expect(notify).toHaveBeenCalledWith('学習の記録のうち、読めなかった 1 件を除きました。', 'error');
+  });
+});
+
+describe('学習の画面: ランダムな出題', () => {
+  it('乱数しだいで出る順番が変わる', async () => {
+    const first = async (random: () => number) => {
+      const { root } = await open(undefined, rulesOnlyStore(), random);
+      click(root, '復習を始める（2 件）');
+      return root.querySelector('.study-card-title')?.textContent;
+    };
+    expect(await first(keepOrder)).toBe('支払');
+    expect(await first(() => 0)).toBe('月次締め');
+  });
+});
+
+describe('学習の画面: 週の予定の問題', () => {
+  it('先週・今週・来週の3問を並べ、復習に含める', async () => {
+    const { root } = await open(undefined, createMemoryStore());
+    const rows = [...root.querySelectorAll('.study-week-row')].map((row) => row.textContent);
+    expect(rows[0]).toContain('先週の予定11/16（月）〜11/22（日）');
+    expect(rows[1]).toContain('今週の予定11/23（月）〜11/29（日）');
+    expect(rows[2]).toContain('来週の予定11/30（月）〜12/6（日）');
+    expect(buttonOf(root, '復習を始める（5 件）')).toBeTruthy();
+    expect(root.querySelector('.study-stats')?.textContent).toContain('ほかに週の予定 3 問');
+  });
+
+  it('答えはアプリが計算したその週の予定。1分・10分で繰り返す', async () => {
+    clock = new Date('2026-12-21T01:00:00.000Z'); // 12/21（月）
+    const local = { ...input(), today: '2026-12-21' };
+    const view = await StudyView.create({ store: createMemoryStore(), now: () => clock, notify: vi.fn(), random: keepOrder }, local);
+    document.body.replaceChildren(view.element);
+    const root = view.element;
+    const thisWeek = [...root.querySelectorAll('.study-week-row')][1]!;
+    click(thisWeek, '今すぐ');
+    expect(root.querySelector('.study-card-title')?.textContent).toBe('今週の予定');
+    expect(root.querySelector('.study-week-range')?.textContent).toBe('12/21（月） 〜 12/27（日）');
+    click(root, '答えを見る');
+    const answer = root.querySelector('.study-week');
+    expect(answer?.textContent).toContain('12/22（火）支払: 振込データ作成');
+    expect(answer?.textContent).toContain('12/25（金）支払');
+    expect(buttonOf(root, /^できた/).textContent).toBe('できた次は10分後');
+
+    click(root, /^できた/);
+    // 10分たつまで待つ。待たずに続けることもできる。
+    expect(root.querySelector('h2')?.textContent).toBe('少し時間をおいて、もう一度');
+    expect(root.querySelector('.study-waiting')?.textContent).toContain('次は「今週の予定」です。あと約10分で出します。');
+    click(root, '今すぐ出す');
+    expect(root.querySelector('.study-card-title')?.textContent).toBe('今週の予定');
+
+    // 時間が来れば、待ちから自動で戻る。
+    click(root, '答えを見る');
+    click(root, /^もう一度/);
+    expect(root.querySelector('.study-waiting')?.textContent).toContain('あと約1分');
+    clock = new Date(clock.getTime() + 2 * 60_000);
+    view.update(local);
+    expect(root.querySelector('.study-card-title')?.textContent).toBe('今週の予定');
+  });
+
+  it('設定で止めると、一覧にも復習にも出さない', async () => {
+    const { root, store } = await open(undefined, createMemoryStore());
+    const toggle = [...root.querySelectorAll<HTMLLabelElement>('.study-settings label.checkbox')].find((label) =>
+      label.textContent?.includes('先週・今週・来週'),
+    )!.querySelector('input')!;
+    toggle.checked = false;
+    toggle.dispatchEvent(new Event('change'));
+    expect(root.querySelector('.study-week-row')).toBeNull();
+    expect(buttonOf(root, '復習を始める（2 件）')).toBeTruthy();
+    expect(loadStudyState(store).state.weekCards).toBe(false);
   });
 });

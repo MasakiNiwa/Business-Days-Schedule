@@ -3618,3 +3618,89 @@ main:focus {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* 週の予定の問題（§8.13） */
+.study-weeks {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.study-week-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.study-week-name {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.1rem 0.5rem;
+  font-weight: 600;
+  margin-right: auto;
+}
+
+.study-week-range,
+.study-week-status {
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.study-week {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.35rem 0.75rem;
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.study-week dt {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.study-week dt.is-today::after {
+  content: ' 今日';
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--accent);
+}
+
+.study-week dd {
+  margin: 0;
+}
+
+.study-week ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.study-week li {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  overflow-wrap: anywhere;
+}
+
+.study-week li.is-notice {
+  color: var(--fg-muted);
+}
+
+.study-waiting {
+  margin: 0;
+}
