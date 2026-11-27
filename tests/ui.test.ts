@@ -183,6 +183,13 @@ describe('renderCalendar', () => {
     expect(onSelectDay).toHaveBeenCalledExactlyOnceWith('2026-09-04');
   });
 
+  it('日付の数字の名前に、見えている数字を1語として含める', () => {
+    const table = gridFor(2026, 9, [], vi.fn());
+    const dayButton = [...table.querySelectorAll<HTMLButtonElement>('.cell-day')].find((node) => node.textContent === '4');
+    // 「2026-09-04」だと見えている「4」が「04」になり、音声操作で押せない。
+    expect(dayButton?.getAttribute('aria-label')).toBe('2026年9月4日の予定を見る');
+  });
+
   it('数字以外の余白をクリックしても開く', () => {
     const onSelectDay = vi.fn();
     const table = gridFor(2026, 9, [], onSelectDay);

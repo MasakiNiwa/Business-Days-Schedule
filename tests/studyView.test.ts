@@ -95,9 +95,11 @@ describe('学習の画面: 復習', () => {
     expect(answer?.querySelector('.preview-list .preview-date')?.textContent).toBe('2026-12-25');
     expect(answer?.textContent).toContain('前回は 2026-11-25（水）');
 
-    const ratings = [...root.querySelectorAll('.study-rating')].map((node) => node.getAttribute('aria-label'));
-    expect(ratings[0]).toBe('もう一度（次の復習は今すぐ）');
-    expect(ratings[2]).toMatch(/^できた（次の復習は\d+日後）$/);
+    // 名前は見えている文字のまま（別の名前を付けない）。
+    expect(root.querySelector('.study-rating[aria-label]')).toBeNull();
+    const ratings = [...root.querySelectorAll('.study-rating')].map((node) => node.textContent);
+    expect(ratings[0]).toBe('もう一度次は今すぐ');
+    expect(ratings[2]).toMatch(/^できた次は\d+日後$/);
 
     click(root, /^できた/);
     expect(loadStudyState(store).state.cards['pay']?.reps).toBe(1);
@@ -267,7 +269,7 @@ describe('学習の画面: 週の予定の問題', () => {
     const answer = root.querySelector('.study-week');
     expect(answer?.textContent).toContain('12/22（火）支払: 振込データ作成');
     expect(answer?.textContent).toContain('12/25（金）支払');
-    expect(buttonOf(root, /^できた/).getAttribute('aria-label')).toBe('できた（次の復習は10分後）');
+    expect(buttonOf(root, /^できた/).textContent).toBe('できた次は10分後');
 
     click(root, /^できた/);
     // 10分たつまで待つ。待たずに続けることもできる。

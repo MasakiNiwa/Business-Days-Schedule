@@ -60,7 +60,7 @@ test.describe('学習', () => {
     await expect(page.locator('.study-card-title')).toHaveText('今週の予定');
     await page.getByRole('button', { name: '答えを見る' }).click();
     await expect(page.locator('.study-answer')).toBeVisible();
-    await expect(page.locator('.study-rating-3')).toHaveAccessibleName('できた（次の復習は10分後）');
+    await expect(page.locator('.study-rating-3')).toHaveAccessibleName('できた 次は10分後');
     await page.locator('.study-rating-3').click();
     await expect(page.locator('.study-waiting')).toContainText('あと約10分');
     await page.getByRole('button', { name: '今すぐ出す' }).click();

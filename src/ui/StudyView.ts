@@ -730,8 +730,9 @@ export class StudyView {
     const ratings = h('div', { class: 'study-ratings', role: 'group', 'aria-label': '思い出せたか' });
     for (const { rating, label } of STUDY_RATINGS) {
       const choice = button('', () => onRate(rating), `button study-rating study-rating-${rating}`);
+      // 名前は見えている文字のまま（「できた 次は10分後」）。別の名前を付けると、
+      // 音声操作で見えている言葉を言っても押せなくなる（axe の label-content-name-mismatch）。
       choice.append(h('span', { class: 'study-rating-label' }, label), h('span', { class: 'study-rating-next' }, `次は${labels[rating]}`));
-      choice.setAttribute('aria-label', `${label}（次の復習は${labels[rating]}）`);
       ratings.append(choice);
     }
     return ratings;
