@@ -23,6 +23,12 @@ export const DEFAULT_DESIRED_RETENTION = 0.9;
 export const NEW_PER_DAY_CHOICES: readonly number[] = [5, 10, 20, 0];
 export const DEFAULT_NEW_PER_DAY = 10;
 
+/** 週の予定の問題。先週・今週・来週の3つ。 */
+export type WeekKey = 'last' | 'this' | 'next';
+export const WEEK_KEYS: readonly WeekKey[] = ['last', 'this', 'next'];
+export const weekCardId = (key: WeekKey): string => `week:${key}`;
+export const WEEK_CARD_IDS: readonly string[] = WEEK_KEYS.map(weekCardId);
+
 /** 残す評価の記録の数。古いものから捨てる。 */
 export const STUDY_LOG_LIMIT = 2000;
 
@@ -40,7 +46,10 @@ export type StoredCard = {
   lapses: number;
   scheduledDays: number;
   learningStep: number;
-  /** 最後に評価したときのルールの印。ルールが変わったことに気づくため。 */
+  /**
+   * 最後に評価したときのルールの印。ルールが変わったことに気づくため。
+   * 週の予定の問題では、対象の週（"week:2026-11-23"）。週が替われば別の問題として覚え直す。
+   */
   ruleRev: string;
 };
 
@@ -59,6 +68,8 @@ export type StudyState = {
   version: typeof STUDY_VERSION;
   desiredRetention: number;
   newPerDay: number;
+  /** 先週・今週・来週の予定を思い浮かべる問題を出すか。 */
+  weekCards: boolean;
   /** ルールの id → カード。 */
   cards: Record<string, StoredCard>;
   logs: StudyLog[];
@@ -69,6 +80,7 @@ export function createStudyState(): StudyState {
     version: STUDY_VERSION,
     desiredRetention: DEFAULT_DESIRED_RETENTION,
     newPerDay: DEFAULT_NEW_PER_DAY,
+    weekCards: true,
     cards: {},
     logs: [],
   };
@@ -137,6 +149,7 @@ export function parseStudyState(raw: unknown): { state: StudyState; dropped: num
   if (isFiniteNumber(retention) && DESIRED_RETENTION_CHOICES.includes(retention)) state.desiredRetention = retention;
   const perDay = raw['newPerDay'];
   if (isFiniteNumber(perDay) && NEW_PER_DAY_CHOICES.includes(perDay)) state.newPerDay = perDay;
+  if (raw['weekCards'] === false) state.weekCards = false;
   const cards = raw['cards'];
   if (isRecord(cards)) {
     for (const ruleId of Object.keys(cards)) {
@@ -173,7 +186,8 @@ export function saveStudyState(store: KeyValueStore, state: StudyState): void {
 
 /** 消したルールのカードと記録を外す。残しておくと件数や平均が合わなくなる。 */
 export function pruneStudyState(state: StudyState, rules: readonly Rule[]): StudyState {
-  const ids = new Set(rules.map((rule) => rule.id));
+  // 週の予定の問題（week:…）はルールに紐づかないので残す。
+  const ids = new Set([...rules.map((rule) => rule.id), ...WEEK_CARD_IDS]);
   const stale = Object.keys(state.cards).filter((id) => !ids.has(id));
   const staleLogs = state.logs.some((log) => !ids.has(log.ruleId));
   if (stale.length === 0 && !staleLogs) return state;

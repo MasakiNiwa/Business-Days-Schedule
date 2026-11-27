@@ -74,7 +74,7 @@ describe('FSRS-7 で復習の予定を決める', () => {
     expect(days(1)).toBeLessThanOrEqual(days(2));
     expect(days(2)).toBeLessThan(days(3));
     expect(days(3)).toBeLessThan(days(4));
-    expect(labels[1]).toBe('今日');
+    expect(labels[1]).toBe('今すぐ');
     expect(labels[4]).toMatch(/日後|か月後/);
   });
 
@@ -268,5 +268,119 @@ describe('バックアップ', () => {
     expect(mergeStudyStates(newer, older).cards['pay']).toEqual(newer.cards['pay']);
     expect(studyFromBackup({ rules: [] })).toBeNull();
     expect(studyFromBackup({ study: newer })).toEqual(newer);
+  });
+});
+
+describe('出題はランダム', () => {
+  it('shuffle は並びを入れ替えるだけ（同じ要素がそろう）', async () => {
+    const { shuffle } = await import('../src/core/study');
+    const items = ['a', 'b', 'c', 'd'];
+    expect(shuffle(items, () => 0.999)).toEqual(items);
+    const mixed = shuffle(items, () => 0);
+    expect(mixed).not.toEqual(items);
+    expect([...mixed].sort()).toEqual(items);
+    // 元の配列は変えない。
+    expect(items).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('乱数を渡すと、並びも新しいものの選び方もばらばらにする', () => {
+    const many = Array.from({ length: 6 }, (_, index) => makeRule({ id: `r${index}`, title: `ルール${index}` }));
+    const state = { ...createStudyState(), newPerDay: 3 };
+    const progress = progressOf(many, state, scheduler, now, today);
+    expect(buildQueue(progress, state, today).map((item) => item.rule.id)).toEqual(['r0', 'r1', 'r2']);
+    const picked = buildQueue(progress, state, today, () => 0).map((item) => item.rule.id);
+    expect(picked).toHaveLength(3);
+    expect(picked).not.toEqual(['r0', 'r1', 'r2']);
+  });
+});
+
+describe('週の予定の問題（分単位の学習ステップ）', () => {
+  let short: Scheduler;
+  beforeAll(async () => {
+    const { createShortTermScheduler } = await import('../src/core/study');
+    short = await createShortTermScheduler();
+  });
+  const thursday = '2026-11-26';
+  const at = (iso: string) => new Date(iso);
+
+  it('週は月曜始まり', async () => {
+    const { weekRange } = await import('../src/core/study');
+    expect(weekRange('this', thursday)).toEqual({ start: '2026-11-23', end: '2026-11-29' });
+    expect(weekRange('last', thursday)).toEqual({ start: '2026-11-16', end: '2026-11-22' });
+    expect(weekRange('next', thursday)).toEqual({ start: '2026-11-30', end: '2026-12-06' });
+  });
+
+  it('1分・10分の学習ステップを踏んでから、日単位の間隔へ移る', async () => {
+    const { reviewWeek, weekProgressOf, previewNextWeek } = await import('../src/core/study');
+    let state = createStudyState();
+    let clock = at('2026-11-26T01:00:00.000Z');
+    expect(previewNextWeek(short, state, 'this', clock, thursday)).toMatchObject({ 1: '1分後', 3: '10分後' });
+
+    state = reviewWeek(state, short, 'this', 3, clock, thursday);
+    let item = weekProgressOf(state, short, clock, thursday).find((week) => week.key === 'this')!;
+    expect(item.status).toBe('learning');
+    expect((item.dueAt!.getTime() - clock.getTime()) / 60_000).toBe(10);
+
+    clock = item.dueAt!;
+    state = reviewWeek(state, short, 'this', 1, clock, thursday);
+    item = weekProgressOf(state, short, clock, thursday).find((week) => week.key === 'this')!;
+    expect((item.dueAt!.getTime() - clock.getTime()) / 60_000).toBe(1);
+
+    clock = item.dueAt!;
+    state = reviewWeek(state, short, 'this', 3, clock, thursday);
+    clock = weekProgressOf(state, short, clock, thursday).find((week) => week.key === 'this')!.dueAt!;
+    state = reviewWeek(state, short, 'this', 3, clock, thursday);
+    item = weekProgressOf(state, short, clock, thursday).find((week) => week.key === 'this')!;
+    expect(item.status).toBe('review');
+    expect(item.dueAt!.getTime() - clock.getTime()).toBeGreaterThanOrEqual(86_400_000);
+  });
+
+  it('週が替わると、新しい週の問題として覚え直す', async () => {
+    const { reviewWeek, weekProgressOf } = await import('../src/core/study');
+    let state = reviewWeek(createStudyState(), short, 'this', 4, at('2026-11-26T01:00:00.000Z'), thursday);
+    const nextMonday = '2026-11-30';
+    const later = at('2026-11-30T01:00:00.000Z');
+    const item = weekProgressOf(state, short, later, nextMonday).find((week) => week.key === 'this')!;
+    expect(item).toMatchObject({ status: 'new', card: null, start: '2026-11-30' });
+    state = reviewWeek(state, short, 'this', 3, later, nextMonday);
+    expect(state.cards['week:this']).toMatchObject({ reps: 1, ruleRev: 'week:2026-11-30' });
+  });
+
+  it('今の復習に入れるのは、まだ覚えていない週と1時間以内に出すものだけ', async () => {
+    const { reviewWeek, weekProgressOf, weekQueue } = await import('../src/core/study');
+    const clock = at('2026-11-26T01:00:00.000Z');
+    let state = reviewWeek(createStudyState(), short, 'last', 3, clock, thursday); // 10分後
+    state = reviewWeek(state, short, 'next', 4, clock, thursday); // 日単位
+    const queue = weekQueue(weekProgressOf(state, short, clock, thursday), clock).map((item) => item.key);
+    expect(queue).toEqual(['last', 'this']);
+  });
+
+  it('週の予定の問題の記録は、ルールを消しても残す', () => {
+    const state = { ...createStudyState(), cards: { 'week:this': reviewRule(createStudyState(), scheduler, payment, 3, now).cards['pay']! } };
+    expect(Object.keys(pruneStudyState(state, []).cards)).toEqual(['week:this']);
+  });
+
+  it('週の予定の問題は止められる（設定は保存される）', () => {
+    expect(createStudyState().weekCards).toBe(true);
+    expect(parseStudyState({ ...createStudyState(), weekCards: false }).state.weekCards).toBe(false);
+  });
+
+  it('その週の予定を日ごとにまとめる（一時停止中は入れない）', async () => {
+    const { weekOccurrences } = await import('../src/core/study');
+    const days = weekOccurrences([payment, paused], scheduleContext, { start: '2026-12-21', end: '2026-12-27' });
+    expect(days.map((day) => day.date)).toEqual(['2026-12-25']);
+    expect(days[0]?.items.map((item) => item.rule.id)).toEqual(['pay']);
+  });
+});
+
+describe('describeDueAt', () => {
+  it('今日のうちは分・時間で、明日以降は日で言う', async () => {
+    const { describeDueAt } = await import('../src/core/study');
+    const base = new Date('2026-11-26T01:00:00.000Z'); // 日本時間 10:00
+    const later = (minutes: number) => new Date(base.getTime() + minutes * 60_000);
+    expect(describeDueAt(base, later(0.2), '2026-11-26')).toBe('今すぐ');
+    expect(describeDueAt(base, later(10), '2026-11-26')).toBe('10分後');
+    expect(describeDueAt(base, later(180), '2026-11-26')).toBe('約3時間後');
+    expect(describeDueAt(base, later(24 * 60), '2026-11-26')).toBe('明日');
   });
 });

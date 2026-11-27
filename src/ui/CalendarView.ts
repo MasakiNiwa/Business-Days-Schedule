@@ -126,7 +126,9 @@ function renderCell(
     {
       type: 'button',
       class: 'cell-day',
-      'aria-label': `${cell.date} の予定を見る`,
+      // 見えている数字（「1」）が名前の中に1語として入るようにする。
+      // 「2026-11-01」だと「01」になり、音声で「1」と言っても押せない（axe の label-content-name-mismatch）。
+      'aria-label': `${Number(cell.date.slice(0, 4))}年${Number(cell.date.slice(5, 7))}月${cell.day}日の予定を見る`,
       tabindex: cell.date === tabbableDate ? '0' : '-1',
       'data-date': cell.date,
     },
